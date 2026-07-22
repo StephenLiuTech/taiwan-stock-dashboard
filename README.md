@@ -6,6 +6,8 @@ PAMS (Personal Asset Management System) is a typed Python and Streamlit foundati
 
 - Validated holdings, transactions, dividends, liabilities, quotes, valuations, and snapshots
 - Portfolio valuation and daily snapshot services
+- Explicit TWSE/TPEx end-of-day ingestion and quote normalization
+- Decimal-safe `price_quotes`, aggregate `daily_snapshots`, and holding-level `position_snapshots` persistence
 - Versioned SQLite schema and domain-specific repositories
 - Idempotent bootstrap of the current known portfolio
 - Environment-backed secrets/configuration and validated non-secret YAML settings

@@ -3,7 +3,15 @@
 from datetime import date
 from typing import Protocol
 
-from domain import DailySnapshot, Dividend, Holding, Liability, Transaction
+from domain import (
+    DailySnapshot,
+    Dividend,
+    Holding,
+    Liability,
+    PositionSnapshot,
+    PriceQuote,
+    Transaction,
+)
 
 
 class HoldingRepository(Protocol):
@@ -52,3 +60,18 @@ class SnapshotRepository(Protocol):
     def get_highest(self) -> DailySnapshot | None: ...
     def list_between_dates(self, start: date, end: date) -> list[DailySnapshot]: ...
     def add(self, snapshot: DailySnapshot) -> None: ...
+
+
+class PriceQuoteRepository(Protocol):
+    """Persistence operations required for normalized market prices."""
+
+    def upsert_many(self, quotes: list[PriceQuote]) -> None: ...
+    def list_by_date(self, trade_date: date) -> list[PriceQuote]: ...
+    def get_latest(self, symbol: str, market: str) -> PriceQuote | None: ...
+
+
+class PositionSnapshotRepository(Protocol):
+    """Persistence operations for holding-level snapshot rows."""
+
+    def add_many(self, snapshots: list[PositionSnapshot]) -> None: ...
+    def list_by_date(self, snapshot_date: date) -> list[PositionSnapshot]: ...

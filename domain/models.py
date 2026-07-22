@@ -171,6 +171,12 @@ class PositionValuation(SymbolModel):
     daily_value_change: Decimal
 
 
+class PositionSnapshot(PositionValuation):
+    """One holding's immutable valuation for one portfolio snapshot date."""
+
+    snapshot_date: date
+
+
 class DailySnapshot(DomainModel):
     """Persisted daily portfolio totals."""
 

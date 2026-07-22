@@ -4,7 +4,15 @@ import sqlite3
 from datetime import date, datetime
 from decimal import Decimal
 
-from domain import DailySnapshot, Dividend, Holding, Liability, Transaction
+from domain import (
+    DailySnapshot,
+    Dividend,
+    Holding,
+    Liability,
+    PositionSnapshot,
+    PriceQuote,
+    Transaction,
+)
 
 
 def _decimal(value: object) -> Decimal:
@@ -280,8 +288,11 @@ class SQLiteLiabilityRepository:
 class SQLiteSnapshotRepository:
     """Persist immutable daily snapshots in SQLite."""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
         self.connection = connection
+        self.auto_commit = auto_commit
 
     def get_by_date(self, snapshot_date: date) -> DailySnapshot | None:
         row = self.connection.execute(
@@ -327,7 +338,8 @@ class SQLiteSnapshotRepository:
                 snapshot.created_at.isoformat(),
             ),
         )
-        self.connection.commit()
+        if self.auto_commit:
+            self.connection.commit()
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> DailySnapshot:
@@ -346,3 +358,130 @@ class SQLiteSnapshotRepository:
         ):
             values[key] = _decimal(values[key])
         return DailySnapshot.model_validate(values)
+
+
+class SQLitePriceQuoteRepository:
+    """Persist normalized end-of-day price quotes in SQLite."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def upsert_many(self, quotes: list[PriceQuote]) -> None:
+        self.connection.executemany(
+            """INSERT INTO price_quotes VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(symbol, market, trade_date) DO UPDATE SET
+            close_price=excluded.close_price,
+            previous_close=excluded.previous_close,
+            currency=excluded.currency,
+            source=excluded.source,
+            fetched_at=excluded.fetched_at""",
+            [
+                (
+                    quote.symbol,
+                    quote.market.value,
+                    quote.trade_date.isoformat(),
+                    str(quote.close_price),
+                    (
+                        str(quote.previous_close)
+                        if quote.previous_close is not None
+                        else None
+                    ),
+                    quote.currency.value,
+                    quote.source,
+                    quote.fetched_at.isoformat(),
+                )
+                for quote in quotes
+            ],
+        )
+        if self.auto_commit:
+            self.connection.commit()
+
+    def list_by_date(self, trade_date: date) -> list[PriceQuote]:
+        rows = self.connection.execute(
+            """SELECT * FROM price_quotes WHERE trade_date = ?
+            ORDER BY market, symbol""",
+            (trade_date.isoformat(),),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def get_latest(self, symbol: str, market: str) -> PriceQuote | None:
+        row = self.connection.execute(
+            """SELECT * FROM price_quotes WHERE symbol = ? AND market = ?
+            ORDER BY trade_date DESC LIMIT 1""",
+            (symbol.strip().upper(), market),
+        ).fetchone()
+        return self._from_row(row) if row else None
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> PriceQuote:
+        values = dict(row)
+        values["trade_date"] = date.fromisoformat(values["trade_date"])
+        values["fetched_at"] = datetime.fromisoformat(values["fetched_at"])
+        values["close_price"] = _decimal(values["close_price"])
+        if values["previous_close"] is not None:
+            values["previous_close"] = _decimal(values["previous_close"])
+        return PriceQuote.model_validate(values)
+
+
+class SQLitePositionSnapshotRepository:
+    """Persist one position valuation per holding and snapshot date."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def add_many(self, snapshots: list[PositionSnapshot]) -> None:
+        self.connection.executemany(
+            """INSERT INTO position_snapshots VALUES
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    item.snapshot_date.isoformat(),
+                    item.holding_id,
+                    item.symbol,
+                    str(item.quantity),
+                    str(item.average_cost),
+                    str(item.close_price),
+                    str(item.cost_basis),
+                    str(item.market_value),
+                    str(item.unrealized_pnl),
+                    str(item.unrealized_return),
+                    str(item.portfolio_weight),
+                    str(item.daily_value_change),
+                )
+                for item in snapshots
+            ],
+        )
+        if self.auto_commit:
+            self.connection.commit()
+
+    def list_by_date(self, snapshot_date: date) -> list[PositionSnapshot]:
+        rows = self.connection.execute(
+            """SELECT * FROM position_snapshots
+            WHERE snapshot_date = ? ORDER BY symbol, holding_id""",
+            (snapshot_date.isoformat(),),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> PositionSnapshot:
+        values = dict(row)
+        values["snapshot_date"] = date.fromisoformat(values["snapshot_date"])
+        for key in (
+            "quantity",
+            "average_cost",
+            "close_price",
+            "cost_basis",
+            "market_value",
+            "unrealized_pnl",
+            "unrealized_return",
+            "portfolio_weight",
+            "daily_value_change",
+        ):
+            values[key] = _decimal(values[key])
+        return PositionSnapshot.model_validate(values)

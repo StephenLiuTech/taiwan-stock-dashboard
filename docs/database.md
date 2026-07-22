@@ -7,11 +7,13 @@
 - `transactions`: identity, security, type, trade/settlement dates, quantity, price, fees, taxes, currency, notes.
 - `dividends`: identity, security, ex/payment dates, per-share and total amounts, tax, status.
 - `liabilities`: identity, type, principal, optional decimal-fraction interest rate, currency, dates, collateral, notes.
-- `daily_snapshots`: unique date and calculated portfolio totals, high-water mark, and drawdown.
+- `price_quotes`: normalized TWSE/TPEx close and previous-close values by symbol, market, and trading date.
+- `daily_snapshots`: aggregate grain; exactly one portfolio totals row per date.
+- `position_snapshots`: position grain; one row per `(snapshot_date, holding_id)`.
 
 ## Constraints and indexes
 
-Primary keys use stable text IDs. Holding symbols are unique. Dividends are unique by symbol, market, and ex-dividend date. Snapshot dates are primary keys, preventing duplicates. Boolean pledge values have a check constraint. Composite indexes support transaction and dividend symbol/date queries; snapshot dates and holding symbols are indexed.
+Primary keys use stable text IDs. Holding symbols are unique. Dividends are unique by symbol, market, and ex-dividend date. Quotes are unique by symbol, market, and trade date. `daily_snapshots.snapshot_date` is its primary key. `position_snapshots` has a composite `(snapshot_date, holding_id)` primary key and a foreign key to holdings. Composite indexes support market-data and position-history lookups.
 
 ## Serialization
 
@@ -19,4 +21,4 @@ Decimals are stored as canonical text and reconstructed with `Decimal`, avoiding
 
 ## Schema versions
 
-Version 1 is created idempotently by `initialize_schema`. The version table is intentionally separate from table creation. Future changes should add ordered, transactional migration functions rather than modifying existing deployed versions in place.
+Version 2 adds normalized quotes and holding-grain position snapshots while preserving the version-1 aggregate `daily_snapshots` table. No rows are copied between snapshot grains. Future changes should use ordered transactional migrations.

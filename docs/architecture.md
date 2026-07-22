@@ -17,10 +17,11 @@ Each aggregate has a purpose-specific protocol. Repositories translate between d
 - `PortfolioService` matches holdings and quotes and calculates position and portfolio totals.
 - `SnapshotService` maintains high-water marks and drawdowns and persists one record per date.
 - `BootstrapService` initializes storage and seeds the known portfolio only when both seed aggregates are empty.
+- `MarketDataEngine` verifies the official ROC source date, normalizes only held symbols, values the complete portfolio, and atomically persists quotes, one aggregate daily snapshot, and one position snapshot per holding. It has no scheduler or UI dependency.
 
 ## Persistence
 
-SQLite is the local adapter. Schema initialization is idempotent and versioned, leaving a clear seam for ordered migration functions later. Domain-facing repository protocols prevent SQLite details from leaking into services.
+SQLite is the local adapter. Schema initialization is idempotent and versioned. One explicit `BEGIN IMMEDIATE` unit of work surrounds all writes for an ingestion run. Domain-facing repository protocols prevent SQLite details from leaking into services.
 
 ## Future Supabase migration
 

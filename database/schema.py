@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -39,6 +39,15 @@ CREATE TABLE IF NOT EXISTS liabilities (
     annual_interest_rate TEXT, currency TEXT NOT NULL, start_date TEXT,
     maturity_date TEXT, collateral_description TEXT, notes TEXT, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS price_quotes (
+    symbol TEXT NOT NULL, market TEXT NOT NULL, trade_date TEXT NOT NULL,
+    close_price TEXT NOT NULL, previous_close TEXT, currency TEXT NOT NULL,
+    source TEXT NOT NULL, fetched_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, market, trade_date)
+);
+CREATE INDEX IF NOT EXISTS ix_price_quotes_date ON price_quotes(trade_date);
+CREATE INDEX IF NOT EXISTS ix_price_quotes_symbol_date
+    ON price_quotes(symbol, market, trade_date DESC);
 CREATE TABLE IF NOT EXISTS daily_snapshots (
     snapshot_date TEXT PRIMARY KEY, total_market_value TEXT NOT NULL,
     total_cost_basis TEXT NOT NULL, total_unrealized_pnl TEXT NOT NULL,
@@ -46,16 +55,29 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
     leverage_ratio TEXT NOT NULL, high_water_mark TEXT NOT NULL,
     drawdown TEXT NOT NULL, created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_snapshots_date ON daily_snapshots(snapshot_date);
+CREATE INDEX IF NOT EXISTS ix_daily_snapshots_date
+    ON daily_snapshots(snapshot_date);
+CREATE TABLE IF NOT EXISTS position_snapshots (
+    snapshot_date TEXT NOT NULL, holding_id TEXT NOT NULL, symbol TEXT NOT NULL,
+    quantity TEXT NOT NULL, average_cost TEXT NOT NULL, close_price TEXT NOT NULL,
+    cost_basis TEXT NOT NULL, market_value TEXT NOT NULL,
+    unrealized_pnl TEXT NOT NULL, unrealized_return TEXT NOT NULL,
+    portfolio_weight TEXT NOT NULL, daily_value_change TEXT NOT NULL,
+    PRIMARY KEY (snapshot_date, holding_id),
+    FOREIGN KEY (holding_id) REFERENCES holdings(id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS ix_position_snapshots_symbol_date
+    ON position_snapshots(symbol, snapshot_date DESC);
 """
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
     """Create the initial schema and record its version idempotently."""
     connection.executescript(INITIAL_SCHEMA)
-    connection.execute(
-        """INSERT OR IGNORE INTO schema_version(version, applied_at)
-        VALUES (?, datetime('now'))""",
-        (SCHEMA_VERSION,),
-    )
+    for version in range(1, SCHEMA_VERSION + 1):
+        connection.execute(
+            """INSERT OR IGNORE INTO schema_version(version, applied_at)
+            VALUES (?, datetime('now'))""",
+            (version,),
+        )
     connection.commit()

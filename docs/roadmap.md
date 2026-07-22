@@ -6,7 +6,7 @@ Typed domain models, portfolio and snapshot calculations, repository contracts, 
 
 ## v0.3 — Taiwan price ingestion
 
-Introduce a provider boundary, resilient Taiwan-market quote ingestion, provenance, freshness checks, and ingestion tests.
+Implemented foundation: official TWSE/TPEx provider boundaries, normalization, provenance, quote persistence, and explicit portfolio refresh. Remaining work includes operational retries and freshness policy; scheduling remains intentionally out of scope.
 
 ## v0.4 — Dashboard
 

@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-from database import initialize_database
+from database import initialize_database, initialize_schema
 
 
 def test_database_initialization_creates_usable_sqlite_database(tmp_path: Path) -> None:
@@ -21,3 +21,22 @@ def test_database_initialization_creates_usable_sqlite_database(tmp_path: Path) 
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()
     assert ("smoke_test",) in tables
+
+
+def test_schema_initialization_creates_market_data_version(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "schema.db"
+    with initialize_database(f"sqlite:///{database_path.as_posix()}") as connection:
+        initialize_schema(connection)
+        version = connection.execute(
+            "SELECT MAX(version) FROM schema_version"
+        ).fetchone()
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+    assert version[0] == 2
+    assert {"price_quotes", "daily_snapshots", "position_snapshots"} <= tables
