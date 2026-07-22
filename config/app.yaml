@@ -1,0 +1,9 @@
+application:
+  name: PAMS
+  version: 0.2.0
+default_currency: TWD
+database:
+  path: data/pams.db
+portfolio_display:
+  decimal_places: 2
+  show_zero_positions: false

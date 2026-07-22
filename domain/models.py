@@ -1,0 +1,199 @@
+"""PAMS domain models with structural validation."""
+
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from typing import Annotated, Self
+from uuid import uuid4
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from domain.enums import (
+    Currency,
+    DividendStatus,
+    HoldingType,
+    LiabilityType,
+    Market,
+    TransactionType,
+)
+
+NonNegativeDecimal = Annotated[Decimal, Field(ge=0)]
+UnitDecimal = Annotated[Decimal, Field(ge=0, le=1)]
+
+
+def utc_now() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(UTC)
+
+
+class DomainModel(BaseModel):
+    """Base behavior shared by immutable-boundary domain records."""
+
+    model_config = {"use_enum_values": False}
+
+
+class SymbolModel(DomainModel):
+    """Base model for records identified by a security symbol."""
+
+    symbol: str = Field(min_length=1, max_length=32)
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        """Normalize symbols for stable matching and persistence."""
+        normalized = value.strip().upper()
+        if not normalized:
+            raise ValueError("symbol cannot be blank")
+        return normalized
+
+
+class Holding(SymbolModel):
+    """An owned portfolio position."""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    name: str = Field(min_length=1)
+    market: Market
+    currency: Currency
+    quantity: NonNegativeDecimal
+    average_cost: NonNegativeDecimal
+    holding_type: HoldingType = HoldingType.STOCK
+    is_pledged: bool = False
+    notes: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_timestamps(self) -> Self:
+        """Ensure the update timestamp does not precede creation."""
+        if self.updated_at < self.created_at:
+            raise ValueError("updated_at cannot precede created_at")
+        return self
+
+
+class Transaction(SymbolModel):
+    """A purchase or sale of a security."""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    market: Market
+    transaction_type: TransactionType
+    trade_date: date
+    settlement_date: date
+    quantity: NonNegativeDecimal
+    price: NonNegativeDecimal
+    fees: NonNegativeDecimal = Decimal("0")
+    taxes: NonNegativeDecimal = Decimal("0")
+    currency: Currency
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_dates(self) -> Self:
+        """Ensure settlement is not earlier than the trade."""
+        if self.settlement_date < self.trade_date:
+            raise ValueError("settlement_date cannot precede trade_date")
+        return self
+
+
+class Dividend(SymbolModel):
+    """A declared or received dividend."""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    market: Market
+    ex_dividend_date: date
+    payment_date: date | None = None
+    amount_per_share: NonNegativeDecimal
+    currency: Currency
+    shares_eligible: NonNegativeDecimal
+    gross_amount: NonNegativeDecimal
+    withholding_tax: NonNegativeDecimal = Decimal("0")
+    net_amount: NonNegativeDecimal
+    status: DividendStatus = DividendStatus.EXPECTED
+
+    @model_validator(mode="after")
+    def validate_dates_and_amounts(self) -> Self:
+        """Ensure payment ordering and internally consistent totals."""
+        if self.payment_date and self.payment_date < self.ex_dividend_date:
+            raise ValueError("payment_date cannot precede ex_dividend_date")
+        if self.withholding_tax > self.gross_amount:
+            raise ValueError("withholding_tax cannot exceed gross_amount")
+        if self.net_amount != self.gross_amount - self.withholding_tax:
+            raise ValueError("net_amount must equal gross_amount minus withholding_tax")
+        return self
+
+
+class Liability(DomainModel):
+    """A debt included in net asset calculations."""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    liability_type: LiabilityType
+    principal: NonNegativeDecimal
+    annual_interest_rate: UnitDecimal | None = None
+    currency: Currency
+    start_date: date | None = None
+    maturity_date: date | None = None
+    collateral_description: str | None = None
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_dates(self) -> Self:
+        """Ensure maturity does not precede the liability start."""
+        if (
+            self.start_date
+            and self.maturity_date
+            and self.maturity_date < self.start_date
+        ):
+            raise ValueError("maturity_date cannot precede start_date")
+        return self
+
+
+class PriceQuote(SymbolModel):
+    """An end-of-day market price observation."""
+
+    market: Market
+    trade_date: date
+    close_price: NonNegativeDecimal
+    previous_close: NonNegativeDecimal | None = None
+    currency: Currency
+    source: str = Field(min_length=1)
+    fetched_at: datetime = Field(default_factory=utc_now)
+
+
+class PositionValuation(SymbolModel):
+    """Calculated valuation for one holding."""
+
+    holding_id: str
+    quantity: NonNegativeDecimal
+    average_cost: NonNegativeDecimal
+    close_price: NonNegativeDecimal
+    cost_basis: NonNegativeDecimal
+    market_value: NonNegativeDecimal
+    unrealized_pnl: Decimal
+    unrealized_return: Decimal
+    portfolio_weight: UnitDecimal
+    daily_value_change: Decimal
+
+
+class DailySnapshot(DomainModel):
+    """Persisted daily portfolio totals."""
+
+    snapshot_date: date
+    total_market_value: NonNegativeDecimal
+    total_cost_basis: NonNegativeDecimal
+    total_unrealized_pnl: Decimal
+    total_liabilities: NonNegativeDecimal
+    net_asset_value: Decimal
+    leverage_ratio: NonNegativeDecimal
+    high_water_mark: Decimal
+    drawdown: Decimal = Field(le=0)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class PortfolioSummary(DomainModel):
+    """Calculated portfolio totals for a valuation date."""
+
+    valuation_date: date
+    positions: list[PositionValuation]
+    total_market_value: NonNegativeDecimal
+    total_cost_basis: NonNegativeDecimal
+    total_unrealized_pnl: Decimal
+    total_liabilities: NonNegativeDecimal
+    net_asset_value: Decimal
+    leverage_ratio: NonNegativeDecimal
