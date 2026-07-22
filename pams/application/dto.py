@@ -176,3 +176,41 @@ class DemoDataResult:
     total_unrealized_pnl: Decimal
     total_liabilities: Decimal
     net_equity: Decimal
+
+
+@dataclass(frozen=True)
+class LedgerPositionResult:
+    """Application representation of one active transaction position."""
+
+    symbol: str
+    market: str
+    currency: str
+    quantity: Decimal
+    average_cost: Decimal
+    cost_basis: Decimal
+    realized_pnl: Decimal
+
+
+@dataclass(frozen=True)
+class ProjectedHoldingResult:
+    """Dry-run holding projection returned at the application boundary."""
+
+    id: str
+    symbol: str
+    name: str
+    market: str
+    currency: str
+    quantity: Decimal
+    average_cost: Decimal
+    holding_type: str
+
+
+@dataclass(frozen=True)
+class RebuildHoldingsResult:
+    """Complete dry-run transaction-ledger projection result."""
+
+    positions: tuple[LedgerPositionResult, ...]
+    projected_holdings: tuple[ProjectedHoldingResult, ...]
+    total_realized_pnl: Decimal
+    transaction_count: int
+    persisted: bool = False

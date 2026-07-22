@@ -39,6 +39,22 @@ Each aggregate has a purpose-specific protocol. Repositories translate between d
 - `SnapshotService` maintains high-water marks and drawdowns and persists one record per date.
 - `BootstrapService` initializes storage and seeds the known portfolio only when both seed aggregates are empty.
 - `MarketDataEngine` verifies the official ROC source date, normalizes only held symbols, values the complete portfolio, and atomically persists quotes, one aggregate daily snapshot, and one position snapshot per holding. It has no scheduler or UI dependency.
+- `TransactionEngine` deterministically orders BUY and SELL records, maintains moving weighted-average cost by `(symbol, market, currency)`, and returns immutable active positions plus realized P/L. It has no repository, SQLite, Streamlit, Pandas, or market-data dependency.
+
+```text
+transactions
+     |
+     v
+TransactionEngine
+     |
+     v
+Projected Holdings
+     |
+     v
+Portfolio Valuation
+```
+
+`RebuildHoldingsUseCase` reads transaction and holding repository protocols, invokes the transaction engine, supplies explicit holding metadata, and returns immutable projection DTOs. The v0.7 Sprint 1 workflow is dry-run only: it does not call holding write methods, and existing bootstrap holdings remain authoritative until a later persistence migration is designed.
 
 `MarketDataEngine.preview()` follows the same provider, date-verification, normalization, completeness, and valuation path but does not invoke quote or snapshot writes. CLI dry runs never use write-then-delete behavior.
 

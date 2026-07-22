@@ -4,12 +4,15 @@ from pams.application.demo_data import DemoDataUseCase
 from pams.application.dto import (
     DemoDataResult,
     HoldingOverview,
+    LedgerPositionResult,
     MarketAvailabilitySummary,
     PortfolioHistory,
     PortfolioHistoryPoint,
     PortfolioOverview,
     PortfolioTotals,
     PositionSummary,
+    ProjectedHoldingResult,
+    RebuildHoldingsResult,
     UpdateMode,
     UpdateResult,
     VerificationItem,
@@ -22,6 +25,7 @@ from pams.application.exceptions import (
 )
 from pams.application.portfolio_history import PortfolioHistoryUseCase
 from pams.application.portfolio_status import PortfolioStatusUseCase
+from pams.application.rebuild_holdings import RebuildHoldingsUseCase
 from pams.application.update_portfolio import UpdatePortfolioUseCase
 from pams.application.verify_system import VerifySystemUseCase
 
@@ -30,6 +34,7 @@ __all__ = [
     "DemoDataResult",
     "DemoDataUseCase",
     "HoldingOverview",
+    "LedgerPositionResult",
     "MarketAvailabilitySummary",
     "PortfolioHistory",
     "PortfolioHistoryPoint",
@@ -37,6 +42,9 @@ __all__ = [
     "PortfolioOverview",
     "PortfolioStatusUseCase",
     "PortfolioTotals",
+    "ProjectedHoldingResult",
+    "RebuildHoldingsResult",
+    "RebuildHoldingsUseCase",
     "PositionSummary",
     "ProductionDatabaseProtectedError",
     "UpdateMode",
