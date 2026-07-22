@@ -2,6 +2,7 @@
 
 from dataclasses import FrozenInstanceError
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from market_calendar import MarketAvailability
 from pams.application import (
     MarketAvailabilitySummary,
+    PortfolioHistoryUseCase,
     PortfolioStatusUseCase,
     UpdateMode,
     UpdatePortfolioUseCase,
@@ -117,6 +119,19 @@ def test_portfolio_status_use_case_returns_summary_dto() -> None:
     ).execute()
     assert summary.holdings_count == 5
     assert summary.market_availability.commonly_ingestible_date is None
+
+
+def test_portfolio_history_use_case_maps_persisted_snapshots() -> None:
+    class SnapshotsStub:
+        def list_between_dates(self, start: date, end: date) -> list[object]:
+            assert start == date.min
+            assert end == date.max
+            return [sample_result().snapshot]
+
+    history = PortfolioHistoryUseCase(SnapshotsStub()).execute()  # type: ignore[arg-type]
+    assert len(history.points) == 1
+    assert history.points[0].snapshot_date == date(2026, 7, 22)
+    assert history.points[0].market_value == Decimal("1200")
 
 
 def test_verify_system_use_case_returns_items() -> None:

@@ -21,6 +21,12 @@ CLI / future Dashboard / future Automation
 
 The `pams` command package is a composition surface. `cli.py` owns only argument parsing, DTO rendering, and exit codes. `composition.py` constructs concrete dependencies and complete use cases. `pams.application` owns the update, status, and verification workflows and returns immutable DTOs; it has no CLI or Streamlit dependency. `reporting.py` only serializes those DTOs. Importing the package creates no services or database connections.
 
+The Streamlit dashboard follows the same boundary. `app.py` is a small composition root and passes composed application use cases into `pams.dashboard`. Dashboard modules import application DTOs and use cases only; they contain no SQLite, repository, provider, market-engine, domain-service, or SQL access. `PortfolioStatusUseCase` returns `PortfolioOverview`, including persisted KPIs and holding rows. `PortfolioHistoryUseCase` returns chronological aggregate `PortfolioHistory` points. The UI formats these values but does not recalculate them.
+
+Dashboard read queries use an explicit 60-second Streamlit data cache. Update operations are never cached and the dashboard invokes `UpdatePortfolioUseCase` only with `dry_run=True`. Missing quotes, snapshots, allocation, or history render as unavailable values or empty-state messages. Source disagreement is a neutral waiting condition rather than a system failure.
+
+`DemoDataUseCase` is an explicitly synthetic offline workflow. It validates that its target differs from the configured production database, creates a complete temporary SQLite database in one transaction, and atomically replaces only the selected demo target after success. It reuses the existing seed records, valuation service, snapshot service, and repository adapters; it never composes or calls market providers. Dashboard database selection remains in the `app.py` composition root via the forwarded `--database` argument.
+
 The domain package owns financial records, constrained enums, and structural invariants. Money, prices, and ratios use `Decimal`; ratios are decimal fractions (`0.05` means 5%). Dates and timestamps use standard-library `date` and timezone-aware `datetime` values.
 
 ## Repositories
@@ -43,6 +49,8 @@ SQLite is the local adapter. Schema initialization is idempotent and versioned. 
 CLI update flow is: parse arguments → composed `UpdatePortfolioUseCase` → immutable `UpdateResult` → terminal/JSON rendering → exit. The use case owns automatic date resolution, dry-run routing, synchronization handling, and engine invocation. Status and verification follow the same pattern through `PortfolioStatusUseCase` and `VerifySystemUseCase`.
 
 When an update omits `--date`, `MarketCalendar` reads the unique official date exposed by each latest-only provider. A commonly ingestible date exists only when TWSE and TPEx dates are equal. If publication is staggered, CLI returns a successful no-update outcome before calling the engine. It never treats the earlier date as retrievable, and contains no weekday or holiday tables. Manual requested dates still use strict engine verification. `status` exposes both source dates and current ingestibility; `verify` reports disagreement as WARN.
+
+Manual updates use date-bound `HistoricalTWSEProvider` and `HistoricalTPExProvider` instances. They adapt the exchanges' structured historical JSON documents into the same `MarketDataProvider` record protocol used by latest-only sources. Composition selects historical providers only for an explicit date; the engine remains provider-mode agnostic and retains source-date, mixed-date, completeness, duplicate, and transactional checks.
 
 ## Future Supabase migration
 

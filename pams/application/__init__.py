@@ -1,8 +1,13 @@
 """Presentation-neutral PAMS application workflows and DTOs."""
 
+from pams.application.demo_data import DemoDataUseCase
 from pams.application.dto import (
+    DemoDataResult,
+    HoldingOverview,
     MarketAvailabilitySummary,
-    PortfolioSummary,
+    PortfolioHistory,
+    PortfolioHistoryPoint,
+    PortfolioOverview,
     PortfolioTotals,
     PositionSummary,
     UpdateMode,
@@ -11,18 +16,29 @@ from pams.application.dto import (
     VerificationLevel,
     VerificationReport,
 )
-from pams.application.exceptions import ApplicationError
+from pams.application.exceptions import (
+    ApplicationError,
+    ProductionDatabaseProtectedError,
+)
+from pams.application.portfolio_history import PortfolioHistoryUseCase
 from pams.application.portfolio_status import PortfolioStatusUseCase
 from pams.application.update_portfolio import UpdatePortfolioUseCase
 from pams.application.verify_system import VerifySystemUseCase
 
 __all__ = [
     "ApplicationError",
+    "DemoDataResult",
+    "DemoDataUseCase",
+    "HoldingOverview",
     "MarketAvailabilitySummary",
+    "PortfolioHistory",
+    "PortfolioHistoryPoint",
+    "PortfolioHistoryUseCase",
+    "PortfolioOverview",
     "PortfolioStatusUseCase",
-    "PortfolioSummary",
     "PortfolioTotals",
     "PositionSummary",
+    "ProductionDatabaseProtectedError",
     "UpdateMode",
     "UpdatePortfolioUseCase",
     "UpdateResult",

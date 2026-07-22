@@ -10,14 +10,16 @@ from enum import IntEnum
 from pathlib import Path
 
 from config.yaml_loader import ConfigurationError
+from core.constants import PROJECT_ROOT
 from market_data import (
     ProviderDataError,
     SourceDateError,
     SuspendedSecurityError,
     SymbolNotFoundError,
 )
-from pams.composition import compose_application, compose_operations
+from pams.composition import compose_application, compose_demo_data, compose_operations
 from pams.reporting import (
+    format_demo_data_report,
     format_human_report,
     format_json_report,
     format_status_report,
@@ -61,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--dry-run", action="store_true")
     update.add_argument("--json", action="store_true", dest="json_output")
     update.add_argument("--verbose", action="store_true")
+    demo = commands.add_parser("demo-data", help="create an isolated demo database")
+    demo.add_argument(
+        "--database", type=Path, default=PROJECT_ROOT / "data" / "pams_demo.db"
+    )
+    demo.add_argument("--verbose", action="store_true")
     for command_name in ("status", "verify"):
         command = commands.add_parser(command_name)
         command.add_argument("--database", type=Path)
@@ -86,6 +93,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run a PAMS command and return its explicit process exit code."""
     arguments = build_parser().parse_args(argv)
     try:
+        if arguments.command == "demo-data":
+            result = compose_demo_data().execute(arguments.database)
+            print(format_demo_data_report(result))
+            return int(ExitCode.SUCCESS)
         composer = (
             compose_application if arguments.command == "update" else compose_operations
         )

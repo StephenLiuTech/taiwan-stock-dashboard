@@ -4,6 +4,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from config import get_settings, load_logging_config
@@ -12,8 +13,16 @@ from core.logging import configure_logging
 from database import initialize_database, initialize_schema
 from market_calendar import MarketCalendar, OfficialMarketDateProvider
 from market_data.engine import MarketDataEngine
-from market_data.providers import MarketDataProvider, TPExProvider, TWSEProvider
+from market_data.providers import (
+    HistoricalTPExProvider,
+    HistoricalTWSEProvider,
+    MarketDataProvider,
+    TPExProvider,
+    TWSEProvider,
+)
 from pams.application import (
+    DemoDataUseCase,
+    PortfolioHistoryUseCase,
     PortfolioStatusUseCase,
     UpdatePortfolioUseCase,
     VerifySystemUseCase,
@@ -23,6 +32,9 @@ from repositories import (
     SQLiteHoldingRepository,
     SQLiteLiabilityRepository,
     SQLiteMarketDataUnitOfWork,
+    SQLitePositionSnapshotRepository,
+    SQLitePriceQuoteRepository,
+    SQLiteSnapshotRepository,
 )
 from services import BootstrapService
 
@@ -41,6 +53,7 @@ class ApplicationContext:
     update_portfolio: UpdatePortfolioUseCase
     portfolio_status: PortfolioStatusUseCase
     verify_system: VerifySystemUseCase
+    portfolio_history: PortfolioHistoryUseCase | None = None
 
 
 def resolve_database_path(override: Path | None = None) -> Path:
@@ -58,6 +71,11 @@ def resolve_database_path(override: Path | None = None) -> Path:
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     return path.resolve()
+
+
+def compose_demo_data() -> DemoDataUseCase:
+    """Build the isolated demo-data workflow with production protection."""
+    return DemoDataUseCase(resolve_database_path())
 
 
 @contextmanager
@@ -126,6 +144,21 @@ def _compose(
         verification_service = VerificationService(
             connection, database_path, date_providers, calendar, engine
         )
+        snapshots = SQLiteSnapshotRepository(connection)
+        position_snapshots = SQLitePositionSnapshotRepository(connection)
+        quotes = SQLitePriceQuoteRepository(connection)
+
+        def historical_engine(trade_date: date) -> MarketDataEngine:
+            return MarketDataEngine(
+                (
+                    HistoricalTWSEProvider(trade_date),
+                    HistoricalTPExProvider(trade_date),
+                ),
+                holdings,
+                liabilities,
+                SQLiteMarketDataUnitOfWork(connection),
+            )
+
         yield ApplicationContext(
             connection=connection,
             engine=engine,
@@ -134,9 +167,19 @@ def _compose(
             calendar=calendar,
             status=status_service,
             verification=verification_service,
-            update_portfolio=UpdatePortfolioUseCase(calendar, engine, database_path),
-            portfolio_status=PortfolioStatusUseCase(calendar, status_service),
+            update_portfolio=UpdatePortfolioUseCase(
+                calendar, engine, database_path, historical_engine
+            ),
+            portfolio_status=PortfolioStatusUseCase(
+                calendar,
+                status_service,
+                holdings,
+                snapshots,
+                position_snapshots,
+                quotes,
+            ),
             verify_system=VerifySystemUseCase(verification_service),
+            portfolio_history=PortfolioHistoryUseCase(snapshots),
         )
     finally:
         connection.close()

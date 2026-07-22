@@ -10,9 +10,16 @@ from market_data.exceptions import (
     SymbolNotFoundError,
 )
 from market_data.normalizer import QuoteNormalizationError, QuoteNormalizer
-from market_data.providers import TPExProvider, TWSEProvider
+from market_data.providers import (
+    HistoricalTPExProvider,
+    HistoricalTWSEProvider,
+    TPExProvider,
+    TWSEProvider,
+)
 
 __all__ = [
+    "HistoricalTPExProvider",
+    "HistoricalTWSEProvider",
     "MarketDataEngine",
     "MarketDataError",
     "MarketDataRefreshResult",

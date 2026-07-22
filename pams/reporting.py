@@ -5,7 +5,8 @@ from datetime import date
 from decimal import Decimal
 
 from pams.application import (
-    PortfolioSummary,
+    DemoDataResult,
+    PortfolioOverview,
     UpdateMode,
     UpdateResult,
     VerificationReport,
@@ -114,7 +115,7 @@ def format_json_report(result: UpdateResult) -> str:
     )
 
 
-def format_status_report(status: PortfolioSummary) -> str:
+def format_status_report(status: PortfolioOverview) -> str:
     """Render operational portfolio status."""
     unavailable = "none"
     availability = status.market_availability
@@ -129,8 +130,8 @@ def format_status_report(status: PortfolioSummary) -> str:
             f"Liabilities count: {status.liabilities_count}",
             f"Schema version: {status.schema_version or unavailable}",
             f"Database size: {status.database_size_bytes:,} bytes",
-            f"TWSE latest source date: {availability.twse_latest_date}",
-            f"TPEx latest source date: {availability.tpex_latest_date}",
+            f"TWSE latest source date: {availability.twse_latest_date or unavailable}",
+            f"TPEx latest source date: {availability.tpex_latest_date or unavailable}",
             "Commonly ingestible dataset: "
             f"{availability.commonly_ingestible_date or 'not currently available'}",
         ]
@@ -144,3 +145,22 @@ def format_verification_report(report: VerificationReport) -> str:
         f"{item.level.value:<4} {item.name}: {item.detail}" for item in report.items
     )
     return "\n".join(lines)
+
+
+def format_demo_data_report(result: DemoDataResult) -> str:
+    """Render creation details and the exact dashboard launch command."""
+    return "\n".join(
+        [
+            "PAMS Demo Data",
+            "",
+            f"Database: {result.database_path}",
+            f"Holdings: {result.holdings_count}",
+            f"Liabilities: {result.liabilities_count}",
+            f"Quote date: {result.quote_date}",
+            f"History points: {result.history_points}",
+            "Result: demo database created",
+            "",
+            "Launch dashboard:",
+            "python -m streamlit run app.py -- --database " f'"{result.database_path}"',
+        ]
+    )

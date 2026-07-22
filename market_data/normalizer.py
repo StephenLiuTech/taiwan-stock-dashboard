@@ -85,10 +85,12 @@ class QuoteNormalizer:
         """Parse the official ROC calendar date carried by both exchanges."""
         raw = _text(_first(record, self.DATE_KEYS))
         compact = raw.replace("/", "").replace("-", "")
-        if len(compact) != 7 or not compact.isdigit():
+        if not compact.isdigit() or len(compact) not in (7, 8):
             raise SourceDateError(f"Missing or invalid official source date: {raw!r}")
-        roc_year = int(compact[:3])
         try:
+            if len(compact) == 8:
+                return date(int(compact[:4]), int(compact[4:6]), int(compact[6:8]))
+            roc_year = int(compact[:3])
             return date(roc_year + 1911, int(compact[3:5]), int(compact[5:7]))
         except ValueError as error:
             raise SourceDateError(f"Invalid official source date: {raw!r}") from error

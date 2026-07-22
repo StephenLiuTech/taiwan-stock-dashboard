@@ -1,5 +1,6 @@
 """Portfolio update application workflow."""
 
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -26,18 +27,24 @@ class UpdatePortfolioUseCase:
     """Resolve, validate, value, and optionally persist one portfolio update."""
 
     def __init__(
-        self, calendar: MarketCalendar, engine: MarketDataEngine, database_path: Path
+        self,
+        calendar: MarketCalendar,
+        engine: MarketDataEngine,
+        database_path: Path,
+        historical_engine_factory: Callable[[date], MarketDataEngine] | None = None,
     ) -> None:
         self.calendar = calendar
         self.engine = engine
         self.database_path = database_path
+        self.historical_engine_factory = historical_engine_factory
 
     def execute(
         self, requested_date: date | None = None, *, dry_run: bool = False
     ) -> UpdateResult:
         """Run an explicit or latest commonly ingestible update."""
+        automatic = requested_date is None
         availability = None
-        if requested_date is None:
+        if automatic:
             source_availability = self.calendar.market_availability()
             availability = _availability_dto(source_availability)
             requested_date = source_availability.commonly_ingestible_date
@@ -50,10 +57,15 @@ class UpdatePortfolioUseCase:
                     availability=availability,
                 )
 
+        selected_engine = (
+            self.historical_engine_factory(requested_date)
+            if self.historical_engine_factory is not None and not automatic
+            else self.engine
+        )
         engine_result = (
-            self.engine.preview(requested_date)
+            selected_engine.preview(requested_date)
             if dry_run
-            else self.engine.refresh(requested_date)
+            else selected_engine.refresh(requested_date)
         )
         return self._result_dto(
             engine_result, requested_date, dry_run=dry_run, availability=availability

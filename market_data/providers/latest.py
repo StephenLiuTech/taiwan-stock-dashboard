@@ -1,19 +1,9 @@
-"""Official TWSE and TPEx market-data providers."""
+"""Official latest-only TWSE and TPEx market-data providers."""
 
 from collections.abc import Sequence
-from typing import Protocol
 
 from domain import Market
 from market_data.transport import JSONRecord, JSONTransport, UrllibJSONTransport
-
-
-class MarketDataProvider(Protocol):
-    """Fetch raw end-of-day records for one market."""
-
-    market: Market
-    source: str
-
-    def fetch(self) -> Sequence[JSONRecord]: ...
 
 
 class TWSEProvider:

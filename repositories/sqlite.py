@@ -22,8 +22,11 @@ def _decimal(value: object) -> Decimal:
 class SQLiteHoldingRepository:
     """Persist holdings in SQLite."""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
         self.connection = connection
+        self.auto_commit = auto_commit
 
     def list_all(self) -> list[Holding]:
         rows = self.connection.execute(
@@ -60,11 +63,13 @@ class SQLiteHoldingRepository:
                 holding.updated_at.isoformat(),
             ),
         )
-        self.connection.commit()
+        if self.auto_commit:
+            self.connection.commit()
 
     def delete(self, holding_id: str) -> None:
         self.connection.execute("DELETE FROM holdings WHERE id = ?", (holding_id,))
-        self.connection.commit()
+        if self.auto_commit:
+            self.connection.commit()
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> Holding:
@@ -221,8 +226,11 @@ class SQLiteDividendRepository:
 class SQLiteLiabilityRepository:
     """Persist liabilities in SQLite."""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
         self.connection = connection
+        self.auto_commit = auto_commit
 
     def list_all(self) -> list[Liability]:
         rows = self.connection.execute(
@@ -265,11 +273,13 @@ class SQLiteLiabilityRepository:
                 datetime.now().isoformat(),
             ),
         )
-        self.connection.commit()
+        if self.auto_commit:
+            self.connection.commit()
 
     def delete(self, liability_id: str) -> None:
         self.connection.execute("DELETE FROM liabilities WHERE id = ?", (liability_id,))
-        self.connection.commit()
+        if self.auto_commit:
+            self.connection.commit()
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> Liability:

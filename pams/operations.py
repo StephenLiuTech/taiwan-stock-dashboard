@@ -30,8 +30,8 @@ class OperationalStatus:
     liabilities_count: int
     schema_version: int | None
     database_size_bytes: int
-    twse_latest_source_date: date
-    tpex_latest_source_date: date
+    twse_latest_source_date: date | None
+    tpex_latest_source_date: date | None
     commonly_ingestible_date: date | None
 
 
@@ -70,7 +70,7 @@ class OperationalStatusService:
         self.connection = connection
         self.database_path = database_path
 
-    def read(self, availability: MarketAvailability) -> OperationalStatus:
+    def read(self, availability: MarketAvailability | None) -> OperationalStatus:
         """Collect current database status."""
         daily = SQLiteSnapshotRepository(self.connection).get_latest()
         schema = self.connection.execute(
@@ -93,9 +93,11 @@ class OperationalStatusService:
             database_size_bytes=(
                 self.database_path.stat().st_size if self.database_path.exists() else 0
             ),
-            twse_latest_source_date=availability.twse_date,
-            tpex_latest_source_date=availability.tpex_date,
-            commonly_ingestible_date=availability.commonly_ingestible_date,
+            twse_latest_source_date=availability.twse_date if availability else None,
+            tpex_latest_source_date=availability.tpex_date if availability else None,
+            commonly_ingestible_date=(
+                availability.commonly_ingestible_date if availability else None
+            ),
         )
 
 

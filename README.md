@@ -1,6 +1,6 @@
 # PAMS
 
-PAMS (Personal Asset Management System) is a typed Python and Streamlit foundation for tracking a personal investment portfolio. Version 0.2 implements the first domain, service, and local persistence layers without external market-data or notification integrations.
+PAMS (Personal Asset Management System) is a typed Python and Streamlit application for tracking a personal investment portfolio. The first dashboard reads persisted portfolio snapshots through the application layer and keeps update operations dry-run only.
 
 ## Implemented
 
@@ -11,6 +11,7 @@ PAMS (Personal Asset Management System) is a typed Python and Streamlit foundati
 - Versioned SQLite schema and domain-specific repositories
 - Idempotent bootstrap of the current known portfolio
 - Environment-backed secrets/configuration and validated non-secret YAML settings
+- Single-page portfolio dashboard with KPIs, holdings, allocation, history, and market availability
 
 ## Installation
 
@@ -29,17 +30,35 @@ Copy `.env.example` to `.env` if environment overrides are needed.
 streamlit run app.py
 ```
 
-Run an explicit local market-data update:
+The dashboard displays `—` for unavailable financial values and clear empty states when quotes or snapshots do not exist. Its **Refresh data** action performs validation and valuation as a dry run; it never persists an update. **Reload dashboard** clears the short-lived read cache and reruns the page.
+
+To create a populated synthetic demo database without touching the configured production database:
+
+```bash
+python -m pams demo-data
+python -m streamlit run app.py -- --database data/pams_demo.db
+```
+
+Use `python -m pams demo-data --database data/custom_demo.db` for a custom demo path. Demo generation is deterministic, uses no live market providers, and recreates only the selected demo database. All demo quotes are marked `demo_fixture`. This synthetic data is for software demonstration only and must not be used for investment decisions.
+
+Run an explicit historical market-data update:
 
 ```bash
 python -m pams update --date 2026-07-22
 pams update --date 2026-07-22
 ```
 
-Omit `--date` to update only when the latest-only TWSE and TPEx providers expose the same official date. PAMS never guesses weekends or holidays. When publication is staggered, automatic update returns success with `no_update_sources_unsynchronized` and performs no ingestion:
+An explicit `--date` uses the official TWSE and TPEx date-query providers. Each response carries its authoritative source date, which must match the request before any write occurs. Historical updates never relabel the latest payload as an earlier date.
+
+Omit `--date` to use the latest-only providers and update only when TWSE and TPEx expose the same official date. PAMS never guesses weekends or holidays. When publication is staggered, automatic update returns success with `no_update_sources_unsynchronized` and performs no ingestion:
 
 ```bash
 python -m pams update --dry-run
+```
+
+```text
+Automatic update → latest-only providers → synchronization check → engine
+Manual update    → historical date-query providers → source-date check → engine
 ```
 
 Preview the complete fetch, source-date validation, normalization, and valuation without writing quotes or snapshots:
@@ -72,8 +91,8 @@ python -m compileall .
 ## Project structure
 
 ```text
-app.py          Streamlit composition root
-pams/           Application use cases/DTOs, CLI, composition, and reporting
+app.py          Small Streamlit composition root
+pams/           Application use cases/DTOs, CLI, dashboard, composition, reporting
 market_calendar/ Official cross-market availability-date resolution
 config/         Environment and validated YAML configuration
 domain/         Framework-independent models and enums
