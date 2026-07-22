@@ -415,6 +415,13 @@ class SQLitePriceQuoteRepository:
         ).fetchone()
         return self._from_row(row) if row else None
 
+    def get_latest_date(self) -> date | None:
+        """Return the newest persisted quote date across all markets."""
+        row = self.connection.execute(
+            "SELECT MAX(trade_date) FROM price_quotes"
+        ).fetchone()
+        return date.fromisoformat(row[0]) if row and row[0] else None
+
     @staticmethod
     def _from_row(row: sqlite3.Row) -> PriceQuote:
         values = dict(row)
@@ -468,6 +475,13 @@ class SQLitePositionSnapshotRepository:
             (snapshot_date.isoformat(),),
         ).fetchall()
         return [self._from_row(row) for row in rows]
+
+    def get_latest_date(self) -> date | None:
+        """Return the newest holding-level snapshot date."""
+        row = self.connection.execute(
+            "SELECT MAX(snapshot_date) FROM position_snapshots"
+        ).fetchone()
+        return date.fromisoformat(row[0]) if row and row[0] else None
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> PositionSnapshot:

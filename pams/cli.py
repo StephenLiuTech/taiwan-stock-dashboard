@@ -16,8 +16,15 @@ from market_data import (
     SuspendedSecurityError,
     SymbolNotFoundError,
 )
-from pams.composition import compose_application
-from pams.reporting import format_human_report, format_json_report
+from pams.composition import compose_application, compose_operations
+from pams.reporting import (
+    format_human_report,
+    format_json_report,
+    format_no_update_json,
+    format_no_update_report,
+    format_status_report,
+    format_verification_report,
+)
 from services import DuplicateSnapshotError
 
 
@@ -32,6 +39,7 @@ class ExitCode(IntEnum):
     SECURITY_ERROR = 5
     DUPLICATE_SNAPSHOT = 6
     CONFIG_OR_DATABASE_ERROR = 7
+    VERIFICATION_FAILED = 8
 
 
 def parse_iso_date(value: str) -> date:
@@ -50,11 +58,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pams")
     commands = parser.add_subparsers(dest="command", required=True)
     update = commands.add_parser("update", help="fetch and value official market data")
-    update.add_argument("--date", required=True, type=parse_iso_date)
+    update.add_argument("--date", type=parse_iso_date)
     update.add_argument("--database", type=Path)
     update.add_argument("--dry-run", action="store_true")
     update.add_argument("--json", action="store_true", dest="json_output")
     update.add_argument("--verbose", action="store_true")
+    for command_name in ("status", "verify"):
+        command = commands.add_parser(command_name)
+        command.add_argument("--database", type=Path)
+        command.add_argument("--verbose", action="store_true")
     return parser
 
 
@@ -76,25 +88,52 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run a PAMS command and return its explicit process exit code."""
     arguments = build_parser().parse_args(argv)
     try:
-        with compose_application(
-            arguments.database, verbose=arguments.verbose
-        ) as application:
+        composer = (
+            compose_application if arguments.command == "update" else compose_operations
+        )
+        with composer(arguments.database, verbose=arguments.verbose) as application:
+            if arguments.command == "status":
+                availability = application.calendar.market_availability()
+                print(format_status_report(application.status.read(availability)))
+                return int(ExitCode.SUCCESS)
+            if arguments.command == "verify":
+                verification = application.verification.run()
+                print(format_verification_report(verification))
+                return int(
+                    ExitCode.VERIFICATION_FAILED
+                    if verification.failed
+                    else ExitCode.SUCCESS
+                )
+            requested_date = arguments.date
+            if requested_date is None:
+                availability = application.calendar.market_availability()
+                requested_date = availability.commonly_ingestible_date
+                if requested_date is None:
+                    report = (
+                        format_no_update_json(availability, application.database_path)
+                        if arguments.json_output
+                        else format_no_update_report(
+                            availability, application.database_path
+                        )
+                    )
+                    print(report)
+                    return int(ExitCode.SUCCESS)
             result = (
-                application.engine.preview(arguments.date)
+                application.engine.preview(requested_date)
                 if arguments.dry_run
-                else application.engine.refresh(arguments.date)
+                else application.engine.refresh(requested_date)
             )
             report = (
                 format_json_report(
                     result,
-                    arguments.date,
+                    requested_date,
                     application.database_path,
                     dry_run=arguments.dry_run,
                 )
                 if arguments.json_output
                 else format_human_report(
                     result,
-                    arguments.date,
+                    requested_date,
                     application.database_path,
                     dry_run=arguments.dry_run,
                 )

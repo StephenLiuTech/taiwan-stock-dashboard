@@ -29,6 +29,8 @@ SQLite is the local adapter. Schema initialization is idempotent and versioned. 
 
 CLI update flow is: configuration → logging → SQLite/schema → idempotent bootstrap → official providers → engine refresh or preview → terminal/JSON report. The verified official source date remains authoritative.
 
+When an update omits `--date`, `MarketCalendar` reads the unique official date exposed by each latest-only provider. A commonly ingestible date exists only when TWSE and TPEx dates are equal. If publication is staggered, CLI returns a successful no-update outcome before calling the engine. It never treats the earlier date as retrievable, and contains no weekday or holiday tables. Manual requested dates still use strict engine verification. `status` exposes both source dates and current ingestibility; `verify` reports disagreement as WARN.
+
 ## Future Supabase migration
 
 A future Supabase adapter should implement the existing repository protocols and preserve domain serialization semantics. Configuration would select the adapter in the composition root. Domain models and services should require no changes; schema migration, authentication, connection lifecycle, and concurrency behavior must be addressed within the new adapter and deployment layer.

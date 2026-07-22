@@ -36,6 +36,12 @@ python -m pams update --date 2026-07-22
 pams update --date 2026-07-22
 ```
 
+Omit `--date` to update only when the latest-only TWSE and TPEx providers expose the same official date. PAMS never guesses weekends or holidays. When publication is staggered, automatic update returns success with `no_update_sources_unsynchronized` and performs no ingestion:
+
+```bash
+python -m pams update --dry-run
+```
+
 Preview the complete fetch, source-date validation, normalization, and valuation without writing quotes or snapshots:
 
 ```bash
@@ -45,7 +51,14 @@ python -m pams update --date 2026-07-22 --dry-run --json
 
 Use `--database PATH` to override SQLite and `--verbose` for diagnostic tracebacks. Duplicate persisted dates remain protected; there is intentionally no force option.
 
-Exit codes: `0` success, `1` unexpected, `2` arguments/date, `3` provider data, `4` source-date freshness, `5` missing/suspended security, `6` duplicate snapshot, and `7` configuration/database.
+Inspect local database state and operational readiness:
+
+```bash
+python -m pams status
+python -m pams verify
+```
+
+Exit codes: `0` success, `1` unexpected, `2` arguments/date, `3` provider data, `4` source-date freshness, `5` missing/suspended security, `6` duplicate snapshot, `7` configuration/database, and `8` verification failed.
 
 ## Testing
 
@@ -61,6 +74,7 @@ python -m compileall .
 ```text
 app.py          Streamlit composition root
 pams/           CLI parsing, composition, and terminal reporting
+market_calendar/ Official cross-market availability-date resolution
 config/         Environment and validated YAML configuration
 domain/         Framework-independent models and enums
 services/       Portfolio, snapshot, and bootstrap use cases

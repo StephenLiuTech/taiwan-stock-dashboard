@@ -14,6 +14,7 @@ import pytest
 
 import pams.cli
 from domain import Currency, DailySnapshot, Holding, Market, PriceQuote
+from market_calendar import MarketAvailability
 from market_data import (
     ProviderDataError,
     SourceDateError,
@@ -24,6 +25,12 @@ from market_data import (
 from market_data.engine import MarketDataRefreshResult
 from pams.cli import ExitCode, _error_exit_code, main
 from pams.composition import ApplicationContext
+from pams.operations import (
+    CheckLevel,
+    OperationalStatus,
+    VerificationCheck,
+    VerificationReport,
+)
 from pams.reporting import (
     format_decimal,
     format_human_report,
@@ -115,10 +122,58 @@ class FakeEngine:
         return sample_result()
 
 
+class FakeCalendar:
+    """Deterministic automatic-date resolver."""
+
+    def __init__(
+        self,
+        twse_date: date = date(2026, 7, 22),
+        tpex_date: date = date(2026, 7, 22),
+    ) -> None:
+        self.availability = MarketAvailability(twse_date, tpex_date)
+
+    def market_availability(self) -> MarketAvailability:
+        return self.availability
+
+
+class FakeStatusService:
+    def read(self, availability: MarketAvailability) -> OperationalStatus:
+        return OperationalStatus(
+            Path("configured.db"),
+            None,
+            None,
+            None,
+            5,
+            2,
+            3,
+            4096,
+            availability.twse_date,
+            availability.tpex_date,
+            availability.commonly_ingestible_date,
+        )
+
+
+class FakeVerificationService:
+    def __init__(self, *, failed: bool = False) -> None:
+        self.failed = failed
+
+    def run(self) -> VerificationReport:
+        return VerificationReport(
+            (
+                VerificationCheck(
+                    "test",
+                    CheckLevel.FAIL if self.failed else CheckLevel.PASS,
+                    "offline",
+                ),
+            )
+        )
+
+
 def install_fake_composition(
     monkeypatch: pytest.MonkeyPatch,
     engine: FakeEngine,
     captured: dict[str, object] | None = None,
+    calendar: FakeCalendar | None = None,
 ) -> None:
     @contextmanager
     def fake_compose(
@@ -138,11 +193,15 @@ def install_fake_composition(
                 engine,  # type: ignore[arg-type]
                 database_override or Path("configured.db"),
                 False,
+                calendar or FakeCalendar(),  # type: ignore[arg-type]
+                FakeStatusService(),  # type: ignore[arg-type]
+                FakeVerificationService(),  # type: ignore[arg-type]
             )
         finally:
             connection.close()
 
     monkeypatch.setattr(pams.cli, "compose_application", fake_compose)
+    monkeypatch.setattr(pams.cli, "compose_operations", fake_compose)
 
 
 def test_module_entry_point_help_works() -> None:
@@ -166,11 +225,75 @@ def test_valid_update_routes_to_refresh(
     assert "PAMS Market Data Update" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("argv", [["update"], ["update", "--date", "2026/07/22"]])
-def test_missing_or_invalid_date_returns_argparse_exit_two(argv: list[str]) -> None:
+def test_invalid_date_returns_argparse_exit_two() -> None:
     with pytest.raises(SystemExit) as raised:
-        main(argv)
+        main(["update", "--date", "2026/07/22"])
     assert raised.value.code == ExitCode.CLI_ERROR
+
+
+def test_update_without_date_uses_market_calendar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = FakeEngine()
+    install_fake_composition(monkeypatch, engine)
+    assert main(["update", "--dry-run"]) == 0
+    assert engine.preview_called is True
+
+
+@pytest.mark.parametrize(
+    ("twse_date", "tpex_date"),
+    [
+        (date(2026, 7, 21), date(2026, 7, 22)),
+        (date(2026, 7, 22), date(2026, 7, 21)),
+    ],
+)
+def test_unsynchronized_automatic_update_is_successful_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    twse_date: date,
+    tpex_date: date,
+) -> None:
+    engine = FakeEngine()
+    install_fake_composition(
+        monkeypatch, engine, calendar=FakeCalendar(twse_date, tpex_date)
+    )
+    assert main(["update"]) == ExitCode.SUCCESS
+    output = capsys.readouterr().out
+    assert "no update performed" in output
+    assert f"TWSE latest source date: {twse_date}" in output
+    assert f"TPEx latest source date: {tpex_date}" in output
+    assert engine.preview_called is False
+    assert engine.refresh_called is False
+
+
+def test_unsynchronized_automatic_update_json_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    engine = FakeEngine()
+    install_fake_composition(
+        monkeypatch,
+        engine,
+        calendar=FakeCalendar(date(2026, 7, 21), date(2026, 7, 22)),
+    )
+    assert main(["update", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "no_update_sources_unsynchronized"
+    assert payload["commonly_ingestible_date"] is None
+    assert engine.refresh_called is False
+
+
+def test_manual_requested_date_mismatch_remains_strict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = SourceDateMismatchError(Market.TWSE, date(2026, 7, 22), date(2026, 7, 21))
+    engine = FakeEngine(error)
+    install_fake_composition(
+        monkeypatch,
+        engine,
+        calendar=FakeCalendar(date(2026, 7, 21), date(2026, 7, 22)),
+    )
+    assert main(["update", "--date", "2026-07-22"]) == ExitCode.SOURCE_DATE_ERROR
+    assert engine.refresh_called is True
 
 
 def test_json_output_is_machine_readable(
@@ -213,6 +336,64 @@ def test_dry_run_routes_to_preview(monkeypatch: pytest.MonkeyPatch) -> None:
     assert main(["update", "--date", "2026-07-22", "--dry-run"]) == 0
     assert engine.preview_called is True
     assert engine.refresh_called is False
+
+
+def test_status_command_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fake_composition(monkeypatch, FakeEngine())
+    assert main(["status"]) == 0
+    output = capsys.readouterr().out
+    assert "PAMS Operational Status" in output
+    assert "Holdings count: 5" in output
+    assert "TWSE latest source date: 2026-07-22" in output
+    assert "TPEx latest source date: 2026-07-22" in output
+    assert "Commonly ingestible dataset: 2026-07-22" in output
+
+
+def test_status_exposes_unsynchronized_source_dates(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fake_composition(
+        monkeypatch,
+        FakeEngine(),
+        calendar=FakeCalendar(date(2026, 7, 21), date(2026, 7, 22)),
+    )
+    assert main(["status"]) == 0
+    output = capsys.readouterr().out
+    assert "TWSE latest source date: 2026-07-21" in output
+    assert "TPEx latest source date: 2026-07-22" in output
+    assert "Commonly ingestible dataset: not currently available" in output
+
+
+def test_verify_failed_returns_exit_eight(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    @contextmanager
+    def failed_compose(
+        database_override: Path | None = None,
+        *,
+        verbose: bool = False,
+    ) -> Iterator[ApplicationContext]:
+        del database_override, verbose
+        connection = sqlite3.connect(":memory:")
+        try:
+            yield ApplicationContext(
+                connection,
+                FakeEngine(),  # type: ignore[arg-type]
+                Path("configured.db"),
+                False,
+                FakeCalendar(),  # type: ignore[arg-type]
+                FakeStatusService(),  # type: ignore[arg-type]
+                FakeVerificationService(failed=True),  # type: ignore[arg-type]
+            )
+        finally:
+            connection.close()
+
+    monkeypatch.setattr(pams.cli, "compose_application", failed_compose)
+    monkeypatch.setattr(pams.cli, "compose_operations", failed_compose)
+    assert main(["verify"]) == ExitCode.VERIFICATION_FAILED
+    assert "FAIL" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -266,4 +447,4 @@ def test_json_report_serializes_all_decimals_as_strings() -> None:
     )
     assert payload["positions"][0]["average_cost"] == "80"
     assert payload["positions"][0]["portfolio_weight"] == str(Decimal("5") / 6)
-    assert payload["mode"] == "persisted"
+    assert payload["mode"] == "updated"

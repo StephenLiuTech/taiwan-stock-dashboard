@@ -98,3 +98,78 @@ def test_persisted_update_writes_all_grains_and_protects_duplicate(
         assert row_count(application.connection, "position_snapshots") == 5
         with pytest.raises(DuplicateSnapshotError):
             application.engine.refresh(date(2026, 7, 22))
+
+
+def test_operational_status_reports_database_state(tmp_path: Path) -> None:
+    database = tmp_path / "status.db"
+    with compose_application(database, providers=providers()) as application:
+        application.engine.refresh(date(2026, 7, 22))
+        status = application.status.read(application.calendar.market_availability())
+        assert status.database_path == database.resolve()
+        assert status.latest_quote_date == date(2026, 7, 22)
+        assert status.latest_daily_snapshot == date(2026, 7, 22)
+        assert status.latest_position_snapshot == date(2026, 7, 22)
+        assert status.holdings_count == 5
+        assert status.liabilities_count == 2
+        assert status.schema_version == 3
+        assert status.database_size_bytes > 0
+
+
+def test_offline_operational_verification_passes(tmp_path: Path) -> None:
+    database = tmp_path / "verify.db"
+    with compose_application(database, providers=providers()) as application:
+        report = application.verification.run()
+        assert report.failed is False
+        assert {check.name for check in report.checks} >= {
+            "Configuration",
+            "Database",
+            "Schema",
+            "Holdings",
+            "Liabilities",
+            "TWSE endpoint",
+            "TPEx endpoint",
+            "Market Calendar",
+            "Market Data Engine",
+        }
+
+
+def test_offline_verification_fails_when_official_data_is_empty(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "verify-failure.db"
+    failing_providers = (
+        StaticProvider(Market.TWSE, []),
+        StaticProvider(
+            Market.TPEX,
+            [{"Date": "1150722", "SecuritiesCompanyCode": "8299", "Close": "1"}],
+        ),
+    )
+    with compose_application(database, providers=failing_providers) as application:
+        report = application.verification.run()
+        assert report.failed is True
+        twse = next(check for check in report.checks if check.name == "TWSE endpoint")
+        assert twse.level.value == "FAIL"
+
+
+def test_verification_warns_when_official_market_dates_disagree(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "verify-warning.db"
+    mixed_providers = (
+        StaticProvider(
+            Market.TWSE,
+            [{"Date": "1150721", "Code": "2330", "ClosingPrice": "1"}],
+        ),
+        StaticProvider(
+            Market.TPEX,
+            [{"Date": "1150722", "SecuritiesCompanyCode": "8299", "Close": "1"}],
+        ),
+    )
+    with compose_application(database, providers=mixed_providers) as application:
+        report = application.verification.run()
+        calendar = next(
+            check for check in report.checks if check.name == "Market Calendar"
+        )
+        assert report.failed is False
+        assert calendar.level.value == "WARN"
+        assert "waiting for synchronization" in calendar.detail

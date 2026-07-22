@@ -5,7 +5,9 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+from market_calendar import MarketAvailability
 from market_data.engine import MarketDataRefreshResult
+from pams.operations import OperationalStatus, VerificationReport
 
 
 def format_decimal(value: Decimal) -> str:
@@ -115,7 +117,7 @@ def format_json_report(
     payload = {
         "requested_date": requested_date,
         "verified_source_date": result.verified_source_date,
-        "mode": "dry-run" if dry_run else "persisted",
+        "mode": "dry_run" if dry_run else "updated",
         "database_path": str(database_path),
         "positions": _position_records(result),
         "totals": {
@@ -130,4 +132,65 @@ def format_json_report(
     }
     return json.dumps(
         payload, default=_json_default, ensure_ascii=False, sort_keys=True
+    )
+
+
+def format_status_report(status: OperationalStatus) -> str:
+    """Render operational database status."""
+    unavailable = "none"
+    return "\n".join(
+        [
+            "PAMS Operational Status",
+            f"Database: {status.database_path}",
+            f"Latest quote date: {status.latest_quote_date or unavailable}",
+            f"Latest daily snapshot: {status.latest_daily_snapshot or unavailable}",
+            f"Latest position snapshot: {status.latest_position_snapshot or unavailable}",
+            f"Holdings count: {status.holdings_count}",
+            f"Liabilities count: {status.liabilities_count}",
+            f"Schema version: {status.schema_version or unavailable}",
+            f"Database size: {status.database_size_bytes:,} bytes",
+            f"TWSE latest source date: {status.twse_latest_source_date}",
+            f"TPEx latest source date: {status.tpex_latest_source_date}",
+            "Commonly ingestible dataset: "
+            f"{status.commonly_ingestible_date or 'not currently available'}",
+        ]
+    )
+
+
+def format_verification_report(report: VerificationReport) -> str:
+    """Render PASS, FAIL, and WARN verification rows."""
+    lines = ["PAMS Operational Verification"]
+    lines.extend(
+        f"{check.level.value:<4} {check.name}: {check.detail}"
+        for check in report.checks
+    )
+    return "\n".join(lines)
+
+
+def format_no_update_report(
+    availability: MarketAvailability, database_path: Path
+) -> str:
+    """Render a normal automatic no-op caused by staggered publication."""
+    return "\n".join(
+        [
+            "PAMS Market Data Update",
+            "Result: no update performed; official sources are not synchronized",
+            f"TWSE latest source date: {availability.twse_date.isoformat()}",
+            f"TPEx latest source date: {availability.tpex_date.isoformat()}",
+            f"Database: {database_path}",
+        ]
+    )
+
+
+def format_no_update_json(availability: MarketAvailability, database_path: Path) -> str:
+    """Render a machine-readable automatic no-op result."""
+    return json.dumps(
+        {
+            "mode": "no_update_sources_unsynchronized",
+            "database_path": str(database_path),
+            "twse_latest_source_date": availability.twse_date.isoformat(),
+            "tpex_latest_source_date": availability.tpex_date.isoformat(),
+            "commonly_ingestible_date": None,
+        },
+        sort_keys=True,
     )

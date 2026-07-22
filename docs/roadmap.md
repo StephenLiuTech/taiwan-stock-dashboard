@@ -10,7 +10,7 @@ Implemented foundation: official TWSE/TPEx provider boundaries, normalization, p
 
 ## v0.4 — Dashboard
 
-Sprint 1 implements the local update CLI, JSON/human reporting, dry-run validation, explicit exit codes, and dependency composition. Dashboard views remain a later v0.4 sprint.
+Sprint 1 implements the local update CLI, JSON/human reporting, dry-run validation, explicit exit codes, and dependency composition. v0.4.1 adds latest-only source synchronization semantics plus operational `status` and `verify` commands. Automatic ingestion waits until both markets publish the same official date. Dashboard views remain a later sprint.
 
 ## v0.5 — Notifications and dividends
 

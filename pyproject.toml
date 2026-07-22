@@ -35,6 +35,7 @@ packages = [
     "database",
     "domain",
     "market_data",
+    "market_calendar",
     "pams",
     "repositories",
     "services",

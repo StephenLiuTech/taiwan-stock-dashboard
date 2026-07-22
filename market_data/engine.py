@@ -56,6 +56,19 @@ class MarketDataEngine:
         self.normalizer = normalizer or QuoteNormalizer()
         self.portfolio = portfolio or PortfolioService()
 
+    def dependency_graph_ready(self) -> bool:
+        """Return whether every concrete dependency required to run is wired."""
+        return set(self.providers) == set(Market) and all(
+            dependency is not None
+            for dependency in (
+                self.holdings,
+                self.liabilities,
+                self.unit_of_work,
+                self.normalizer,
+                self.portfolio,
+            )
+        )
+
     def refresh(self, trade_date: date) -> MarketDataRefreshResult:
         """Run one caller-triggered market-data refresh; no scheduling is implied."""
         if self.unit_of_work.daily_snapshots.get_by_date(trade_date):
