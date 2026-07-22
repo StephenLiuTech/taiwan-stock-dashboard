@@ -6,7 +6,10 @@ from decimal import Decimal
 
 from pams.application import (
     DemoDataResult,
+    HoldingChangePlan,
     PortfolioOverview,
+    TransactionList,
+    TransactionRecord,
     UpdateMode,
     UpdateResult,
     VerificationReport,
@@ -164,3 +167,96 @@ def format_demo_data_report(result: DemoDataResult) -> str:
             "python -m streamlit run app.py -- --database " f'"{result.database_path}"',
         ]
     )
+
+
+def format_holding_change_plan(plan: HoldingChangePlan) -> str:
+    """Render a holding rebuild plan and explicit applied state."""
+    lines = [
+        "PAMS Holding Rebuild",
+        "",
+        "Symbol | Action    | Old Qty | New Qty | Old Avg | New Avg",
+    ]
+    for item in plan.items:
+        lines.append(
+            f"{item.symbol:<6} | {item.action.value:<9} | "
+            f"{format_decimal(item.old_quantity) if item.old_quantity is not None else '-':>7} | "
+            f"{format_decimal(item.new_quantity):>7} | "
+            f"{format_decimal(item.old_average_cost) if item.old_average_cost is not None else '-':>7} | "
+            f"{format_decimal(item.new_average_cost):>7}"
+        )
+    lines.extend(
+        [
+            "",
+            f"CREATE: {len(plan.created_holdings)}",
+            f"UPDATE: {len(plan.updated_holdings)}",
+            f"UNCHANGED: {len(plan.unchanged_holdings)}",
+            f"CLOSE: {len(plan.closed_holdings)}",
+            f"Warnings: {len(plan.warnings)}",
+        ]
+    )
+    lines.extend(f"  - {warning}" for warning in plan.warnings)
+    lines.extend(
+        [
+            f"Projected Cost Basis: {format_decimal(plan.projected_total_cost_basis)}",
+            f"Applied: {'Yes' if plan.applied else 'No'}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def format_holding_change_plan_json(plan: HoldingChangePlan) -> str:
+    """Render a machine-readable holding rebuild plan."""
+    return json.dumps(
+        {
+            "created_holdings": [vars(item) for item in plan.created_holdings],
+            "updated_holdings": [vars(item) for item in plan.updated_holdings],
+            "unchanged_holdings": [vars(item) for item in plan.unchanged_holdings],
+            "closed_holdings": [vars(item) for item in plan.closed_holdings],
+            "warnings": plan.warnings,
+            "transaction_count": plan.transaction_count,
+            "projected_total_cost_basis": plan.projected_total_cost_basis,
+            "applied": plan.applied,
+        },
+        default=_json_default,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def format_transaction_record(record: TransactionRecord) -> str:
+    """Render confirmation for one recorded transaction."""
+    return "\n".join(
+        [
+            "PAMS Transaction Added",
+            f"ID: {record.id}",
+            f"Symbol: {record.symbol}",
+            f"Market: {record.market}",
+            f"Type: {record.transaction_type}",
+            f"Trade date: {record.trade_date}",
+            f"Quantity: {record.quantity}",
+            f"Price: {record.price}",
+        ]
+    )
+
+
+def format_transaction_list(result: TransactionList, *, json_output: bool) -> str:
+    """Render filtered transactions as text or lossless JSON."""
+    if json_output:
+        return json.dumps(
+            {"transactions": [vars(item) for item in result.transactions]},
+            default=_json_default,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    lines = [
+        "PAMS Transactions",
+        "",
+        "ID | Symbol | Market | Type | Trade Date | Quantity | Price",
+    ]
+    lines.extend(
+        f"{item.id} | {item.symbol} | {item.market} | {item.transaction_type} | "
+        f"{item.trade_date} | {item.quantity} | {item.price}"
+        for item in result.transactions
+    )
+    lines.append(f"Count: {len(result.transactions)}")
+    return "\n".join(lines)

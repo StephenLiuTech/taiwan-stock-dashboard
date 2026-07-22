@@ -85,8 +85,11 @@ class SQLiteHoldingRepository:
 class SQLiteTransactionRepository:
     """Persist transactions in SQLite."""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
         self.connection = connection
+        self.auto_commit = auto_commit
 
     def list_all(self) -> list[Transaction]:
         rows = self.connection.execute(
@@ -104,6 +107,38 @@ class SQLiteTransactionRepository:
         rows = self.connection.execute(
             "SELECT * FROM transactions WHERE symbol = ? ORDER BY trade_date, id",
             (symbol.strip().upper(),),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def exists(self, transaction_id: str) -> bool:
+        row = self.connection.execute(
+            "SELECT 1 FROM transactions WHERE id = ?", (transaction_id,)
+        ).fetchone()
+        return row is not None
+
+    def list_filtered(
+        self,
+        *,
+        symbol: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[Transaction]:
+        clauses: list[str] = []
+        parameters: list[str] = []
+        if symbol is not None:
+            clauses.append("symbol = ?")
+            parameters.append(symbol.strip().upper())
+        if start_date is not None:
+            clauses.append("trade_date >= ?")
+            parameters.append(start_date.isoformat())
+        if end_date is not None:
+            clauses.append("trade_date <= ?")
+            parameters.append(end_date.isoformat())
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self.connection.execute(
+            "SELECT * FROM transactions"
+            f"{where} ORDER BY trade_date, settlement_date, id",
+            parameters,
         ).fetchall()
         return [self._from_row(row) for row in rows]
 
@@ -131,13 +166,37 @@ class SQLiteTransactionRepository:
                 datetime.now().isoformat(),
             ),
         )
-        self.connection.commit()
+        if self.auto_commit:
+            self.connection.commit()
+
+    def add(self, transaction: Transaction) -> None:
+        self.connection.execute(
+            "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                transaction.id,
+                transaction.symbol,
+                transaction.market.value,
+                transaction.transaction_type.value,
+                transaction.trade_date.isoformat(),
+                transaction.settlement_date.isoformat(),
+                str(transaction.quantity),
+                str(transaction.price),
+                str(transaction.fees),
+                str(transaction.taxes),
+                transaction.currency.value,
+                transaction.notes,
+                datetime.now().isoformat(),
+            ),
+        )
+        if self.auto_commit:
+            self.connection.commit()
 
     def delete(self, transaction_id: str) -> None:
         self.connection.execute(
             "DELETE FROM transactions WHERE id = ?", (transaction_id,)
         )
-        self.connection.commit()
+        if self.auto_commit:
+            self.connection.commit()
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> Transaction:

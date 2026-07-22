@@ -24,7 +24,7 @@ Add explicit notification ports, dividend workflows, scheduling, consent, and de
 
 ## v0.7 — Transaction engine
 
-Sprint 1 adds deterministic moving weighted-average BUY/SELL accounting, realized P/L, immutable ledger results, and a protocol-driven dry-run holding projection use case. Zero positions are excluded from active holdings, and invalid histories fail explicitly. Bootstrap holdings remain the authoritative persisted portfolio; transaction-derived holding persistence is deferred to a later migration sprint.
+Sprint 1 adds deterministic moving weighted-average BUY/SELL accounting, realized P/L, immutable ledger results, and a protocol-driven dry-run holding projection use case. Sprint 2 adds manual transaction entry/listing, immutable holding change plans, migration warnings, and an explicit atomic apply boundary. Rebuild remains dry-run by default; bootstrap migration requires complete history or explicit unmatched-holding acknowledgement. Historical snapshots are never rewritten.
 
 ## v1.0 — Deployment-ready system
 

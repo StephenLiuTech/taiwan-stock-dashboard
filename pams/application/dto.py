@@ -23,6 +23,15 @@ class VerificationLevel(StrEnum):
     WARN = "WARN"
 
 
+class HoldingChangeAction(StrEnum):
+    """Supported persisted-holding reconciliation actions."""
+
+    CREATE = "CREATE"
+    UPDATE = "UPDATE"
+    UNCHANGED = "UNCHANGED"
+    CLOSE = "CLOSE"
+
+
 @dataclass(frozen=True)
 class MarketAvailabilitySummary:
     """Official latest-only market dates and their joint ingestibility."""
@@ -214,3 +223,83 @@ class RebuildHoldingsResult:
     total_realized_pnl: Decimal
     transaction_count: int
     persisted: bool = False
+
+
+@dataclass(frozen=True)
+class HoldingChangeItem:
+    """One projected difference between transaction and persisted holdings."""
+
+    symbol: str
+    action: HoldingChangeAction
+    old_quantity: Decimal | None
+    new_quantity: Decimal
+    old_average_cost: Decimal | None
+    new_average_cost: Decimal
+    old_cost_basis: Decimal | None
+    new_cost_basis: Decimal
+
+
+@dataclass(frozen=True)
+class HoldingChangePlan:
+    """Immutable preview or applied holding reconciliation plan."""
+
+    created_holdings: tuple[HoldingChangeItem, ...]
+    updated_holdings: tuple[HoldingChangeItem, ...]
+    unchanged_holdings: tuple[HoldingChangeItem, ...]
+    closed_holdings: tuple[HoldingChangeItem, ...]
+    warnings: tuple[str, ...]
+    transaction_count: int
+    projected_total_cost_basis: Decimal
+    applied: bool = False
+
+    @property
+    def items(self) -> tuple[HoldingChangeItem, ...]:
+        return (
+            self.created_holdings
+            + self.updated_holdings
+            + self.unchanged_holdings
+            + self.closed_holdings
+        )
+
+
+@dataclass(frozen=True)
+class AddTransactionCommand:
+    """Validated-boundary input for recording one transaction."""
+
+    symbol: str
+    market: str
+    transaction_type: str
+    trade_date: date
+    settlement_date: date
+    quantity: Decimal
+    price: Decimal
+    fees: Decimal
+    taxes: Decimal
+    currency: str
+    transaction_id: str | None = None
+    notes: str | None = None
+
+
+@dataclass(frozen=True)
+class TransactionRecord:
+    """Immutable application representation of a persisted transaction."""
+
+    id: str
+    symbol: str
+    market: str
+    transaction_type: str
+    trade_date: date
+    settlement_date: date
+    quantity: Decimal
+    price: Decimal
+    fees: Decimal
+    taxes: Decimal
+    currency: str
+    notes: str | None
+
+
+@dataclass(frozen=True)
+class TransactionList:
+    """Immutable filtered transaction query result."""
+
+    transactions: tuple[TransactionRecord, ...]

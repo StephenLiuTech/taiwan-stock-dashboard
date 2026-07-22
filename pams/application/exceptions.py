@@ -7,3 +7,19 @@ class ApplicationError(Exception):
 
 class ProductionDatabaseProtectedError(ApplicationError, ValueError):
     """Raised when demo generation targets the production database."""
+
+
+class HoldingRebuildError(ApplicationError, ValueError):
+    """Base class for holding rebuild safety failures."""
+
+
+class EmptyTransactionHistoryError(HoldingRebuildError):
+    """Raised when applying without any transaction history."""
+
+
+class UnmatchedHoldingsError(HoldingRebuildError):
+    """Raised when migration warnings have not been explicitly accepted."""
+
+
+class DuplicateTransactionError(ApplicationError, ValueError):
+    """Raised when a transaction ID already exists."""

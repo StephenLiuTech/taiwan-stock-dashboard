@@ -21,7 +21,10 @@ from market_data.providers import (
     TWSEProvider,
 )
 from pams.application import (
+    AddTransactionUseCase,
+    ApplyRebuiltHoldingsUseCase,
     DemoDataUseCase,
+    ListTransactionsUseCase,
     PortfolioHistoryUseCase,
     PortfolioStatusUseCase,
     UpdatePortfolioUseCase,
@@ -29,14 +32,16 @@ from pams.application import (
 )
 from pams.operations import OperationalStatusService, VerificationService
 from repositories import (
+    SQLiteHoldingRebuildUnitOfWork,
     SQLiteHoldingRepository,
     SQLiteLiabilityRepository,
     SQLiteMarketDataUnitOfWork,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
     SQLiteSnapshotRepository,
+    SQLiteTransactionRepository,
 )
-from services import BootstrapService
+from services import BootstrapService, HoldingProjectionMetadata
 
 
 @dataclass(frozen=True)
@@ -54,6 +59,9 @@ class ApplicationContext:
     portfolio_status: PortfolioStatusUseCase
     verify_system: VerifySystemUseCase
     portfolio_history: PortfolioHistoryUseCase | None = None
+    apply_rebuilt_holdings: ApplyRebuiltHoldingsUseCase | None = None
+    add_transaction: AddTransactionUseCase | None = None
+    list_transactions: ListTransactionsUseCase | None = None
 
 
 def resolve_database_path(override: Path | None = None) -> Path:
@@ -87,7 +95,11 @@ def compose_application(
 ) -> Iterator[ApplicationContext]:
     """Initialize storage, bootstrap data, and wire a market-data engine."""
     with _compose(
-        database_override, verbose=verbose, providers=providers, initialize=True
+        database_override,
+        verbose=verbose,
+        providers=providers,
+        initialize=True,
+        bootstrap=True,
     ) as context:
         yield context
 
@@ -101,7 +113,29 @@ def compose_operations(
 ) -> Iterator[ApplicationContext]:
     """Wire read-only operational commands without migration or bootstrap."""
     with _compose(
-        database_override, verbose=verbose, providers=providers, initialize=False
+        database_override,
+        verbose=verbose,
+        providers=providers,
+        initialize=False,
+        bootstrap=False,
+    ) as context:
+        yield context
+
+
+@contextmanager
+def compose_ledger_operations(
+    database_override: Path | None = None,
+    *,
+    verbose: bool = False,
+    providers: tuple[MarketDataProvider, ...] | None = None,
+) -> Iterator[ApplicationContext]:
+    """Initialize schema for ledger writes without bootstrapping holdings."""
+    with _compose(
+        database_override,
+        verbose=verbose,
+        providers=providers,
+        initialize=True,
+        bootstrap=False,
     ) as context:
         yield context
 
@@ -113,6 +147,7 @@ def _compose(
     verbose: bool,
     providers: tuple[MarketDataProvider, ...] | None,
     initialize: bool,
+    bootstrap: bool,
 ) -> Iterator[ApplicationContext]:
     logging_config = load_logging_config()
     settings = get_settings()
@@ -126,7 +161,7 @@ def _compose(
         liabilities = SQLiteLiabilityRepository(connection)
         seeded = (
             BootstrapService(connection, holdings, liabilities).initialize()
-            if initialize
+            if bootstrap
             else False
         )
         market_providers = providers or (TWSEProvider(), TPExProvider())
@@ -147,6 +182,13 @@ def _compose(
         snapshots = SQLiteSnapshotRepository(connection)
         position_snapshots = SQLitePositionSnapshotRepository(connection)
         quotes = SQLitePriceQuoteRepository(connection)
+        transaction_repository = SQLiteTransactionRepository(connection)
+        holding_metadata = {
+            (holding.symbol, holding.market, holding.currency): (
+                HoldingProjectionMetadata(holding.name, holding.holding_type)
+            )
+            for holding in holdings.list_all()
+        }
 
         def historical_engine(trade_date: date) -> MarketDataEngine:
             return MarketDataEngine(
@@ -180,6 +222,11 @@ def _compose(
             ),
             verify_system=VerifySystemUseCase(verification_service),
             portfolio_history=PortfolioHistoryUseCase(snapshots),
+            apply_rebuilt_holdings=ApplyRebuiltHoldingsUseCase(
+                SQLiteHoldingRebuildUnitOfWork(connection), holding_metadata
+            ),
+            add_transaction=AddTransactionUseCase(transaction_repository),
+            list_transactions=ListTransactionsUseCase(transaction_repository),
         )
     finally:
         connection.close()

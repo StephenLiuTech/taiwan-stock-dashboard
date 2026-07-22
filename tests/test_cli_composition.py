@@ -10,7 +10,11 @@ import pytest
 from config import get_settings
 from domain import Market
 from market_data.transport import JSONRecord
-from pams.composition import compose_application, resolve_database_path
+from pams.composition import (
+    compose_application,
+    compose_ledger_operations,
+    resolve_database_path,
+)
 from services import DuplicateSnapshotError
 
 
@@ -75,6 +79,17 @@ def test_override_database_path_and_bootstrap_are_idempotent(tmp_path: Path) -> 
         assert second.seeded is False
         assert row_count(second.connection, "holdings") == 5
         assert row_count(second.connection, "liabilities") == 2
+
+
+def test_ledger_composition_initializes_schema_without_bootstrap(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "ledger.db"
+    with compose_ledger_operations(database, providers=providers()) as application:
+        assert application.seeded is False
+        assert row_count(application.connection, "holdings") == 0
+        assert row_count(application.connection, "liabilities") == 0
+        assert row_count(application.connection, "transactions") == 0
 
 
 def test_dry_run_validates_but_does_not_write_market_tables(tmp_path: Path) -> None:

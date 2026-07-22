@@ -1,5 +1,6 @@
 """Domain-specific repository contracts."""
 
+from contextlib import AbstractContextManager
 from datetime import date
 from typing import Protocol
 
@@ -29,6 +30,15 @@ class TransactionRepository(Protocol):
     def list_all(self) -> list[Transaction]: ...
     def get_by_id(self, transaction_id: str) -> Transaction | None: ...
     def list_by_symbol(self, symbol: str) -> list[Transaction]: ...
+    def exists(self, transaction_id: str) -> bool: ...
+    def list_filtered(
+        self,
+        *,
+        symbol: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[Transaction]: ...
+    def add(self, transaction: Transaction) -> None: ...
     def upsert(self, transaction: Transaction) -> None: ...
     def delete(self, transaction_id: str) -> None: ...
 
@@ -75,3 +85,25 @@ class PositionSnapshotRepository(Protocol):
 
     def add_many(self, snapshots: list[PositionSnapshot]) -> None: ...
     def list_by_date(self, snapshot_date: date) -> list[PositionSnapshot]: ...
+
+
+class HoldingRebuildRepository(Protocol):
+    """Only holding operations permitted during a rebuild."""
+
+    def list_all(self) -> list[Holding]: ...
+    def upsert(self, holding: Holding) -> None: ...
+
+
+class TransactionLedgerRepository(Protocol):
+    """Read-only transaction access permitted during a rebuild."""
+
+    def list_all(self) -> list[Transaction]: ...
+
+
+class HoldingRebuildUnitOfWork(Protocol):
+    """Atomic repository boundary for applying a holding rebuild."""
+
+    holdings: HoldingRebuildRepository
+    transactions: TransactionLedgerRepository
+
+    def transaction(self) -> AbstractContextManager[None]: ...

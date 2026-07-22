@@ -48,13 +48,25 @@ transactions
 TransactionEngine
      |
      v
-Projected Holdings
+Holding Change Plan
      |
      v
-Portfolio Valuation
+Explicit Apply
+     |
+     v
+Persisted Holdings
+     |
+     v
+Future Portfolio Snapshots
 ```
 
 `RebuildHoldingsUseCase` reads transaction and holding repository protocols, invokes the transaction engine, supplies explicit holding metadata, and returns immutable projection DTOs. The v0.7 Sprint 1 workflow is dry-run only: it does not call holding write methods, and existing bootstrap holdings remain authoritative until a later persistence migration is designed.
+
+Sprint 2 adds `ApplyRebuiltHoldingsUseCase`. It always calculates an immutable change plan and defaults to preview. An apply requires an explicit caller flag, non-empty transaction history, and explicit acknowledgement of unmatched active bootstrap holdings. A dedicated unit of work exposes only transaction reads and holding writes, disables repository auto-commit, and commits all CREATE, UPDATE, and CLOSE operations together. CLOSE means zeroing quantity and average cost while retaining the row and its metadata; hard deletion is not part of the workflow.
+
+Transaction entry and filtered listing are separate protocol-driven application use cases. CLI parsing uses `Decimal` directly and domain `Transaction` validation remains authoritative. Neither the transaction engine nor application use cases import SQLite.
+
+Historical `daily_snapshots` and `position_snapshots` are outside the rebuild unit of work and are never rewritten. Rebuilt holdings affect portfolio valuation only when a future market-data update creates new snapshots.
 
 `MarketDataEngine.preview()` follows the same provider, date-verification, normalization, completeness, and valuation path but does not invoke quote or snapshot writes. CLI dry runs never use write-then-delete behavior.
 

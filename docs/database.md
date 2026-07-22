@@ -24,3 +24,9 @@ Decimals are stored as canonical text and reconstructed with `Decimal`, avoiding
 Version 2 adds normalized quotes and holding-grain position snapshots while preserving the version-1 aggregate `daily_snapshots` table. No rows are copied between snapshot grains. Future changes should use ordered transactional migrations.
 
 Version 3 adds the nullable pre-calculated `daily_return` field to position snapshots for reporting without duplicating valuation logic.
+
+## Transaction-derived holding rebuilds
+
+The `transactions` table is the ordered accounting source for the v0.7 ledger. A rebuild compares its active projection with `holdings` and classifies CREATE, UPDATE, UNCHANGED, and CLOSE actions before writing. Applying uses one explicit SQLite transaction with holding repository auto-commit disabled. CLOSE updates quantity and average cost to canonical zero values; rows are never deleted, preserving stable IDs and metadata.
+
+The rebuild transaction does not expose or write `daily_snapshots`, `position_snapshots`, or `price_quotes`. Those tables remain immutable historical observations. Rebuilt holdings become inputs only for snapshots created by later portfolio updates.
