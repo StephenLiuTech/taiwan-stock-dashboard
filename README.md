@@ -29,6 +29,24 @@ Copy `.env.example` to `.env` if environment overrides are needed.
 streamlit run app.py
 ```
 
+Run an explicit local market-data update:
+
+```bash
+python -m pams update --date 2026-07-22
+pams update --date 2026-07-22
+```
+
+Preview the complete fetch, source-date validation, normalization, and valuation without writing quotes or snapshots:
+
+```bash
+python -m pams update --date 2026-07-22 --dry-run
+python -m pams update --date 2026-07-22 --dry-run --json
+```
+
+Use `--database PATH` to override SQLite and `--verbose` for diagnostic tracebacks. Duplicate persisted dates remain protected; there is intentionally no force option.
+
+Exit codes: `0` success, `1` unexpected, `2` arguments/date, `3` provider data, `4` source-date freshness, `5` missing/suspended security, `6` duplicate snapshot, and `7` configuration/database.
+
 ## Testing
 
 ```bash
@@ -42,6 +60,7 @@ python -m compileall .
 
 ```text
 app.py          Streamlit composition root
+pams/           CLI parsing, composition, and terminal reporting
 config/         Environment and validated YAML configuration
 domain/         Framework-independent models and enums
 services/       Portfolio, snapshot, and bootstrap use cases

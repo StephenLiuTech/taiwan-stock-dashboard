@@ -97,4 +97,9 @@ class PortfolioService:
                 else Decimal("0")
             ),
             daily_value_change=market_value - previous_value,
+            daily_return=(
+                (quote.close_price - quote.previous_close) / quote.previous_close
+                if quote.previous_close
+                else None
+            ),
         )

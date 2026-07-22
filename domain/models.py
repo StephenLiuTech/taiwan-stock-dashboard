@@ -169,6 +169,7 @@ class PositionValuation(SymbolModel):
     unrealized_return: Decimal
     portfolio_weight: UnitDecimal
     daily_value_change: Decimal
+    daily_return: Decimal | None
 
 
 class PositionSnapshot(PositionValuation):

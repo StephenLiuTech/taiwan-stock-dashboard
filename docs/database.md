@@ -22,3 +22,5 @@ Decimals are stored as canonical text and reconstructed with `Decimal`, avoiding
 ## Schema versions
 
 Version 2 adds normalized quotes and holding-grain position snapshots while preserving the version-1 aggregate `daily_snapshots` table. No rows are copied between snapshot grains. Future changes should use ordered transactional migrations.
+
+Version 3 adds the nullable pre-calculated `daily_return` field to position snapshots for reporting without duplicating valuation logic.

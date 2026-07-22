@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS position_snapshots (
     cost_basis TEXT NOT NULL, market_value TEXT NOT NULL,
     unrealized_pnl TEXT NOT NULL, unrealized_return TEXT NOT NULL,
     portfolio_weight TEXT NOT NULL, daily_value_change TEXT NOT NULL,
+    daily_return TEXT,
     PRIMARY KEY (snapshot_date, holding_id),
     FOREIGN KEY (holding_id) REFERENCES holdings(id) ON DELETE RESTRICT
 );
@@ -74,6 +75,13 @@ CREATE INDEX IF NOT EXISTS ix_position_snapshots_symbol_date
 def initialize_schema(connection: sqlite3.Connection) -> None:
     """Create the initial schema and record its version idempotently."""
     connection.executescript(INITIAL_SCHEMA)
+    position_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(position_snapshots)")
+    }
+    if "daily_return" not in position_columns:
+        connection.execute(
+            "ALTER TABLE position_snapshots ADD COLUMN daily_return TEXT"
+        )
     for version in range(1, SCHEMA_VERSION + 1):
         connection.execute(
             """INSERT OR IGNORE INTO schema_version(version, applied_at)

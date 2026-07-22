@@ -10,7 +10,7 @@ Implemented foundation: official TWSE/TPEx provider boundaries, normalization, p
 
 ## v0.4 — Dashboard
 
-Build portfolio, position, liability, performance, and historical snapshot views on the existing service layer.
+Sprint 1 implements the local update CLI, JSON/human reporting, dry-run validation, explicit exit codes, and dependency composition. Dashboard views remain a later v0.4 sprint.
 
 ## v0.5 — Notifications and dividends
 

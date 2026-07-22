@@ -3,7 +3,14 @@
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
-from domain import DailySnapshot, Market, PositionSnapshot, PriceQuote
+from domain import (
+    DailySnapshot,
+    Holding,
+    Market,
+    PortfolioSummary,
+    PositionSnapshot,
+    PriceQuote,
+)
 from market_data.exceptions import (
     MarketDataError,
     ProviderDataError,
@@ -24,7 +31,10 @@ class MarketDataRefreshResult:
     """Result of one explicit end-of-day refresh."""
 
     quotes: tuple[PriceQuote, ...]
+    holdings: tuple[Holding, ...]
+    summary: PortfolioSummary
     snapshot: DailySnapshot
+    verified_source_date: date
 
 
 class MarketDataEngine:
@@ -52,6 +62,27 @@ class MarketDataEngine:
             raise DuplicateSnapshotError(
                 f"Snapshot already exists for {trade_date.isoformat()}"
             )
+        result = self.preview(trade_date)
+        position_snapshots = [
+            PositionSnapshot(snapshot_date=trade_date, **position.model_dump())
+            for position in result.summary.positions
+        ]
+        with self.unit_of_work.transaction():
+            self.unit_of_work.price_quotes.upsert_many(list(result.quotes))
+            snapshot = SnapshotService(self.unit_of_work.daily_snapshots).create(
+                result.summary
+            )
+            self.unit_of_work.position_snapshots.add_many(position_snapshots)
+        return MarketDataRefreshResult(
+            quotes=result.quotes,
+            holdings=result.holdings,
+            summary=result.summary,
+            snapshot=snapshot,
+            verified_source_date=result.verified_source_date,
+        )
+
+    def preview(self, trade_date: date) -> MarketDataRefreshResult:
+        """Run full validation and valuation without market-data persistence."""
         holdings = self.holdings.list_all()
         requested = {
             market: {holding.symbol for holding in holdings if holding.market == market}
@@ -108,14 +139,11 @@ class MarketDataEngine:
         summary = self.portfolio.value_portfolio(
             holdings, quotes, self.liabilities.list_all(), trade_date
         )
-        position_snapshots = [
-            PositionSnapshot(snapshot_date=trade_date, **position.model_dump())
-            for position in summary.positions
-        ]
-        with self.unit_of_work.transaction():
-            self.unit_of_work.price_quotes.upsert_many(quotes)
-            snapshot = SnapshotService(self.unit_of_work.daily_snapshots).create(
-                summary
-            )
-            self.unit_of_work.position_snapshots.add_many(position_snapshots)
-        return MarketDataRefreshResult(tuple(quotes), snapshot)
+        snapshot = SnapshotService(self.unit_of_work.daily_snapshots).preview(summary)
+        return MarketDataRefreshResult(
+            quotes=tuple(quotes),
+            holdings=tuple(holdings),
+            summary=summary,
+            snapshot=snapshot,
+            verified_source_date=trade_date,
+        )

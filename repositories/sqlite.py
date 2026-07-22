@@ -438,7 +438,7 @@ class SQLitePositionSnapshotRepository:
     def add_many(self, snapshots: list[PositionSnapshot]) -> None:
         self.connection.executemany(
             """INSERT INTO position_snapshots VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (
                     item.snapshot_date.isoformat(),
@@ -453,6 +453,7 @@ class SQLitePositionSnapshotRepository:
                     str(item.unrealized_return),
                     str(item.portfolio_weight),
                     str(item.daily_value_change),
+                    str(item.daily_return) if item.daily_return is not None else None,
                 )
                 for item in snapshots
             ],
@@ -484,4 +485,6 @@ class SQLitePositionSnapshotRepository:
             "daily_value_change",
         ):
             values[key] = _decimal(values[key])
+        if values["daily_return"] is not None:
+            values["daily_return"] = _decimal(values["daily_return"])
         return PositionSnapshot.model_validate(values)

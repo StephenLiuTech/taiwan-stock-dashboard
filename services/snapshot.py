@@ -23,6 +23,12 @@ class SnapshotService:
                 f"Snapshot already exists for {summary.valuation_date.isoformat()}"
             )
 
+        snapshot = self.preview(summary)
+        self.repository.add(snapshot)
+        return snapshot
+
+    def preview(self, summary: PortfolioSummary) -> DailySnapshot:
+        """Calculate a snapshot without persisting it."""
         highest = self.repository.get_highest()
         previous_high = highest.high_water_mark if highest else summary.net_asset_value
         high_water_mark = max(previous_high, summary.net_asset_value)
@@ -31,7 +37,7 @@ class SnapshotService:
             if high_water_mark > 0
             else Decimal("0")
         )
-        snapshot = DailySnapshot(
+        return DailySnapshot(
             snapshot_date=summary.valuation_date,
             total_market_value=summary.total_market_value,
             total_cost_basis=summary.total_cost_basis,
@@ -42,5 +48,3 @@ class SnapshotService:
             high_water_mark=high_water_mark,
             drawdown=drawdown,
         )
-        self.repository.add(snapshot)
-        return snapshot
