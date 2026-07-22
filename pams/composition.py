@@ -13,6 +13,11 @@ from database import initialize_database, initialize_schema
 from market_calendar import MarketCalendar, OfficialMarketDateProvider
 from market_data.engine import MarketDataEngine
 from market_data.providers import MarketDataProvider, TPExProvider, TWSEProvider
+from pams.application import (
+    PortfolioStatusUseCase,
+    UpdatePortfolioUseCase,
+    VerifySystemUseCase,
+)
 from pams.operations import OperationalStatusService, VerificationService
 from repositories import (
     SQLiteHoldingRepository,
@@ -33,6 +38,9 @@ class ApplicationContext:
     calendar: MarketCalendar
     status: OperationalStatusService
     verification: VerificationService
+    update_portfolio: UpdatePortfolioUseCase
+    portfolio_status: PortfolioStatusUseCase
+    verify_system: VerifySystemUseCase
 
 
 def resolve_database_path(override: Path | None = None) -> Path:
@@ -114,16 +122,21 @@ def _compose(
             OfficialMarketDateProvider(provider) for provider in market_providers
         )
         calendar = MarketCalendar(date_providers)
+        status_service = OperationalStatusService(connection, database_path)
+        verification_service = VerificationService(
+            connection, database_path, date_providers, calendar, engine
+        )
         yield ApplicationContext(
-            connection,
-            engine,
-            database_path,
-            seeded,
-            calendar,
-            OperationalStatusService(connection, database_path),
-            VerificationService(
-                connection, database_path, date_providers, calendar, engine
-            ),
+            connection=connection,
+            engine=engine,
+            database_path=database_path,
+            seeded=seeded,
+            calendar=calendar,
+            status=status_service,
+            verification=verification_service,
+            update_portfolio=UpdatePortfolioUseCase(calendar, engine, database_path),
+            portfolio_status=PortfolioStatusUseCase(calendar, status_service),
+            verify_system=VerifySystemUseCase(verification_service),
         )
     finally:
         connection.close()

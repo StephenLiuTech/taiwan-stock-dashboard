@@ -73,7 +73,7 @@ python -m compileall .
 
 ```text
 app.py          Streamlit composition root
-pams/           CLI parsing, composition, and terminal reporting
+pams/           Application use cases/DTOs, CLI, composition, and reporting
 market_calendar/ Official cross-market availability-date resolution
 config/         Environment and validated YAML configuration
 domain/         Framework-independent models and enums

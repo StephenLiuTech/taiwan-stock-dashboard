@@ -20,8 +20,6 @@ from pams.composition import compose_application, compose_operations
 from pams.reporting import (
     format_human_report,
     format_json_report,
-    format_no_update_json,
-    format_no_update_report,
     format_status_report,
     format_verification_report,
 )
@@ -93,50 +91,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         with composer(arguments.database, verbose=arguments.verbose) as application:
             if arguments.command == "status":
-                availability = application.calendar.market_availability()
-                print(format_status_report(application.status.read(availability)))
+                print(format_status_report(application.portfolio_status.execute()))
                 return int(ExitCode.SUCCESS)
             if arguments.command == "verify":
-                verification = application.verification.run()
+                verification = application.verify_system.execute()
                 print(format_verification_report(verification))
                 return int(
                     ExitCode.VERIFICATION_FAILED
                     if verification.failed
                     else ExitCode.SUCCESS
                 )
-            requested_date = arguments.date
-            if requested_date is None:
-                availability = application.calendar.market_availability()
-                requested_date = availability.commonly_ingestible_date
-                if requested_date is None:
-                    report = (
-                        format_no_update_json(availability, application.database_path)
-                        if arguments.json_output
-                        else format_no_update_report(
-                            availability, application.database_path
-                        )
-                    )
-                    print(report)
-                    return int(ExitCode.SUCCESS)
-            result = (
-                application.engine.preview(requested_date)
-                if arguments.dry_run
-                else application.engine.refresh(requested_date)
+            result = application.update_portfolio.execute(
+                arguments.date, dry_run=arguments.dry_run
             )
             report = (
-                format_json_report(
-                    result,
-                    requested_date,
-                    application.database_path,
-                    dry_run=arguments.dry_run,
-                )
+                format_json_report(result)
                 if arguments.json_output
-                else format_human_report(
-                    result,
-                    requested_date,
-                    application.database_path,
-                    dry_run=arguments.dry_run,
-                )
+                else format_human_report(result)
             )
             print(report)
             return int(ExitCode.SUCCESS)

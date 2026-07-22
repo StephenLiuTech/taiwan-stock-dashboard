@@ -23,6 +23,11 @@ from market_data import (
     SymbolNotFoundError,
 )
 from market_data.engine import MarketDataRefreshResult
+from pams.application import (
+    PortfolioStatusUseCase,
+    UpdatePortfolioUseCase,
+    VerifySystemUseCase,
+)
 from pams.cli import ExitCode, _error_exit_code, main
 from pams.composition import ApplicationContext
 from pams.operations import (
@@ -189,13 +194,25 @@ def install_fake_composition(
         connection = sqlite3.connect(":memory:")
         try:
             yield ApplicationContext(
-                connection,
-                engine,  # type: ignore[arg-type]
-                database_override or Path("configured.db"),
-                False,
-                calendar or FakeCalendar(),  # type: ignore[arg-type]
-                FakeStatusService(),  # type: ignore[arg-type]
-                FakeVerificationService(),  # type: ignore[arg-type]
+                connection=connection,
+                engine=engine,  # type: ignore[arg-type]
+                database_path=database_override or Path("configured.db"),
+                seeded=False,
+                calendar=calendar or FakeCalendar(),  # type: ignore[arg-type]
+                status=FakeStatusService(),  # type: ignore[arg-type]
+                verification=FakeVerificationService(),  # type: ignore[arg-type]
+                update_portfolio=UpdatePortfolioUseCase(
+                    calendar or FakeCalendar(),  # type: ignore[arg-type]
+                    engine,  # type: ignore[arg-type]
+                    database_override or Path("configured.db"),
+                ),
+                portfolio_status=PortfolioStatusUseCase(
+                    calendar or FakeCalendar(),  # type: ignore[arg-type]
+                    FakeStatusService(),  # type: ignore[arg-type]
+                ),
+                verify_system=VerifySystemUseCase(
+                    FakeVerificationService()  # type: ignore[arg-type]
+                ),
             )
         finally:
             connection.close()
@@ -379,13 +396,22 @@ def test_verify_failed_returns_exit_eight(
         connection = sqlite3.connect(":memory:")
         try:
             yield ApplicationContext(
-                connection,
-                FakeEngine(),  # type: ignore[arg-type]
-                Path("configured.db"),
-                False,
-                FakeCalendar(),  # type: ignore[arg-type]
-                FakeStatusService(),  # type: ignore[arg-type]
-                FakeVerificationService(failed=True),  # type: ignore[arg-type]
+                connection=connection,
+                engine=FakeEngine(),  # type: ignore[arg-type]
+                database_path=Path("configured.db"),
+                seeded=False,
+                calendar=FakeCalendar(),  # type: ignore[arg-type]
+                status=FakeStatusService(),  # type: ignore[arg-type]
+                verification=FakeVerificationService(failed=True),  # type: ignore[arg-type]
+                update_portfolio=UpdatePortfolioUseCase(
+                    FakeCalendar(), FakeEngine(), Path("configured.db")  # type: ignore[arg-type]
+                ),
+                portfolio_status=PortfolioStatusUseCase(
+                    FakeCalendar(), FakeStatusService()  # type: ignore[arg-type]
+                ),
+                verify_system=VerifySystemUseCase(
+                    FakeVerificationService(failed=True)  # type: ignore[arg-type]
+                ),
             )
         finally:
             connection.close()
@@ -431,20 +457,20 @@ def test_reporting_formats_decimals_and_percentages() -> None:
 
 
 def test_human_report_handles_missing_previous_close_and_stable_order() -> None:
-    report = format_human_report(
-        sample_result(), date(2026, 7, 22), Path("test.db"), dry_run=True
-    )
+    result = UpdatePortfolioUseCase(
+        FakeCalendar(), FakeEngine(), Path("test.db")  # type: ignore[arg-type]
+    ).execute(date(2026, 7, 22), dry_run=True)
+    report = format_human_report(result)
     assert report.index("2330 TSMC") < report.index("8299 Phison")
     assert "100.00 / N/A" in report
     assert "Mode: dry-run" in report
 
 
 def test_json_report_serializes_all_decimals_as_strings() -> None:
-    payload = json.loads(
-        format_json_report(
-            sample_result(), date(2026, 7, 22), Path("test.db"), dry_run=False
-        )
-    )
+    result = UpdatePortfolioUseCase(
+        FakeCalendar(), FakeEngine(), Path("test.db")  # type: ignore[arg-type]
+    ).execute(date(2026, 7, 22))
+    payload = json.loads(format_json_report(result))
     assert payload["positions"][0]["average_cost"] == "80"
     assert payload["positions"][0]["portfolio_weight"] == str(Decimal("5") / 6)
     assert payload["mode"] == "updated"

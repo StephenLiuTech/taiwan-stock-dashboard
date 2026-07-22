@@ -37,6 +37,7 @@ packages = [
     "market_data",
     "market_calendar",
     "pams",
+    "pams.application",
     "repositories",
     "services",
 ]
