@@ -94,6 +94,22 @@ python -m pams portfolio valuate
 python -m pams portfolio valuate --json
 ```
 
+### Portfolio analytics
+
+Analyze all aggregate daily snapshots or an inclusive requested period:
+
+```bash
+python -m pams analytics portfolio
+python -m pams analytics portfolio --from 2026-01-01
+python -m pams analytics portfolio --from 2026-01-01 --to 2026-07-22
+python -m pams analytics portfolio --json
+```
+
+The application layer loads `DailySnapshot` history and delegates every
+performance calculation to the pure `AnalyticsEngine`. This foundation does
+not adjust for cash flows and does not implement TWR, MWR, IRR, volatility, or
+benchmark comparison.
+
 ### Daily reports
 
 Markdown is printed to standard output by default. Reports can also be written
