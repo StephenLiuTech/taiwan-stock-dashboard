@@ -13,6 +13,7 @@ from pams.application.dto import (
     UpdateMode,
     UpdateResult,
 )
+from repositories import SnapshotRepository
 
 
 def _availability_dto(value: MarketAvailability) -> MarketAvailabilitySummary:
@@ -32,34 +33,47 @@ class UpdatePortfolioUseCase:
         engine: MarketDataEngine,
         database_path: Path,
         historical_engine_factory: Callable[[date], MarketDataEngine] | None = None,
+        snapshot_repository: SnapshotRepository | None = None,
     ) -> None:
         self.calendar = calendar
         self.engine = engine
         self.database_path = database_path
         self.historical_engine_factory = historical_engine_factory
+        self.snapshot_repository = snapshot_repository
 
     def execute(
         self, requested_date: date | None = None, *, dry_run: bool = False
     ) -> UpdateResult:
-        """Run an explicit or latest commonly ingestible update."""
+        """Run an explicit update or the newest jointly available market date."""
         automatic = requested_date is None
         availability = None
+        sources_synchronized = True
         if automatic:
             source_availability = self.calendar.market_availability()
             availability = _availability_dto(source_availability)
             requested_date = source_availability.commonly_ingestible_date
-            if requested_date is None:
-                return UpdateResult(
-                    mode=UpdateMode.SOURCES_UNSYNCHRONIZED,
-                    database_path=self.database_path,
-                    requested_date=None,
-                    verified_source_date=None,
-                    availability=availability,
-                )
+            sources_synchronized = source_availability.synchronized
 
+        if (
+            self.snapshot_repository is not None
+            and self.snapshot_repository.get_by_date(requested_date) is not None
+        ):
+            return UpdateResult(
+                mode=UpdateMode.SNAPSHOT_EXISTS,
+                database_path=self.database_path,
+                requested_date=requested_date,
+                verified_source_date=None,
+                availability=availability,
+            )
+
+        needs_historical_provider = not automatic or not sources_synchronized
+        if needs_historical_provider and self.historical_engine_factory is None:
+            raise ValueError(
+                "Historical market-data providers are required for the requested date"
+            )
         selected_engine = (
             self.historical_engine_factory(requested_date)
-            if self.historical_engine_factory is not None and not automatic
+            if needs_historical_provider
             else self.engine
         )
         engine_result = (

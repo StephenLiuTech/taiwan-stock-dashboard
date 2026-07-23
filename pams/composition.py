@@ -220,7 +220,11 @@ def _compose(
             status=status_service,
             verification=verification_service,
             update_portfolio=UpdatePortfolioUseCase(
-                calendar, engine, database_path, historical_engine
+                calendar,
+                engine,
+                database_path,
+                historical_engine,
+                snapshots,
             ),
             portfolio_status=PortfolioStatusUseCase(
                 calendar,

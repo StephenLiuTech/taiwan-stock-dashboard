@@ -29,6 +29,15 @@ def format_percentage(value: Decimal | None) -> str:
 
 def format_human_report(result: UpdateResult) -> str:
     """Render one update result without business calculations."""
+    if result.mode is UpdateMode.SNAPSHOT_EXISTS:
+        return "\n".join(
+            [
+                "PAMS Market Data Update",
+                "No update performed: snapshot already exists for "
+                f"{result.requested_date}",
+                f"Database: {result.database_path}",
+            ]
+        )
     if result.mode is UpdateMode.SOURCES_UNSYNCHRONIZED:
         availability = result.availability
         assert availability is not None

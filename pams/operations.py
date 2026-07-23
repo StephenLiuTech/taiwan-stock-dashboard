@@ -201,12 +201,13 @@ class VerificationService:
             return VerificationCheck(
                 "Market Calendar",
                 CheckLevel.WARN,
-                "automatic ingestion is waiting for synchronization "
+                "latest publications differ; automatic ingestion will use "
+                f"historical providers for {availability.commonly_ingestible_date} "
                 f"(TWSE={availability.twse_date.isoformat()}, "
                 f"TPEx={availability.tpex_date.isoformat()})",
             )
         return VerificationCheck(
             "Market Calendar",
             CheckLevel.PASS,
-            f"commonly ingestible {availability.twse_date.isoformat()}",
+            f"commonly ingestible {availability.commonly_ingestible_date.isoformat()}",
         )

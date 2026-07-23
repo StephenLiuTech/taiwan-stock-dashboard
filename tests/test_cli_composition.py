@@ -102,15 +102,23 @@ def test_dry_run_validates_but_does_not_write_market_tables(tmp_path: Path) -> N
         assert row_count(application.connection, "position_snapshots") == 0
 
 
-def test_persisted_update_writes_all_grains_and_protects_duplicate(
+def test_application_update_is_idempotent_and_engine_protects_duplicate(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "persisted.db"
     with compose_application(database, providers=providers()) as application:
-        application.engine.refresh(date(2026, 7, 22))
+        first = application.update_portfolio.execute()
+        assert first.mode.value == "updated"
         assert row_count(application.connection, "price_quotes") == 5
         assert row_count(application.connection, "daily_snapshots") == 1
         assert row_count(application.connection, "position_snapshots") == 5
+
+        repeated = application.update_portfolio.execute()
+        assert repeated.mode.value == "no_update_snapshot_exists"
+        assert row_count(application.connection, "price_quotes") == 5
+        assert row_count(application.connection, "daily_snapshots") == 1
+        assert row_count(application.connection, "position_snapshots") == 5
+
         with pytest.raises(DuplicateSnapshotError):
             application.engine.refresh(date(2026, 7, 22))
 
@@ -187,4 +195,4 @@ def test_verification_warns_when_official_market_dates_disagree(
         )
         assert report.failed is False
         assert calendar.level.value == "WARN"
-        assert "waiting for synchronization" in calendar.detail
+        assert "historical providers for 2026-07-21" in calendar.detail

@@ -10,7 +10,7 @@ from market_data.exceptions import ProviderDataError
 
 @dataclass(frozen=True)
 class MarketAvailability:
-    """Latest official dates and their current joint ingestibility."""
+    """Latest official dates and the newest date both markets can provide."""
 
     twse_date: date
     tpex_date: date
@@ -20,12 +20,13 @@ class MarketAvailability:
         return self.twse_date == self.tpex_date
 
     @property
-    def commonly_ingestible_date(self) -> date | None:
-        return self.twse_date if self.synchronized else None
+    def commonly_ingestible_date(self) -> date:
+        """Return the newest date jointly available through current providers."""
+        return min(self.twse_date, self.tpex_date)
 
 
 class MarketDataNotSynchronizedError(RuntimeError):
-    """Both latest-only sources are valid but expose different dates."""
+    """Legacy staggered-publication error retained for API compatibility."""
 
     def __init__(self, availability: MarketAvailability) -> None:
         self.availability = availability
@@ -43,7 +44,7 @@ class MarketCalendar:
         self.providers = {provider.market: provider for provider in providers}
 
     def market_availability(self) -> MarketAvailability:
-        """Return each latest source date without claiming common availability."""
+        """Return each latest source date and derive their common upper bound."""
         required = {Market.TWSE, Market.TPEX}
         missing = required - self.providers.keys()
         if missing:
@@ -55,12 +56,9 @@ class MarketCalendar:
         )
 
     def latest_commonly_ingestible_date(self) -> date:
-        """Return a date only when both configured latest-only sources match."""
-        availability = self.market_availability()
-        if availability.commonly_ingestible_date is None:
-            raise MarketDataNotSynchronizedError(availability)
-        return availability.commonly_ingestible_date
+        """Return the newest date available from both configured markets."""
+        return self.market_availability().commonly_ingestible_date
 
     def latest_available_trading_date(self) -> date:
-        """Compatibility alias for the strict common-ingestibility contract."""
+        """Compatibility alias for the joint-availability contract."""
         return self.latest_commonly_ingestible_date()

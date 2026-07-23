@@ -213,17 +213,25 @@ of substituting zero performance.
 
 ### Market-data updates
 
-Automatic mode uses latest-only providers and proceeds only when TWSE and TPEx
-publish the same official date:
+Automatic mode reads each market's latest official date and selects the newer
+date available from both markets:
+
+```text
+min(TWSE latest date, TPEx latest date)
+```
+
+When the dates match, PAMS uses the latest providers. When publication is
+staggered, it uses the existing date-bound historical providers for the common
+date:
 
 ```bash
 python -m pams update
 python -m pams update --dry-run
 ```
 
-If publication is staggered, PAMS returns a successful
-`no_update_sources_unsynchronized` outcome without ingestion or persistence.
-It never guesses weekends or holidays.
+The Market Data Engine still requires both fetched source dates to exactly
+match the selected trade date. PAMS never guesses weekends or holidays and
+never relabels prices.
 
 Manual mode uses official historical date-query providers:
 

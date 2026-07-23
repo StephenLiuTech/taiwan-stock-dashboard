@@ -104,10 +104,11 @@ MarketDataEngine
 Quotes + aggregate snapshot + position snapshots
 ```
 
-Automatic updates use latest-only providers. `MarketCalendar` reads the
-official date exposed by each provider; a commonly ingestible dataset exists
-only when TWSE and TPEx expose the same date. Staggered publication produces a
-normal no-update result before the engine is called.
+For automatic updates, `MarketCalendar` reads the latest official date exposed
+by each market and selects `min(TWSE, TPEx)` as the newest date jointly
+available. Matching latest dates use latest providers. Staggered publication
+uses the existing date-bound historical providers for the selected common
+date. `synchronized` remains available as informational publication state.
 
 Manual updates use date-bound historical providers. Both source dates must
 match the requested date. The engine rejects wrong dates, mixed dates,

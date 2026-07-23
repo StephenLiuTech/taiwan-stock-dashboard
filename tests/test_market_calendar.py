@@ -8,7 +8,6 @@ import pytest
 from domain import Market
 from market_calendar import (
     MarketCalendar,
-    MarketDataNotSynchronizedError,
     OfficialMarketDateProvider,
 )
 from market_data import ProviderDataError, SourceDateError
@@ -31,7 +30,7 @@ def date_provider(market: Market, source_date: str) -> OfficialMarketDateProvide
     )
 
 
-def test_calendar_distinguishes_unsynchronized_latest_dates() -> None:
+def test_calendar_uses_twse_date_when_twse_is_earlier() -> None:
     calendar = MarketCalendar(
         (
             date_provider(Market.TWSE, "1150721"),
@@ -41,9 +40,22 @@ def test_calendar_distinguishes_unsynchronized_latest_dates() -> None:
     availability = calendar.market_availability()
     assert availability.twse_date == date(2026, 7, 21)
     assert availability.tpex_date == date(2026, 7, 22)
-    assert availability.commonly_ingestible_date is None
-    with pytest.raises(MarketDataNotSynchronizedError):
-        calendar.latest_commonly_ingestible_date()
+    assert availability.synchronized is False
+    assert availability.commonly_ingestible_date == date(2026, 7, 21)
+    assert calendar.latest_commonly_ingestible_date() == date(2026, 7, 21)
+
+
+def test_calendar_uses_tpex_date_when_tpex_is_earlier() -> None:
+    calendar = MarketCalendar(
+        (
+            date_provider(Market.TWSE, "1150723"),
+            date_provider(Market.TPEX, "1150722"),
+        )
+    )
+    availability = calendar.market_availability()
+    assert availability.synchronized is False
+    assert availability.commonly_ingestible_date == date(2026, 7, 22)
+    assert calendar.latest_available_trading_date() == date(2026, 7, 22)
 
 
 def test_calendar_returns_matching_market_date() -> None:
@@ -53,6 +65,9 @@ def test_calendar_returns_matching_market_date() -> None:
             date_provider(Market.TPEX, "1150722"),
         )
     )
+    availability = calendar.market_availability()
+    assert availability.synchronized is True
+    assert availability.commonly_ingestible_date == date(2026, 7, 22)
     assert calendar.latest_commonly_ingestible_date() == date(2026, 7, 22)
 
 

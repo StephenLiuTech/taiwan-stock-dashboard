@@ -142,6 +142,14 @@ class FakeCalendar:
         return self.availability
 
 
+class FakeSnapshots:
+    def __init__(self, existing_date: date | None = None) -> None:
+        self.existing_date = existing_date
+
+    def get_by_date(self, snapshot_date: date) -> object | None:
+        return object() if snapshot_date == self.existing_date else None
+
+
 class FakeStatusService:
     def read(self, availability: MarketAvailability) -> OperationalStatus:
         return OperationalStatus(
@@ -180,6 +188,7 @@ def install_fake_composition(
     engine: FakeEngine,
     captured: dict[str, object] | None = None,
     calendar: FakeCalendar | None = None,
+    existing_snapshot_date: date | None = None,
 ) -> None:
     @contextmanager
     def fake_compose(
@@ -206,6 +215,8 @@ def install_fake_composition(
                     calendar or FakeCalendar(),  # type: ignore[arg-type]
                     engine,  # type: ignore[arg-type]
                     database_override or Path("configured.db"),
+                    lambda _: engine,  # type: ignore[arg-type]
+                    FakeSnapshots(existing_snapshot_date),  # type: ignore[arg-type]
                 ),
                 portfolio_status=PortfolioStatusUseCase(
                     calendar or FakeCalendar(),  # type: ignore[arg-type]
@@ -258,6 +269,21 @@ def test_update_without_date_uses_market_calendar(
     assert engine.preview_called is True
 
 
+def test_repeated_automatic_update_exits_successfully_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    engine = FakeEngine()
+    install_fake_composition(
+        monkeypatch, engine, existing_snapshot_date=date(2026, 7, 22)
+    )
+    assert main(["update", "--verbose"]) == ExitCode.SUCCESS
+    captured = capsys.readouterr()
+    assert "No update performed: snapshot already exists for 2026-07-22" in captured.out
+    assert "Traceback" not in captured.err
+    assert engine.refresh_called is False
+    assert engine.preview_called is False
+
+
 @pytest.mark.parametrize(
     ("twse_date", "tpex_date"),
     [
@@ -265,7 +291,7 @@ def test_update_without_date_uses_market_calendar(
         (date(2026, 7, 22), date(2026, 7, 21)),
     ],
 )
-def test_unsynchronized_automatic_update_is_successful_no_op(
+def test_unsynchronized_automatic_update_uses_joint_date(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     twse_date: date,
@@ -277,14 +303,12 @@ def test_unsynchronized_automatic_update_is_successful_no_op(
     )
     assert main(["update"]) == ExitCode.SUCCESS
     output = capsys.readouterr().out
-    assert "no update performed" in output
-    assert f"TWSE latest source date: {twse_date}" in output
-    assert f"TPEx latest source date: {tpex_date}" in output
+    assert f"Requested trade date: {min(twse_date, tpex_date)}" in output
     assert engine.preview_called is False
-    assert engine.refresh_called is False
+    assert engine.refresh_called is True
 
 
-def test_unsynchronized_automatic_update_json_output(
+def test_unsynchronized_automatic_update_json_uses_joint_date(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     engine = FakeEngine()
@@ -295,9 +319,10 @@ def test_unsynchronized_automatic_update_json_output(
     )
     assert main(["update", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["mode"] == "no_update_sources_unsynchronized"
-    assert payload["commonly_ingestible_date"] is None
-    assert engine.refresh_called is False
+    assert payload["mode"] == "updated"
+    assert payload["requested_date"] == "2026-07-21"
+    assert payload["commonly_ingestible_date"] == "2026-07-21"
+    assert engine.refresh_called is True
 
 
 def test_manual_requested_date_mismatch_remains_strict(
@@ -381,7 +406,7 @@ def test_status_exposes_unsynchronized_source_dates(
     output = capsys.readouterr().out
     assert "TWSE latest source date: 2026-07-21" in output
     assert "TPEx latest source date: 2026-07-22" in output
-    assert "Commonly ingestible dataset: not currently available" in output
+    assert "Commonly ingestible dataset: 2026-07-21" in output
 
 
 def test_verify_failed_returns_exit_eight(
@@ -458,8 +483,12 @@ def test_reporting_formats_decimals_and_percentages() -> None:
 
 
 def test_human_report_handles_missing_previous_close_and_stable_order() -> None:
+    engine = FakeEngine()
     result = UpdatePortfolioUseCase(
-        FakeCalendar(), FakeEngine(), Path("test.db")  # type: ignore[arg-type]
+        FakeCalendar(),
+        engine,  # type: ignore[arg-type]
+        Path("test.db"),
+        lambda _: engine,  # type: ignore[arg-type]
     ).execute(date(2026, 7, 22), dry_run=True)
     report = format_human_report(result)
     assert report.index("2330 TSMC") < report.index("8299 Phison")
@@ -468,8 +497,12 @@ def test_human_report_handles_missing_previous_close_and_stable_order() -> None:
 
 
 def test_json_report_serializes_all_decimals_as_strings() -> None:
+    engine = FakeEngine()
     result = UpdatePortfolioUseCase(
-        FakeCalendar(), FakeEngine(), Path("test.db")  # type: ignore[arg-type]
+        FakeCalendar(),
+        engine,  # type: ignore[arg-type]
+        Path("test.db"),
+        lambda _: engine,  # type: ignore[arg-type]
     ).execute(date(2026, 7, 22))
     payload = json.loads(format_json_report(result))
     assert payload["positions"][0]["average_cost"] == "80"
@@ -478,8 +511,12 @@ def test_json_report_serializes_all_decimals_as_strings() -> None:
 
 
 def test_json_report_is_ascii_safe_for_windows_consoles() -> None:
+    engine = FakeEngine()
     result = UpdatePortfolioUseCase(
-        FakeCalendar(), FakeEngine(), Path("test.db")  # type: ignore[arg-type]
+        FakeCalendar(),
+        engine,  # type: ignore[arg-type]
+        Path("test.db"),
+        lambda _: engine,  # type: ignore[arg-type]
     ).execute(date(2026, 7, 22))
     localized = replace(
         result,

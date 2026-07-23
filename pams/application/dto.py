@@ -16,6 +16,7 @@ class UpdateMode(StrEnum):
 
     UPDATED = "updated"
     DRY_RUN = "dry_run"
+    SNAPSHOT_EXISTS = "no_update_snapshot_exists"
     SOURCES_UNSYNCHRONIZED = "no_update_sources_unsynchronized"
 
 
@@ -38,7 +39,7 @@ class HoldingChangeAction(StrEnum):
 
 @dataclass(frozen=True)
 class MarketAvailabilitySummary:
-    """Official latest-only market dates and their joint ingestibility."""
+    """Official latest dates, synchronization, and joint ingestibility."""
 
     twse_latest_date: date | None
     tpex_latest_date: date | None
@@ -46,7 +47,10 @@ class MarketAvailabilitySummary:
 
     @property
     def synchronized(self) -> bool:
-        return self.commonly_ingestible_date is not None
+        return (
+            self.source_dates_available
+            and self.twse_latest_date == self.tpex_latest_date
+        )
 
     @property
     def source_dates_available(self) -> bool:
