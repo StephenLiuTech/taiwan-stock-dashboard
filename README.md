@@ -19,6 +19,7 @@ Current release: **v0.8.0**
 - Atomic SQLite persistence for quotes and portfolio snapshots
 - Dashboard 2.0 with summary, allocation, winners, losers, and sortable holdings
 - Deterministic Markdown and standalone semantic HTML daily reports
+- Pure snapshot-based basic performance analytics foundation
 - Operational `status`, `verify`, dry-run, and JSON CLI modes
 - Isolated synthetic demo-data workflow
 

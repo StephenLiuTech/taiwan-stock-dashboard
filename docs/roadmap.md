@@ -11,6 +11,7 @@
 | v0.6 | Deferred | Notifications and dividend workflow expansion |
 | v0.7 | Complete | Transaction engine, ledger CLI, atomic holding rebuild |
 | v0.8.0 | Release-ready | Valuation Engine, Dashboard 2.0, Daily Report Engine |
+| v0.9 | In development | Deterministic snapshot analytics foundation |
 
 ## v0.8.0 — Portfolio valuation and reporting
 
@@ -57,3 +58,17 @@ remain intentionally outside v0.8.0:
 - production database adapters, backups, and deployment operations
 
 No future item is implied to be implemented by this release.
+
+## v0.9 — Analytics
+
+### Sprint 1 — Basic performance foundation
+
+- Pure `AnalyticsEngine` over aggregate portfolio snapshots
+- Starting and ending values
+- Absolute profit or loss and simple total return
+- Consecutive snapshot daily returns
+- Peak and trough values
+- Running-peak maximum drawdown
+
+This sprint intentionally excludes cash-flow adjustment, TWR, MWR, IRR, XIRR,
+volatility, Sharpe Ratio, benchmark comparison, charts, and Dashboard changes.

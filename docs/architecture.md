@@ -170,6 +170,27 @@ The former single reporting module is retained as
 `pams.reporting.legacy`; its functions are re-exported by the package for
 backward compatibility.
 
+## Analytics boundary
+
+```text
+Aggregate DailySnapshots
+          ↓
+    AnalyticsEngine
+          ↓
+   PortfolioAnalytics
+```
+
+`AnalyticsEngine` is a pure service over aggregate daily snapshots. It orders
+inputs chronologically and treats `DailySnapshot.net_asset_value` as the total
+portfolio value after that day's transactions and cash movements. It returns
+immutable Decimal-based period totals, consecutive daily returns, peak, trough,
+and running-peak maximum drawdown.
+
+The v0.9 Sprint 1 foundation deliberately does not infer deposits,
+withdrawals, dividends, or benchmarks and does not implement TWR, MWR, IRR,
+XIRR, volatility, Sharpe Ratio, or benchmark comparison. It has no repository,
+application, CLI, dashboard, or chart dependency.
+
 ## Operational boundaries
 
 The CLI follows:

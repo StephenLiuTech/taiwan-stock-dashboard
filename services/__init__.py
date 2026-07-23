@@ -1,5 +1,11 @@
 """PAMS application services."""
 
+from services.analytics_engine import (
+    AnalyticsEngine,
+    AnalyticsError,
+    DuplicateSnapshotDateError,
+    EmptySnapshotHistoryError,
+)
 from services.bootstrap import BootstrapService
 from services.portfolio import MissingPriceQuoteError, PortfolioService
 from services.snapshot import DuplicateSnapshotError, SnapshotService
@@ -14,8 +20,12 @@ from services.transaction_engine import (
 from services.valuation_engine import ValuationEngine
 
 __all__ = [
+    "AnalyticsEngine",
+    "AnalyticsError",
     "BootstrapService",
     "DuplicateSnapshotError",
+    "DuplicateSnapshotDateError",
+    "EmptySnapshotHistoryError",
     "MissingPriceQuoteError",
     "HoldingProjectionMetadata",
     "InvalidTransactionHistoryError",

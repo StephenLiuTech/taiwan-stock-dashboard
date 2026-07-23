@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Pure snapshot-based Analytics Engine foundation.
+- Immutable portfolio analytics and consecutive daily-return DTOs.
+
 ## [0.8.0] - 2026-07-22
 
 ### Added

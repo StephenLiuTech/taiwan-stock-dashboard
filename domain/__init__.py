@@ -1,5 +1,6 @@
 """Public PAMS domain API."""
 
+from domain.analytics import DailyPortfolioReturn, PortfolioAnalytics
 from domain.enums import (
     Currency,
     DividendStatus,
@@ -24,6 +25,7 @@ from domain.valuation import HoldingValuation, PortfolioValuation
 
 __all__ = [
     "Currency",
+    "DailyPortfolioReturn",
     "DailySnapshot",
     "Dividend",
     "DividendStatus",
@@ -34,6 +36,7 @@ __all__ = [
     "LiabilityType",
     "Market",
     "PortfolioSummary",
+    "PortfolioAnalytics",
     "PortfolioValuation",
     "PortfolioLedger",
     "PositionSnapshot",
