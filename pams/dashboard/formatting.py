@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from pams.application import PortfolioOverview
+from pams.application import PortfolioValuation
 
 MISSING_VALUE = "—"
 
@@ -28,13 +28,11 @@ def format_percentage(value: Decimal | None, *, signed: bool = False) -> str:
     return f"{sign}{value * 100:,.2f}%"
 
 
-def kpi_view_model(overview: PortfolioOverview) -> tuple[tuple[str, str], ...]:
+def kpi_view_model(valuation: PortfolioValuation) -> tuple[tuple[str, str], ...]:
     """Map application-provided KPI values to display strings."""
     return (
-        ("Market Value", format_twd(overview.market_value)),
-        ("Net Equity", format_twd(overview.net_equity)),
-        ("Unrealized P/L", format_twd(overview.unrealized_pnl, signed=True)),
-        ("Today's P/L", format_twd(overview.todays_pnl, signed=True)),
-        ("Total Liabilities", format_twd(overview.total_liabilities)),
-        ("Leverage Ratio", format_percentage(overview.leverage_ratio)),
+        ("Market Value", format_twd(valuation.total_market_value)),
+        ("Cost", format_twd(valuation.total_cost)),
+        ("Unrealized", format_twd(valuation.total_unrealized_pl, signed=True)),
+        ("Return", format_percentage(valuation.total_return, signed=True)),
     )

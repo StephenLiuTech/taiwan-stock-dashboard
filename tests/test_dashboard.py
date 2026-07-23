@@ -1,63 +1,60 @@
-"""Offline tests for dashboard view models and architecture boundaries."""
+"""Offline tests for Dashboard 2.0 presentation projections."""
 
 import ast
-from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from pams.application import (
-    HoldingOverview,
-    MarketAvailabilitySummary,
-    PortfolioHistory,
-    PortfolioHistoryPoint,
-    PortfolioOverview,
-)
-from pams.dashboard.charts import allocation_chart, history_chart
+from domain import HoldingValuation, Market, PortfolioValuation
+from pams.dashboard.charts import allocation_chart
 from pams.dashboard.formatting import (
     MISSING_VALUE,
     format_percentage,
     format_twd,
     kpi_view_model,
 )
-from pams.dashboard.tables import allocation_rows, holdings_table_rows
+from pams.dashboard.page import _load_valuation
+from pams.dashboard.tables import (
+    allocation_rows,
+    holdings_table_rows,
+    largest_position_rows,
+    performance_rows,
+)
 
 
-def overview(*, synchronized: bool = True) -> PortfolioOverview:
-    common = date(2026, 7, 22) if synchronized else None
-    holding = HoldingOverview(
-        symbol="2330",
-        name="TSMC",
-        market="TWSE",
-        shares=Decimal("10"),
+def item(
+    symbol: str,
+    *,
+    market_value: str,
+    unrealized: str,
+    weight: str,
+) -> HoldingValuation:
+    return HoldingValuation(
+        symbol=symbol,
+        market=Market.TWSE,
+        quantity=Decimal("10"),
         average_cost=Decimal("80"),
-        latest_price=Decimal("100"),
-        market_value=Decimal("1000"),
+        last_price=Decimal("100"),
         cost_basis=Decimal("800"),
-        unrealized_pnl=Decimal("200"),
-        unrealized_return=Decimal("0.25"),
-        portfolio_weight=Decimal("1"),
-        quote_date=date(2026, 7, 22),
+        market_value=Decimal(market_value),
+        unrealized_pl=Decimal(unrealized),
+        unrealized_return=Decimal(unrealized) / Decimal("800"),
+        portfolio_weight=Decimal(weight),
     )
-    return PortfolioOverview(
-        database_path=Path("pams.db"),
-        latest_quote_date=date(2026, 7, 22),
-        latest_daily_snapshot=date(2026, 7, 22),
-        latest_position_snapshot=date(2026, 7, 22),
-        holdings_count=1,
-        liabilities_count=1,
-        schema_version=3,
-        database_size_bytes=4096,
-        market_availability=MarketAvailabilitySummary(
-            date(2026, 7, 22), date(2026, 7, 22), common
-        ),
-        market_value=Decimal("1000"),
-        net_equity=Decimal("700"),
-        unrealized_pnl=Decimal("200"),
-        todays_pnl=Decimal("-25"),
-        total_liabilities=Decimal("300"),
-        leverage_ratio=Decimal("0.3"),
-        holdings=(holding,),
+
+
+def valuation() -> PortfolioValuation:
+    holdings = (
+        item("2330", market_value="1000", unrealized="200", weight="0.625"),
+        item("0050", market_value="600", unrealized="-200", weight="0.375"),
+    )
+    return PortfolioValuation(
+        valuation_date=date(2026, 7, 22),
+        total_cost=Decimal("1600"),
+        total_market_value=Decimal("1600"),
+        total_unrealized_pl=Decimal("0"),
+        total_return=Decimal("0"),
+        holdings=holdings,
     )
 
 
@@ -68,71 +65,61 @@ def test_currency_and_percentage_formatting_preserves_signs_and_missing() -> Non
     assert format_twd(None) == MISSING_VALUE
 
 
-def test_kpi_view_model_uses_overview_values() -> None:
-    values = dict(kpi_view_model(overview()))
-    assert values["Market Value"] == "NT$ 1,000"
-    assert values["Today's P/L"] == "NT$ -25"
-    assert values["Leverage Ratio"] == "30.00%"
+def test_summary_uses_portfolio_valuation_totals() -> None:
+    values = dict(kpi_view_model(valuation()))
+    assert values == {
+        "Market Value": "NT$ 1,600",
+        "Cost": "NT$ 1,600",
+        "Unrealized": "NT$ 0",
+        "Return": "0.00%",
+    }
 
 
-def test_empty_portfolio_and_missing_quotes_are_safe() -> None:
-    empty = replace(
-        overview(),
-        latest_quote_date=None,
-        holdings=(),
-        market_value=None,
-        net_equity=None,
-        unrealized_pnl=None,
-        todays_pnl=None,
+def test_largest_positions_are_ranked_and_limited() -> None:
+    base = valuation()
+    many = tuple(
+        item(
+            str(index),
+            market_value=str(index),
+            unrealized=str(index),
+            weight="0.01",
+        )
+        for index in range(12)
     )
-    assert holdings_table_rows(empty) == []
-    assert allocation_rows(empty) == []
-    assert allocation_chart(empty) is None
-    assert dict(kpi_view_model(empty))["Market Value"] == MISSING_VALUE
-
-
-def test_holdings_table_is_sorted_by_persisted_market_value() -> None:
-    base = overview()
-    smaller = replace(
-        base.holdings[0], symbol="0050", name="ETF", market_value=Decimal("500")
-    )
-    rows = holdings_table_rows(replace(base, holdings=(smaller, base.holdings[0])))
-    assert [row["Symbol"] for row in rows] == ["2330", "0050"]
-    assert rows[0]["Cost Basis"] == "NT$ 800"
-    assert rows[0]["Quote Date"] == "2026-07-22"
-
-
-def test_allocation_and_history_charts_use_dto_data() -> None:
-    current = overview()
-    assert allocation_rows(current) == [
-        {"Holding": "2330 TSMC", "Market Value": Decimal("1000")}
-    ]
-    allocation = allocation_chart(current)
-    assert allocation is not None
-    history = PortfolioHistory(
-        (
-            PortfolioHistoryPoint(
-                date(2026, 7, 21), Decimal("900"), Decimal("650"), Decimal("250")
-            ),
-            PortfolioHistoryPoint(
-                date(2026, 7, 22), Decimal("1000"), Decimal("700"), Decimal("300")
-            ),
+    rows = largest_position_rows(
+        PortfolioValuation(
+            base.valuation_date,
+            base.total_cost,
+            base.total_market_value,
+            base.total_unrealized_pl,
+            base.total_return,
+            many,
         )
     )
-    chart = history_chart(history)
-    assert chart is not None
-    assert [trace.name for trace in chart.data] == [
-        "Market Value",
-        "Net Equity",
-        "Total Liabilities",
-    ]
-    assert history_chart(PortfolioHistory(())) is None
+    assert len(rows) == 10
+    assert rows[0]["Symbol"] == "11"
+    assert rows[0]["Weight %"] == "1.00%"
 
 
-def test_unsynchronized_availability_has_neutral_waiting_state() -> None:
-    availability = overview(synchronized=False).market_availability
-    assert availability.synchronized is False
-    assert availability.commonly_ingestible_date is None
+def test_winners_losers_and_full_table_use_dto_values() -> None:
+    current = valuation()
+    assert performance_rows(current, winners=True)[0]["Symbol"] == "2330"
+    assert performance_rows(current, winners=False)[0]["Symbol"] == "0050"
+    rows = holdings_table_rows(current)
+    assert rows[0]["Market Value"] == Decimal("1000")
+    assert rows[0]["Return %"] == Decimal("0.25")
+
+
+def test_allocation_chart_uses_application_weights_and_values() -> None:
+    current = valuation()
+    assert allocation_rows(current)[0] == {
+        "Holding": "2330",
+        "Market Value": Decimal("1000"),
+        "Weight": Decimal("0.625"),
+    }
+    assert allocation_chart(current) is not None
+    empty = PortfolioValuation(None, *(Decimal("0") for _ in range(4)), ())
+    assert allocation_chart(empty) is None
 
 
 def test_dashboard_modules_do_not_import_forbidden_layers() -> None:
@@ -147,3 +134,20 @@ def test_dashboard_modules_do_not_import_forbidden_layers() -> None:
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported.add(node.module.split(".")[0])
         assert imported.isdisjoint(forbidden), path.name
+
+
+def test_dashboard_load_executes_valuation_use_case_once() -> None:
+    class FakeUseCase:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self) -> PortfolioValuation:
+            self.calls += 1
+            return valuation()
+
+    use_case = FakeUseCase()
+    _load_valuation.clear()
+    first = _load_valuation(use_case)  # type: ignore[arg-type]
+    second = _load_valuation(use_case)  # type: ignore[arg-type]
+    assert first == second
+    assert use_case.calls == 1

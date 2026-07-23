@@ -23,12 +23,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     st.set_page_config(page_title="PAMS", page_icon="📊", layout="wide")
     try:
         with compose_operations(parse_database_override(argv)) as application:
-            assert application.portfolio_history is not None
-            render_dashboard(
-                application.portfolio_status,
-                application.portfolio_history,
-                application.update_portfolio,
-            )
+            assert application.valuate_portfolio is not None
+            render_dashboard(application.valuate_portfolio)
     except Exception as error:
         st.title("PAMS")
         st.caption("Personal Asset Management System")

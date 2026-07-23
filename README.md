@@ -31,7 +31,7 @@ Copy `.env.example` to `.env` if environment overrides are needed.
 streamlit run app.py
 ```
 
-The dashboard displays `—` for unavailable financial values and clear empty states when quotes or snapshots do not exist. Its **Refresh data** action performs validation and valuation as a dry run; it never persists an update. **Reload dashboard** clears the short-lived read cache and reruns the page.
+Dashboard 2.0 executes the portfolio valuation application use case once per cached load and renders Portfolio Summary, Largest Positions, Allocation, Top Winners, Top Losers, and a sortable full holdings table. Streamlit contains no portfolio formulas or persistence access. **Reload dashboard** clears the short-lived read cache and reruns the page.
 
 To create a populated synthetic demo database without touching the configured production database:
 

@@ -1,41 +1,71 @@
-"""Pure table transformations from application DTOs."""
+"""Pure table projections from application valuation DTOs."""
 
-from pams.application import PortfolioOverview
-from pams.dashboard.formatting import (
-    format_number,
-    format_percentage,
-    format_twd,
-)
+from pams.application import HoldingValuation, PortfolioValuation
+from pams.dashboard.formatting import format_number, format_percentage, format_twd
 
 
-def holdings_table_rows(overview: PortfolioOverview) -> list[dict[str, str]]:
-    """Return display-ready holdings sorted by persisted market value."""
+def _ranked(
+    valuation: PortfolioValuation, *, key: str, reverse: bool, limit: int | None
+) -> tuple[HoldingValuation, ...]:
+    rows = sorted(
+        valuation.holdings, key=lambda holding: getattr(holding, key), reverse=reverse
+    )
+    return tuple(rows if limit is None else rows[:limit])
+
+
+def largest_position_rows(valuation: PortfolioValuation) -> list[dict[str, str]]:
+    """Return the ten largest positions using application-provided values."""
     return [
         {
             "Symbol": item.symbol,
-            "Name": item.name,
-            "Shares": format_number(item.shares),
-            "Average Cost": format_twd(item.average_cost),
-            "Latest Price": format_twd(item.latest_price),
+            "Quantity": format_number(item.quantity),
+            "Last Price": format_twd(item.last_price),
             "Market Value": format_twd(item.market_value),
-            "Cost Basis": format_twd(item.cost_basis),
-            "Unrealized P/L": format_twd(item.unrealized_pnl, signed=True),
-            "Unrealized Return": format_percentage(item.unrealized_return, signed=True),
-            "Portfolio Weight": format_percentage(item.portfolio_weight),
-            "Quote Date": item.quote_date.isoformat(),
+            "Weight %": format_percentage(item.portfolio_weight),
         }
-        for item in sorted(
-            overview.holdings, key=lambda holding: holding.market_value, reverse=True
-        )
+        for item in _ranked(valuation, key="market_value", reverse=True, limit=10)
     ]
 
 
-def allocation_rows(overview: PortfolioOverview) -> list[dict[str, object]]:
-    """Return chart inputs without recalculating portfolio values."""
+def performance_rows(
+    valuation: PortfolioValuation, *, winners: bool
+) -> list[dict[str, str]]:
+    """Return the five highest or lowest unrealized results."""
     return [
-        {"Holding": f"{item.symbol} {item.name}", "Market Value": item.market_value}
-        for item in sorted(
-            overview.holdings, key=lambda holding: holding.market_value, reverse=True
-        )
+        {
+            "Symbol": item.symbol,
+            "Unrealized": format_twd(item.unrealized_pl, signed=True),
+            "Return %": format_percentage(item.unrealized_return, signed=True),
+        }
+        for item in _ranked(valuation, key="unrealized_pl", reverse=winners, limit=5)
+    ]
+
+
+def holdings_table_rows(valuation: PortfolioValuation) -> list[dict[str, object]]:
+    """Return every holding; Streamlit provides interactive column sorting."""
+    return [
+        {
+            "Symbol": item.symbol,
+            "Quantity": item.quantity,
+            "Average Cost": item.average_cost,
+            "Last Price": item.last_price,
+            "Cost Basis": item.cost_basis,
+            "Market Value": item.market_value,
+            "Unrealized": item.unrealized_pl,
+            "Return %": item.unrealized_return,
+        }
+        for item in valuation.holdings
+    ]
+
+
+def allocation_rows(valuation: PortfolioValuation) -> list[dict[str, object]]:
+    """Return extensible holding allocation chart inputs from the DTO."""
+    return [
+        {
+            "Holding": item.symbol,
+            "Market Value": item.market_value,
+            "Weight": item.portfolio_weight,
+        }
+        for item in _ranked(valuation, key="market_value", reverse=True, limit=None)
         if item.market_value > 0
     ]

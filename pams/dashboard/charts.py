@@ -3,13 +3,13 @@
 import plotly.express as px
 import plotly.graph_objects as go
 
-from pams.application import PortfolioHistory, PortfolioOverview
+from pams.application import PortfolioHistory, PortfolioValuation
 from pams.dashboard.tables import allocation_rows
 
 
-def allocation_chart(overview: PortfolioOverview) -> go.Figure | None:
+def allocation_chart(valuation: PortfolioValuation) -> go.Figure | None:
     """Build a readable holding allocation donut, or an empty result."""
-    rows = allocation_rows(overview)
+    rows = allocation_rows(valuation)
     if not rows:
         return None
     return px.pie(

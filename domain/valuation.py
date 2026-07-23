@@ -20,6 +20,7 @@ class HoldingValuation:
     market_value: Decimal
     unrealized_pl: Decimal
     unrealized_return: Decimal
+    portfolio_weight: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)

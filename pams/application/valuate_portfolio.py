@@ -1,5 +1,8 @@
 """Current portfolio valuation application workflow."""
 
+from dataclasses import replace
+from decimal import Decimal
+
 from pams.application.dto import PortfolioValuation
 from pams.application.exceptions import MissingQuoteError
 from repositories.interfaces import HoldingRepository, PriceQuoteRepository
@@ -32,4 +35,13 @@ class ValuatePortfolioUseCase:
                 quotes.append(quote)
         if missing:
             raise MissingQuoteError("Missing latest quote for: " + ", ".join(missing))
-        return self.engine.valuate(holdings, quotes)
+        valuation = self.engine.valuate(holdings, quotes)
+        total = valuation.total_market_value
+        valued_holdings = tuple(
+            replace(
+                item,
+                portfolio_weight=(item.market_value / total if total else Decimal("0")),
+            )
+            for item in valuation.holdings
+        )
+        return replace(valuation, holdings=valued_holdings)
