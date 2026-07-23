@@ -27,3 +27,19 @@ class DuplicateTransactionError(ApplicationError, ValueError):
 
 class MissingQuoteError(ApplicationError, ValueError):
     """Raised when a holding cannot be valued with a latest quote."""
+
+
+class PortfolioAnalyticsError(ApplicationError, ValueError):
+    """Base class for analytics application workflow failures."""
+
+
+class InvalidAnalyticsPeriodError(PortfolioAnalyticsError):
+    """Raised when the requested analytics start follows its end."""
+
+
+class AnalyticsDataUnavailableError(PortfolioAnalyticsError):
+    """Raised when no valid snapshot history exists for a requested period."""
+
+
+class AnalyticsRepositoryError(PortfolioAnalyticsError):
+    """Raised when snapshot history cannot be loaded from persistence."""

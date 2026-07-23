@@ -72,3 +72,14 @@ No future item is implied to be implemented by this release.
 
 This sprint intentionally excludes cash-flow adjustment, TWR, MWR, IRR, XIRR,
 volatility, Sharpe Ratio, benchmark comparison, charts, and Dashboard changes.
+
+### Sprint 2 — Analytics Application Layer
+
+- `AnalyzePortfolioUseCase` over the existing snapshot repository protocol
+- Inclusive optional start and end date filtering
+- Typed application errors for invalid periods, empty history, and repository
+  failures
+- Human and lossless JSON `analytics portfolio` CLI output
+
+Dashboard analytics, charts, reports, allocation analytics, and advanced
+performance methodologies remain unimplemented.

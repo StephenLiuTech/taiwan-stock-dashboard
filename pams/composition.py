@@ -22,6 +22,7 @@ from market_data.providers import (
 )
 from pams.application import (
     AddTransactionUseCase,
+    AnalyzePortfolioUseCase,
     ApplyRebuiltHoldingsUseCase,
     DemoDataUseCase,
     ListTransactionsUseCase,
@@ -64,6 +65,7 @@ class ApplicationContext:
     add_transaction: AddTransactionUseCase | None = None
     list_transactions: ListTransactionsUseCase | None = None
     valuate_portfolio: ValuatePortfolioUseCase | None = None
+    analyze_portfolio: AnalyzePortfolioUseCase | None = None
 
 
 def resolve_database_path(override: Path | None = None) -> Path:
@@ -231,6 +233,7 @@ def _compose(
             add_transaction=AddTransactionUseCase(transaction_repository),
             list_transactions=ListTransactionsUseCase(transaction_repository),
             valuate_portfolio=valuate_portfolio,
+            analyze_portfolio=AnalyzePortfolioUseCase(snapshots),
         )
     finally:
         connection.close()

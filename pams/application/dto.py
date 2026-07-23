@@ -7,6 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from domain import HoldingValuation as HoldingValuation
+from domain import PortfolioAnalytics as PortfolioAnalytics
 from domain import PortfolioValuation as PortfolioValuation
 
 

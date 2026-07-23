@@ -18,7 +18,13 @@ from market_data import (
     SuspendedSecurityError,
     SymbolNotFoundError,
 )
-from pams.application import AddTransactionCommand
+from pams.analytics_reporting import format_portfolio_analytics
+from pams.application import (
+    AddTransactionCommand,
+    AnalyticsDataUnavailableError,
+    AnalyticsRepositoryError,
+    InvalidAnalyticsPeriodError,
+)
 from pams.composition import (
     compose_application,
     compose_demo_data,
@@ -151,6 +157,18 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--output", type=Path)
     generate.add_argument("--database", type=Path)
     generate.add_argument("--verbose", action="store_true")
+    analytics = commands.add_parser("analytics", help="analyze portfolio history")
+    analytics_commands = analytics.add_subparsers(
+        dest="analytics_command", required=True
+    )
+    analytics_portfolio = analytics_commands.add_parser(
+        "portfolio", help="analyze aggregate portfolio snapshots"
+    )
+    analytics_portfolio.add_argument("--from", dest="start_date", type=parse_iso_date)
+    analytics_portfolio.add_argument("--to", dest="end_date", type=parse_iso_date)
+    analytics_portfolio.add_argument("--json", action="store_true", dest="json_output")
+    analytics_portfolio.add_argument("--database", type=Path)
+    analytics_portfolio.add_argument("--verbose", action="store_true")
     for command_name in ("status", "verify"):
         command = commands.add_parser(command_name)
         command.add_argument("--database", type=Path)
@@ -159,6 +177,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _error_exit_code(error: Exception) -> ExitCode:
+    if isinstance(error, InvalidAnalyticsPeriodError):
+        return ExitCode.CLI_ERROR
+    if isinstance(error, (AnalyticsDataUnavailableError, AnalyticsRepositoryError)):
+        return ExitCode.CONFIG_OR_DATABASE_ERROR
     if isinstance(error, SourceDateError):
         return ExitCode.SOURCE_DATE_ERROR
     if isinstance(error, ProviderDataError):
@@ -190,6 +212,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             composer = compose_operations
         with composer(arguments.database, verbose=arguments.verbose) as application:
+            if arguments.command == "analytics":
+                assert application.analyze_portfolio is not None
+                analytics = application.analyze_portfolio.execute(
+                    arguments.start_date, arguments.end_date
+                )
+                print(
+                    format_portfolio_analytics(
+                        analytics, json_output=arguments.json_output
+                    )
+                )
+                return int(ExitCode.SUCCESS)
             if arguments.command == "report":
                 assert application.valuate_portfolio is not None
                 daily_report = DailyReportBuilder().build(

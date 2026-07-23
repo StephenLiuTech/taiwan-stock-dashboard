@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - Pure snapshot-based Analytics Engine foundation.
 - Immutable portfolio analytics and consecutive daily-return DTOs.
+- Analytics application use case with inclusive period filtering.
+- Human and JSON `analytics portfolio` CLI output.
 
 ## [0.8.0] - 2026-07-22
 

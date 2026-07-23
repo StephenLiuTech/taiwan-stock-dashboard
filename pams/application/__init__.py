@@ -1,5 +1,6 @@
 """Presentation-neutral PAMS application workflows and DTOs."""
 
+from pams.application.analyze_portfolio import AnalyzePortfolioUseCase
 from pams.application.apply_rebuilt_holdings import ApplyRebuiltHoldingsUseCase
 from pams.application.demo_data import DemoDataUseCase
 from pams.application.dto import (
@@ -12,6 +13,7 @@ from pams.application.dto import (
     HoldingValuation,
     LedgerPositionResult,
     MarketAvailabilitySummary,
+    PortfolioAnalytics,
     PortfolioHistory,
     PortfolioHistoryPoint,
     PortfolioOverview,
@@ -29,11 +31,15 @@ from pams.application.dto import (
     VerificationReport,
 )
 from pams.application.exceptions import (
+    AnalyticsDataUnavailableError,
+    AnalyticsRepositoryError,
     ApplicationError,
     DuplicateTransactionError,
     EmptyTransactionHistoryError,
     HoldingRebuildError,
+    InvalidAnalyticsPeriodError,
     MissingQuoteError,
+    PortfolioAnalyticsError,
     ProductionDatabaseProtectedError,
     UnmatchedHoldingsError,
 )
@@ -49,6 +55,9 @@ __all__ = [
     "AddTransactionCommand",
     "AddTransactionUseCase",
     "ApplicationError",
+    "AnalyticsDataUnavailableError",
+    "AnalyticsRepositoryError",
+    "AnalyzePortfolioUseCase",
     "ApplyRebuiltHoldingsUseCase",
     "DemoDataResult",
     "DemoDataUseCase",
@@ -60,11 +69,14 @@ __all__ = [
     "HoldingOverview",
     "HoldingValuation",
     "HoldingRebuildError",
+    "InvalidAnalyticsPeriodError",
     "LedgerPositionResult",
     "ListTransactionsUseCase",
     "MarketAvailabilitySummary",
     "MissingQuoteError",
     "PortfolioHistory",
+    "PortfolioAnalytics",
+    "PortfolioAnalyticsError",
     "PortfolioHistoryPoint",
     "PortfolioHistoryUseCase",
     "PortfolioOverview",

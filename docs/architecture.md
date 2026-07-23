@@ -191,6 +191,18 @@ withdrawals, dividends, or benchmarks and does not implement TWR, MWR, IRR,
 XIRR, volatility, Sharpe Ratio, or benchmark comparison. It has no repository,
 application, CLI, dashboard, or chart dependency.
 
+`AnalyzePortfolioUseCase` is the integration boundary. It validates an optional
+inclusive start/end period, loads aggregate snapshots through the existing
+`SnapshotRepository.list_between_dates` contract, translates empty history,
+invalid periods, repository failures, and engine input errors into typed
+application exceptions, then returns `PortfolioAnalytics`. Repository access
+does not enter the engine.
+
+The CLI route `analytics portfolio` parses `--from`, `--to`, and `--json`,
+invokes the composed use case once, and renders the returned DTO. Human and
+JSON renderers do not calculate performance. No Dashboard or Daily Report
+integration is part of Sprint 2.
+
 ## Operational boundaries
 
 The CLI follows:
