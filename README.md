@@ -85,6 +85,17 @@ python -m pams portfolio valuate
 python -m pams portfolio valuate --json
 ```
 
+Generate the same valuation as a deterministic daily report. Markdown is written
+to standard output by default; `--html` selects standalone semantic HTML and
+`--output` writes the result to a UTF-8 file:
+
+```bash
+python -m pams report generate
+python -m pams report generate --html
+python -m pams report generate --output report.md
+python -m pams report generate --html --output report.html
+```
+
 Record and query transactions through the application layer:
 
 ```bash

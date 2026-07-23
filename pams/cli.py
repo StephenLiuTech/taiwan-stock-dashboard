@@ -26,6 +26,9 @@ from pams.composition import (
     compose_operations,
 )
 from pams.reporting import (
+    DailyReportBuilder,
+    HtmlReportRenderer,
+    MarkdownReportRenderer,
     format_demo_data_report,
     format_holding_change_plan,
     format_holding_change_plan_json,
@@ -139,6 +142,15 @@ def build_parser() -> argparse.ArgumentParser:
     valuate.add_argument("--json", action="store_true", dest="json_output")
     valuate.add_argument("--database", type=Path)
     valuate.add_argument("--verbose", action="store_true")
+    report = commands.add_parser("report", help="generate portfolio reports")
+    report_commands = report.add_subparsers(dest="report_command", required=True)
+    generate = report_commands.add_parser(
+        "generate", help="generate a daily portfolio report"
+    )
+    generate.add_argument("--html", action="store_true")
+    generate.add_argument("--output", type=Path)
+    generate.add_argument("--database", type=Path)
+    generate.add_argument("--verbose", action="store_true")
     for command_name in ("status", "verify"):
         command = commands.add_parser(command_name)
         command.add_argument("--database", type=Path)
@@ -178,6 +190,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             composer = compose_operations
         with composer(arguments.database, verbose=arguments.verbose) as application:
+            if arguments.command == "report":
+                assert application.valuate_portfolio is not None
+                daily_report = DailyReportBuilder().build(
+                    application.valuate_portfolio.execute()
+                )
+                renderer = (
+                    HtmlReportRenderer() if arguments.html else MarkdownReportRenderer()
+                )
+                rendered = renderer.render(daily_report)
+                if arguments.output:
+                    arguments.output.write_text(rendered, encoding="utf-8")
+                else:
+                    sys.stdout.write(rendered)
+                return int(ExitCode.SUCCESS)
             if arguments.command == "portfolio":
                 assert application.valuate_portfolio is not None
                 print(

@@ -1,4 +1,4 @@
-"""Human-readable and JSON rendering of application DTOs."""
+"""Legacy human-readable and JSON rendering of application DTOs."""
 
 import json
 from datetime import date

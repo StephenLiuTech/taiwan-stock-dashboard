@@ -32,6 +32,8 @@ Sprint 1 complete: a pure Decimal-based `ValuationEngine`, immutable holding and
 
 Sprint 2 complete: Dashboard 2.0 is a presentation-only consumer of one cached `PortfolioValuation`, with summary KPIs, position ranking, allocation, winners, losers, and a sortable holdings table.
 
+Sprint 3 complete: the repository-free `DailyReportBuilder` prepares a structured, presentation-neutral report from `PortfolioValuation`; independent Markdown and semantic HTML renderers support CLI output and UTF-8 files without email, messaging, or scheduling.
+
 ## v1.0 — Deployment-ready system
 
 Add production persistence, migrations, authentication, backups, monitoring, security review, deployment automation, and operational documentation.
