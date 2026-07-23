@@ -1,10 +1,43 @@
 """CLI rendering for portfolio analytics DTOs."""
 
 import json
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from pams.application import PortfolioAnalytics
+from pams.application import (
+    AnalyticsDataUnavailableError,
+    AnalyticsProcessingError,
+    AnalyticsRepositoryError,
+    InvalidAnalyticsPeriodError,
+    PortfolioAnalytics,
+)
+
+
+@dataclass(frozen=True)
+class DailyReturnView:
+    """One application-provided daily return prepared for presentation."""
+
+    period: str
+    period_end: date
+    value: Decimal
+    formatted_value: str
+
+
+@dataclass(frozen=True)
+class AnalyticsViewModel:
+    """Display-only projection of immutable portfolio analytics."""
+
+    period: str
+    starting_value: str
+    ending_value: str
+    absolute_profit_loss: str
+    total_return: str
+    peak_value: str
+    trough_value: str
+    max_drawdown: str
+    snapshot_count: str
+    daily_returns: tuple[DailyReturnView, ...]
 
 
 def _json_default(value: object) -> object:
@@ -15,12 +48,51 @@ def _json_default(value: object) -> object:
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
-def _money(value: Decimal) -> str:
-    return f"NT${value:,.2f}"
+def _money(value: Decimal, *, signed: bool = False) -> str:
+    sign = "+" if signed and value > 0 else ""
+    return f"{sign}NT${value:,.2f}"
 
 
-def _percentage(value: Decimal) -> str:
-    return f"{value * 100:,.2f}%"
+def _percentage(value: Decimal, *, signed: bool = False) -> str:
+    sign = "+" if signed and value > 0 else ""
+    return f"{sign}{value * 100:,.2f}%"
+
+
+def analytics_view_model(analytics: PortfolioAnalytics) -> AnalyticsViewModel:
+    """Format and reshape analytics without deriving financial results."""
+    return AnalyticsViewModel(
+        period=f"{analytics.start_date} to {analytics.end_date}",
+        starting_value=_money(analytics.starting_value),
+        ending_value=_money(analytics.ending_value),
+        absolute_profit_loss=_money(analytics.absolute_profit_loss, signed=True),
+        total_return=_percentage(analytics.total_return, signed=True),
+        peak_value=_money(analytics.peak_value),
+        trough_value=_money(analytics.trough_value),
+        max_drawdown=_percentage(analytics.max_drawdown),
+        snapshot_count=str(analytics.snapshot_count),
+        daily_returns=tuple(
+            DailyReturnView(
+                period=f"{item.period_start} to {item.period_end}",
+                period_end=item.period_end,
+                value=item.daily_return,
+                formatted_value=_percentage(item.daily_return, signed=True),
+            )
+            for item in analytics.daily_returns
+        ),
+    )
+
+
+def analytics_error_message(error: Exception) -> str:
+    """Translate typed application failures into safe presentation text."""
+    if isinstance(error, AnalyticsDataUnavailableError):
+        return "Portfolio analytics are unavailable until snapshots exist."
+    if isinstance(error, InvalidAnalyticsPeriodError):
+        return "The analytics start date must not be after the end date."
+    if isinstance(error, AnalyticsRepositoryError):
+        return "Portfolio analytics could not be loaded."
+    if isinstance(error, AnalyticsProcessingError):
+        return "Portfolio analytics could not be processed."
+    raise error
 
 
 def format_portfolio_analytics(

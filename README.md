@@ -20,6 +20,7 @@ Current release: **v0.8.0**
 - Dashboard 2.0 with summary, allocation, winners, losers, and sortable holdings
 - Deterministic Markdown and standalone semantic HTML daily reports
 - Pure snapshot-based basic performance analytics foundation
+- Shared analytics presentation across CLI, Dashboard, Markdown, and HTML reports
 - Operational `status`, `verify`, dry-run, and JSON CLI modes
 - Isolated synthetic demo-data workflow
 
@@ -31,6 +32,13 @@ Transactions → Transaction Engine → Holdings
 Official Market Data → Normalization → Valuation Engine
                                       ↓
                             PortfolioValuation
+                              ├─ CLI
+                              ├─ Dashboard
+                              └─ Daily Reports
+
+Aggregate Snapshots → AnalyzePortfolioUseCase → AnalyticsEngine
+                                             ↓
+                                  PortfolioAnalytics
                               ├─ CLI
                               ├─ Dashboard
                               └─ Daily Reports
@@ -82,8 +90,12 @@ renders:
 - Allocation by holding
 - Top Winners and Top Losers
 - Sortable full Portfolio Table
+- Snapshot-period analytics summary and application-provided daily returns
 
-The dashboard has no repository, SQL, provider, or valuation-formula access.
+The dashboard obtains valuation and analytics through composed Application
+Layer use cases. It has no repository, SQL, provider, valuation formula,
+return formula, or drawdown formula access. Decimal values remain intact until
+the chart rendering boundary.
 
 ## Command-line interface
 
@@ -121,6 +133,11 @@ python -m pams report generate --html
 python -m pams report generate --output report.md
 python -m pams report generate --html --output report.html
 ```
+
+Daily reports call `AnalyzePortfolioUseCase` through the existing composition
+root and include a concise snapshot analytics summary. If analytics are
+unavailable, the report remains valid and displays a controlled status instead
+of substituting zero performance.
 
 ### Market-data updates
 

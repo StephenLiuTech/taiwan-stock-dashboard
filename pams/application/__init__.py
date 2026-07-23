@@ -32,6 +32,7 @@ from pams.application.dto import (
 )
 from pams.application.exceptions import (
     AnalyticsDataUnavailableError,
+    AnalyticsProcessingError,
     AnalyticsRepositoryError,
     ApplicationError,
     DuplicateTransactionError,
@@ -56,6 +57,7 @@ __all__ = [
     "AddTransactionUseCase",
     "ApplicationError",
     "AnalyticsDataUnavailableError",
+    "AnalyticsProcessingError",
     "AnalyticsRepositoryError",
     "AnalyzePortfolioUseCase",
     "ApplyRebuiltHoldingsUseCase",

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from pams.application import HoldingValuation, PortfolioValuation
+from pams.application import HoldingValuation, PortfolioAnalytics, PortfolioValuation
 
 
 @dataclass(frozen=True)
@@ -27,12 +27,20 @@ class DailyReport:
     top_gainers: tuple[HoldingValuation, ...]
     top_losers: tuple[HoldingValuation, ...]
     portfolio: tuple[HoldingValuation, ...]
+    analytics: PortfolioAnalytics | None = None
+    analytics_unavailable: str | None = None
 
 
 class DailyReportBuilder:
     """Select and order valuation data without formatting it."""
 
-    def build(self, valuation: PortfolioValuation) -> DailyReport:
+    def build(
+        self,
+        valuation: PortfolioValuation,
+        analytics: PortfolioAnalytics | None = None,
+        *,
+        analytics_unavailable: str | None = None,
+    ) -> DailyReport:
         """Build a deterministic report model from an immutable valuation."""
         by_market_value = tuple(
             sorted(
@@ -63,4 +71,6 @@ class DailyReportBuilder:
                 )
             )[:5],
             portfolio=tuple(sorted(valuation.holdings, key=lambda item: item.symbol)),
+            analytics=analytics,
+            analytics_unavailable=analytics_unavailable,
         )

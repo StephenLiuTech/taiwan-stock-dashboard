@@ -5,15 +5,33 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from domain import HoldingValuation, Market, PortfolioValuation
-from pams.dashboard.charts import allocation_chart
+import pytest
+
+from domain import (
+    DailyPortfolioReturn,
+    HoldingValuation,
+    Market,
+    PortfolioAnalytics,
+    PortfolioValuation,
+)
+from pams.analytics_reporting import (
+    analytics_error_message,
+    analytics_view_model,
+)
+from pams.application import (
+    AnalyticsDataUnavailableError,
+    AnalyticsProcessingError,
+    AnalyticsRepositoryError,
+    InvalidAnalyticsPeriodError,
+)
+from pams.dashboard.charts import allocation_chart, daily_returns_chart
 from pams.dashboard.formatting import (
     MISSING_VALUE,
     format_percentage,
     format_twd,
     kpi_view_model,
 )
-from pams.dashboard.page import _load_valuation
+from pams.dashboard.page import _load_analytics, _load_valuation
 from pams.dashboard.tables import (
     allocation_rows,
     holdings_table_rows,
@@ -55,6 +73,30 @@ def valuation() -> PortfolioValuation:
         total_unrealized_pl=Decimal("0"),
         total_return=Decimal("0"),
         holdings=holdings,
+    )
+
+
+def analytics(total_return: str = "0.1") -> PortfolioAnalytics:
+    return PortfolioAnalytics(
+        start_date=date(2026, 7, 21),
+        end_date=date(2026, 7, 22),
+        starting_value=Decimal("1000.01"),
+        ending_value=Decimal("1100.02"),
+        absolute_profit_loss=Decimal("100.01"),
+        total_return=Decimal(total_return),
+        daily_returns=(
+            DailyPortfolioReturn(
+                period_start=date(2026, 7, 21),
+                period_end=date(2026, 7, 22),
+                starting_value=Decimal("1000.01"),
+                ending_value=Decimal("1100.02"),
+                daily_return=Decimal(total_return),
+            ),
+        ),
+        peak_value=Decimal("1100.02"),
+        trough_value=Decimal("1000.01"),
+        max_drawdown=Decimal("-0.025"),
+        snapshot_count=2,
     )
 
 
@@ -151,3 +193,68 @@ def test_dashboard_load_executes_valuation_use_case_once() -> None:
     second = _load_valuation(use_case)  # type: ignore[arg-type]
     assert first == second
     assert use_case.calls == 1
+
+
+def test_dashboard_analytics_uses_application_result_once() -> None:
+    class FakeUseCase:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self) -> PortfolioAnalytics:
+            self.calls += 1
+            return analytics()
+
+    use_case = FakeUseCase()
+    _load_analytics.clear()
+    first = _load_analytics(use_case)  # type: ignore[arg-type]
+    second = _load_analytics(use_case)  # type: ignore[arg-type]
+    assert first == second == analytics()
+    assert use_case.calls == 1
+
+
+def test_analytics_view_model_preserves_dto_values_and_formats_signs() -> None:
+    source = analytics()
+    view = analytics_view_model(source)
+    assert view.period == "2026-07-21 to 2026-07-22"
+    assert view.starting_value == "NT$1,000.01"
+    assert view.ending_value == "NT$1,100.02"
+    assert view.absolute_profit_loss == "+NT$100.01"
+    assert view.total_return == "+10.00%"
+    assert view.max_drawdown == "-2.50%"
+    assert view.daily_returns[0].value == Decimal("0.1")
+    assert view.daily_returns[0].formatted_value == "+10.00%"
+    assert source == analytics()
+
+
+def test_daily_return_chart_converts_only_mapped_values() -> None:
+    figure = daily_returns_chart(analytics_view_model(analytics()))
+    assert figure is not None
+    assert list(figure.data[0].y) == [0.1]
+    assert list(figure.data[0].text) == ["+10.00%"]
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            AnalyticsDataUnavailableError("internal"),
+            "Portfolio analytics are unavailable until snapshots exist.",
+        ),
+        (
+            InvalidAnalyticsPeriodError("internal"),
+            "The analytics start date must not be after the end date.",
+        ),
+        (
+            AnalyticsRepositoryError("sqlite details"),
+            "Portfolio analytics could not be loaded.",
+        ),
+        (
+            AnalyticsProcessingError("engine details"),
+            "Portfolio analytics could not be processed.",
+        ),
+    ],
+)
+def test_analytics_errors_are_mapped_without_internal_details(
+    error: Exception, message: str
+) -> None:
+    assert analytics_error_message(error) == message

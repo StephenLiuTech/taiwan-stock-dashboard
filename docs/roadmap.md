@@ -81,5 +81,15 @@ volatility, Sharpe Ratio, benchmark comparison, charts, and Dashboard changes.
   failures
 - Human and lossless JSON `analytics portfolio` CLI output
 
-Dashboard analytics, charts, reports, allocation analytics, and advanced
-performance methodologies remain unimplemented.
+### Sprint 3 — Presentation Integration
+
+- Dashboard analytics supplied by `AnalyzePortfolioUseCase`
+- Snapshot-period metrics and application-provided daily-return chart
+- Markdown and HTML daily-report analytics summaries
+- Shared Decimal-aware formatting at the Presentation boundary
+- Controlled empty, invalid-period, repository, and processing states
+
+Sprint 3 adds no financial methodology. Allocation analytics, benchmarking,
+cash-flow-adjusted return, TWR, MWR, IRR, XIRR, volatility, Sharpe and Sortino
+ratios, beta, correlation, sector or currency exposure, multi-asset support,
+import adapters, automation, and notifications remain unimplemented.

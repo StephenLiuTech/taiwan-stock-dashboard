@@ -3,6 +3,7 @@
 import plotly.express as px
 import plotly.graph_objects as go
 
+from pams.analytics_reporting import AnalyticsViewModel
 from pams.application import PortfolioHistory, PortfolioValuation
 from pams.dashboard.tables import allocation_rows
 
@@ -35,4 +36,24 @@ def history_chart(history: PortfolioHistory) -> go.Figure | None:
     for name, values in series:
         figure.add_scatter(x=dates, y=values, mode="lines+markers", name=name)
     figure.update_layout(title="Portfolio History", yaxis_title="TWD")
+    return figure
+
+
+def daily_returns_chart(analytics: AnalyticsViewModel) -> go.Figure | None:
+    """Convert mapped Decimal returns only at the Plotly boundary."""
+    if not analytics.daily_returns:
+        return None
+    figure = go.Figure()
+    figure.add_bar(
+        x=[item.period_end for item in analytics.daily_returns],
+        y=[float(item.value) for item in analytics.daily_returns],
+        text=[item.formatted_value for item in analytics.daily_returns],
+        name="Daily Return",
+    )
+    figure.update_layout(
+        title="Daily Returns",
+        xaxis_title="Date",
+        yaxis_title="Return",
+        yaxis_tickformat=".2%",
+    )
     return figure

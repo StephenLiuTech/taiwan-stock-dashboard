@@ -8,6 +8,7 @@ import pytest
 from domain import DailySnapshot, PortfolioAnalytics
 from pams.application import (
     AnalyticsDataUnavailableError,
+    AnalyticsProcessingError,
     AnalyticsRepositoryError,
     AnalyzePortfolioUseCase,
     InvalidAnalyticsPeriodError,
@@ -129,3 +130,11 @@ def test_engine_input_error_is_translated_at_application_boundary() -> None:
     engine = AnalyticsEngineStub(error=DuplicateSnapshotDateError("duplicate"))
     with pytest.raises(AnalyticsDataUnavailableError, match="history is invalid"):
         AnalyzePortfolioUseCase(repository, engine).execute()  # type: ignore[arg-type]
+
+
+def test_unexpected_engine_failure_is_translated_without_leaking_detail() -> None:
+    repository = SnapshotRepositoryStub([snapshot(date(2026, 1, 1), "100")])
+    engine = AnalyticsEngineStub(error=RuntimeError("calculation internals"))
+    with pytest.raises(AnalyticsProcessingError, match="Unable to analyze") as captured:
+        AnalyzePortfolioUseCase(repository, engine).execute()  # type: ignore[arg-type]
+    assert "calculation internals" not in str(captured.value)

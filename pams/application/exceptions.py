@@ -43,3 +43,7 @@ class AnalyticsDataUnavailableError(PortfolioAnalyticsError):
 
 class AnalyticsRepositoryError(PortfolioAnalyticsError):
     """Raised when snapshot history cannot be loaded from persistence."""
+
+
+class AnalyticsProcessingError(PortfolioAnalyticsError):
+    """Raised when analytics processing fails unexpectedly."""

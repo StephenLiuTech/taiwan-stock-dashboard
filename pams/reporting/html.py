@@ -3,6 +3,7 @@
 from decimal import Decimal
 from html import escape
 
+from pams.analytics_reporting import analytics_view_model
 from pams.reporting.builder import DailyReport
 
 
@@ -95,6 +96,28 @@ class HtmlReportRenderer:
                 for item in report.portfolio
             ],
         )
+        if report.analytics is not None:
+            analytics = analytics_view_model(report.analytics)
+            analytics_section = "".join(
+                [
+                    "<section><h2>Portfolio Analytics</h2><dl>",
+                    f"<dt>Period</dt><dd>{escape(analytics.period)}</dd>",
+                    f"<dt>Starting Value</dt><dd>{escape(analytics.starting_value)}</dd>",
+                    f"<dt>Ending Value</dt><dd>{escape(analytics.ending_value)}</dd>",
+                    "<dt>Profit / Loss</dt>"
+                    f"<dd>{escape(analytics.absolute_profit_loss)}</dd>",
+                    f"<dt>Total Return</dt><dd>{escape(analytics.total_return)}</dd>",
+                    "<dt>Maximum Drawdown</dt>"
+                    f"<dd>{escape(analytics.max_drawdown)}</dd>",
+                    "</dl></section>",
+                ]
+            )
+        else:
+            unavailable = report.analytics_unavailable or "Analytics unavailable."
+            analytics_section = (
+                "<section><h2>Portfolio Analytics</h2>"
+                f"<p>{escape(unavailable)}</p></section>"
+            )
         return "\n".join(
             [
                 "<!doctype html>",
@@ -120,6 +143,7 @@ class HtmlReportRenderer:
                 f"<section><h2>Top Winners</h2>{winners}</section>",
                 f"<section><h2>Top Losers</h2>{losers}</section>",
                 f"<section><h2>Portfolio</h2>{portfolio}</section>",
+                analytics_section,
                 "</main>",
                 "</body>",
                 "</html>",

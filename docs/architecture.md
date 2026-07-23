@@ -200,8 +200,39 @@ does not enter the engine.
 
 The CLI route `analytics portfolio` parses `--from`, `--to`, and `--json`,
 invokes the composed use case once, and renders the returned DTO. Human and
-JSON renderers do not calculate performance. No Dashboard or Daily Report
-integration is part of Sprint 2.
+JSON renderers do not calculate performance.
+
+Sprint 3 extends the same application boundary to every existing presentation:
+
+```text
+                  Presentation
+        ┌──────────────┼──────────────┐
+        ↓              ↓              ↓
+       CLI         Dashboard       Reports
+        └──────────────┼──────────────┘
+                       ↓
+            AnalyzePortfolioUseCase
+                       ↓
+                 AnalyticsEngine
+                       ↓
+             PortfolioAnalytics
+```
+
+The Dashboard receives the composed use case, executes it once per cached page
+load, and maps returned metrics and daily observations to Streamlit elements.
+Markdown and HTML report generation invokes the same use case and attaches the
+returned DTO to the existing `DailyReport`. Missing or invalid analytics remain
+distinct controlled states rather than zero values.
+
+`pams.analytics_reporting` is the shared Presentation mapper. It formats dates,
+Decimal amounts, and percentages without deriving financial results. Decimal
+daily returns are converted to `float` only inside the Plotly chart construction
+boundary. Presentation modules do not import `AnalyticsEngine`, query snapshot
+repositories, execute analytics SQL, or calculate return or drawdown.
+
+This integration adds no analytics methodology. Cash-flow adjustment, TWR,
+MWR, IRR, XIRR, volatility, risk ratios, allocation analytics, and benchmarks
+remain out of scope.
 
 ## Operational boundaries
 

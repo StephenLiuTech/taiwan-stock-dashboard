@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 
+from pams.analytics_reporting import analytics_view_model
 from pams.reporting.builder import DailyReport
 
 
@@ -123,4 +124,24 @@ class MarkdownReportRenderer:
                 ],
             )
         )
+        lines.extend(["", "---", "", "## Portfolio Analytics", ""])
+        if report.analytics is not None:
+            analytics = analytics_view_model(report.analytics)
+            lines.extend(
+                [
+                    f"Period: {analytics.period}",
+                    "",
+                    f"Starting Value: {analytics.starting_value}",
+                    "",
+                    f"Ending Value: {analytics.ending_value}",
+                    "",
+                    f"Profit / Loss: {analytics.absolute_profit_loss}",
+                    "",
+                    f"Total Return: {analytics.total_return}",
+                    "",
+                    f"Maximum Drawdown: {analytics.max_drawdown}",
+                ]
+            )
+        else:
+            lines.append(report.analytics_unavailable or "Analytics unavailable.")
         return "\n".join(lines) + "\n"

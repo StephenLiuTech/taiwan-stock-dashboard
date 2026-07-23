@@ -18,12 +18,16 @@ from market_data import (
     SuspendedSecurityError,
     SymbolNotFoundError,
 )
-from pams.analytics_reporting import format_portfolio_analytics
+from pams.analytics_reporting import (
+    analytics_error_message,
+    format_portfolio_analytics,
+)
 from pams.application import (
     AddTransactionCommand,
     AnalyticsDataUnavailableError,
     AnalyticsRepositoryError,
     InvalidAnalyticsPeriodError,
+    PortfolioAnalyticsError,
 )
 from pams.composition import (
     compose_application,
@@ -155,6 +159,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     generate.add_argument("--html", action="store_true")
     generate.add_argument("--output", type=Path)
+    generate.add_argument("--from", dest="start_date", type=parse_iso_date)
+    generate.add_argument("--to", dest="end_date", type=parse_iso_date)
     generate.add_argument("--database", type=Path)
     generate.add_argument("--verbose", action="store_true")
     analytics = commands.add_parser("analytics", help="analyze portfolio history")
@@ -225,8 +231,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return int(ExitCode.SUCCESS)
             if arguments.command == "report":
                 assert application.valuate_portfolio is not None
+                assert application.analyze_portfolio is not None
+                analytics = None
+                analytics_unavailable = None
+                try:
+                    analytics = application.analyze_portfolio.execute(
+                        arguments.start_date, arguments.end_date
+                    )
+                except PortfolioAnalyticsError as error:
+                    analytics_unavailable = analytics_error_message(error)
                 daily_report = DailyReportBuilder().build(
-                    application.valuate_portfolio.execute()
+                    application.valuate_portfolio.execute(),
+                    analytics,
+                    analytics_unavailable=analytics_unavailable,
                 )
                 renderer = (
                     HtmlReportRenderer() if arguments.html else MarkdownReportRenderer()

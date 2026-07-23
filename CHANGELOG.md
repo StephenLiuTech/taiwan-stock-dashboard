@@ -10,6 +10,16 @@ All notable changes to this project will be documented in this file.
 - Immutable portfolio analytics and consecutive daily-return DTOs.
 - Analytics application use case with inclusive period filtering.
 - Human and JSON `analytics portfolio` CLI output.
+- Dashboard analytics supplied by `AnalyzePortfolioUseCase`.
+- Markdown and HTML daily-report analytics summaries.
+
+### Changed
+
+- Analytics formatting is shared at the Presentation boundary.
+- Dashboard and report presentation consume `PortfolioAnalytics` without
+  recalculating return or drawdown.
+- Analytics repository and processing failures are translated into controlled
+  presentation states.
 
 ## [0.8.0] - 2026-07-22
 

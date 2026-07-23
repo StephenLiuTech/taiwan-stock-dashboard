@@ -24,11 +24,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         with compose_operations(parse_database_override(argv)) as application:
             assert application.valuate_portfolio is not None
-            render_dashboard(application.valuate_portfolio)
-    except Exception as error:
+            assert application.analyze_portfolio is not None
+            render_dashboard(
+                application.valuate_portfolio,
+                application.analyze_portfolio,
+            )
+    except Exception:
         st.title("PAMS")
         st.caption("Personal Asset Management System")
-        st.error(f"Dashboard unavailable: {error}")
+        st.error("Dashboard unavailable. Check configuration and database access.")
 
 
 if __name__ == "__main__":

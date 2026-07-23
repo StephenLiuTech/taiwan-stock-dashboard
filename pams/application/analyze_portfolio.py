@@ -6,6 +6,7 @@ from typing import Protocol
 from domain import DailySnapshot, PortfolioAnalytics
 from pams.application.exceptions import (
     AnalyticsDataUnavailableError,
+    AnalyticsProcessingError,
     AnalyticsRepositoryError,
     InvalidAnalyticsPeriodError,
 )
@@ -60,4 +61,8 @@ class AnalyzePortfolioUseCase:
         except AnalyticsError as error:
             raise AnalyticsDataUnavailableError(
                 f"Portfolio snapshot history is invalid: {error}"
+            ) from error
+        except Exception as error:
+            raise AnalyticsProcessingError(
+                "Unable to analyze portfolio snapshot history"
             ) from error
