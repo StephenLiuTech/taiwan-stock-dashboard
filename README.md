@@ -193,11 +193,16 @@ SQLite and official-market adapters
 
 See:
 
+- [Product vision](docs/product-vision.md)
+- [Development standard](docs/development-standard.md)
 - [Architecture](docs/architecture.md)
 - [Database design](docs/database.md)
 - [Roadmap](docs/roadmap.md)
 - [v0.8.0 release notes](docs/releases/v0.8.0.md)
 - [Changelog](CHANGELOG.md)
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [MIT License](LICENSE)
 
 ## Development and release validation
 
@@ -216,6 +221,8 @@ transactions, valuation, and report generation.
 
 ```text
 app.py             Streamlit composition root
+.agents/           Agent-specific repository development rules
+.github/           CI workflow and collaboration templates
 config/            Environment and validated YAML configuration
 database/          SQLite connection and versioned schema
 domain/            Framework-independent models, ledger, and valuation DTOs
