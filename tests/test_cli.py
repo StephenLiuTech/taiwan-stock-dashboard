@@ -6,6 +6,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -474,3 +475,20 @@ def test_json_report_serializes_all_decimals_as_strings() -> None:
     assert payload["positions"][0]["average_cost"] == "80"
     assert payload["positions"][0]["portfolio_weight"] == str(Decimal("5") / 6)
     assert payload["mode"] == "updated"
+
+
+def test_json_report_is_ascii_safe_for_windows_consoles() -> None:
+    result = UpdatePortfolioUseCase(
+        FakeCalendar(), FakeEngine(), Path("test.db")  # type: ignore[arg-type]
+    ).execute(date(2026, 7, 22))
+    localized = replace(
+        result,
+        positions=(
+            replace(result.positions[0], name="台積電"),
+            *result.positions[1:],
+        ),
+    )
+    rendered = format_json_report(localized)
+    assert "台積電" not in rendered
+    assert "\\u53f0" in rendered
+    assert json.loads(rendered)["positions"][0]["name"] == "台積電"

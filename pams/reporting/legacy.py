@@ -114,9 +114,7 @@ def format_json_report(result: UpdateResult) -> str:
                 "commonly_ingestible_date": availability.commonly_ingestible_date,
             }
         )
-    return json.dumps(
-        payload, default=_json_default, ensure_ascii=False, sort_keys=True
-    )
+    return json.dumps(payload, default=_json_default, ensure_ascii=True, sort_keys=True)
 
 
 def format_status_report(status: PortfolioOverview) -> str:

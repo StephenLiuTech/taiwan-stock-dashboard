@@ -1,89 +1,199 @@
 # PAMS architecture
 
-## Dependency direction
+## Architectural principles
 
-Dependencies flow in one direction: **entry point → application layer → domain/services → repository protocols → database adapters**. Domain models sit at the center and do not import Streamlit, CLI, SQLite, Pandas, Plotly, or external APIs.
+PAMS uses inward-facing dependencies:
 
 ```text
-CLI / Dashboard / future Automation
-                    |
-                    v
-       Application use cases + DTOs
-                    |
-                    v
-        Domain models and services
-                    |
-                    v
-     Repository protocols and adapters
+CLI / Streamlit
+       ↓
+Application use cases + immutable DTOs
+       ↓
+Domain models + pure services + repository protocols
+       ↓
+SQLite repositories + official-market providers
 ```
 
-## Domain boundaries
+- Domain services do not import Streamlit, CLI, SQLite, Pandas, Plotly, or HTTP.
+- Application use cases own workflow orchestration and data loading.
+- Entry points parse input and render returned DTOs.
+- Repository adapters translate persistence records without calculating results.
+- Money, prices, quantities, and ratios use `Decimal`.
+- Dates use `date`; timestamps are timezone-aware.
 
-The `pams` command package is a composition surface. `cli.py` owns only argument parsing, DTO rendering, and exit codes. `composition.py` constructs concrete dependencies and complete use cases. `pams.application` owns the update, status, and verification workflows and returns immutable DTOs; it has no CLI or Streamlit dependency. `reporting.py` only serializes those DTOs. Importing the package creates no services or database connections.
+`pams/composition.py` is the concrete dependency root. Importing a package does
+not open a database connection or call a provider.
 
-The Streamlit dashboard follows the same boundary. `app.py` is a small composition root and passes only the composed `ValuatePortfolioUseCase` into `pams.dashboard`. The use case is executed once per cached page load. Dashboard modules import application DTOs and use cases only; they contain no SQLite, repository, provider, market-engine, domain-service, SQL access, or portfolio formulas. Summary, ranking, allocation, winners, losers, and the sortable holdings table render values from one `PortfolioValuation` result.
-
-`ValuatePortfolioUseCase` loads holdings and their latest quotes through repository protocols, rejects incomplete quote sets with `MissingQuoteError`, and invokes the pure `ValuationEngine`. The engine has no persistence dependencies and is the single source for cost basis, market value, unrealized profit/loss, and return calculations. It returns immutable Decimal-based `PortfolioValuation` and `HoldingValuation` DTOs consumed by CLI and the dashboard application boundary.
-
-Daily reporting is a separate presentation pipeline: `PortfolioValuation → DailyReportBuilder → DailyReport → MarkdownReportRenderer | HtmlReportRenderer`. The builder selects and deterministically orders DTO values without repository, SQL, CLI, or dashboard access. Renderers independently format the structured report as Markdown or standalone semantic HTML. CLI owns stdout and file writing; the report engine owns neither.
-
-Dashboard read queries use an explicit 60-second Streamlit data cache. Update operations are never cached and the dashboard invokes `UpdatePortfolioUseCase` only with `dry_run=True`. Missing quotes, snapshots, allocation, or history render as unavailable values or empty-state messages. Source disagreement is a neutral waiting condition rather than a system failure.
-
-`DemoDataUseCase` is an explicitly synthetic offline workflow. It validates that its target differs from the configured production database, creates a complete temporary SQLite database in one transaction, and atomically replaces only the selected demo target after success. It reuses the existing seed records, valuation service, snapshot service, and repository adapters; it never composes or calls market providers. Dashboard database selection remains in the `app.py` composition root via the forwarded `--database` argument.
-
-The domain package owns financial records, constrained enums, and structural invariants. Money, prices, and ratios use `Decimal`; ratios are decimal fractions (`0.05` means 5%). Dates and timestamps use standard-library `date` and timezone-aware `datetime` values.
-
-## Repositories
-
-Each aggregate has a purpose-specific protocol. Repositories translate between domain records and persistence rows, use parameterized SQL, and expose only needed queries. They do not calculate portfolio results or silently handle database failures.
-
-## Services
-
-- `PortfolioService` matches holdings and quotes and calculates position and portfolio totals.
-- `SnapshotService` maintains high-water marks and drawdowns and persists one record per date.
-- `BootstrapService` initializes storage and seeds the known portfolio only when both seed aggregates are empty.
-- `MarketDataEngine` verifies the official ROC source date, normalizes only held symbols, values the complete portfolio, and atomically persists quotes, one aggregate daily snapshot, and one position snapshot per holding. It has no scheduler or UI dependency.
-- `TransactionEngine` deterministically orders BUY and SELL records, maintains moving weighted-average cost by `(symbol, market, currency)`, and returns immutable active positions plus realized P/L. It has no repository, SQLite, Streamlit, Pandas, or market-data dependency.
+## Portfolio lifecycle
 
 ```text
-transactions
-     |
-     v
+Transactions
+     ↓
 TransactionEngine
-     |
-     v
-Holding Change Plan
-     |
-     v
-Explicit Apply
-     |
-     v
-Persisted Holdings
-     |
-     v
-Future Portfolio Snapshots
+     ↓
+Holding change plan
+     ↓ explicit atomic apply
+Persisted holdings
+     ↓
+ValuatePortfolioUseCase ← latest persisted quotes
+     ↓
+ValuationEngine
+     ↓
+PortfolioValuation
+  ├─ Portfolio CLI
+  ├─ Dashboard 2.0
+  └─ Daily Report Engine
 ```
 
-`RebuildHoldingsUseCase` reads transaction and holding repository protocols, invokes the transaction engine, supplies explicit holding metadata, and returns immutable projection DTOs. The v0.7 Sprint 1 workflow is dry-run only: it does not call holding write methods, and existing bootstrap holdings remain authoritative until a later persistence migration is designed.
+### Transactions
 
-Sprint 2 adds `ApplyRebuiltHoldingsUseCase`. It always calculates an immutable change plan and defaults to preview. An apply requires an explicit caller flag, non-empty transaction history, and explicit acknowledgement of unmatched active bootstrap holdings. A dedicated unit of work exposes only transaction reads and holding writes, disables repository auto-commit, and commits all CREATE, UPDATE, and CLOSE operations together. CLOSE means zeroing quantity and average cost while retaining the row and its metadata; hard deletion is not part of the workflow.
+`TransactionEngine` is a pure service. It deterministically orders BUY and SELL
+records, maintains moving weighted-average cost per
+`(symbol, market, currency)`, rejects oversells, and returns immutable active
+positions and realized profit or loss.
 
-Transaction entry and filtered listing are separate protocol-driven application use cases. CLI parsing uses `Decimal` directly and domain `Transaction` validation remains authoritative. Neither the transaction engine nor application use cases import SQLite.
+`ApplyRebuiltHoldingsUseCase` produces an immutable change plan before any
+write. Applying requires explicit authorization, non-empty transaction history,
+and acknowledgement of unmatched bootstrap holdings. A dedicated unit of work
+commits CREATE, UPDATE, and CLOSE operations atomically. Closing a holding sets
+quantity and average cost to zero; it does not delete historical identity or
+rewrite snapshots.
 
-Historical `daily_snapshots` and `position_snapshots` are outside the rebuild unit of work and are never rewritten. Rebuilt holdings affect portfolio valuation only when a future market-data update creates new snapshots.
+### Valuation
 
-`MarketDataEngine.preview()` follows the same provider, date-verification, normalization, completeness, and valuation path but does not invoke quote or snapshot writes. CLI dry runs never use write-then-delete behavior.
+`ValuatePortfolioUseCase` loads holdings and each holding's latest matching
+quote through repository protocols. An incomplete quote set raises
+`MissingQuoteError`; stale prices are not silently reused.
 
-## Persistence
+`ValuationEngine` is the single source of truth for:
 
-SQLite is the local adapter. Schema initialization is idempotent and versioned. One explicit `BEGIN IMMEDIATE` unit of work surrounds all writes for an ingestion run. Domain-facing repository protocols prevent SQLite details from leaking into services.
+- cost basis
+- market value
+- unrealized profit or loss
+- holding return
+- portfolio totals and return
 
-CLI update flow is: parse arguments → composed `UpdatePortfolioUseCase` → immutable `UpdateResult` → terminal/JSON rendering → exit. The use case owns automatic date resolution, dry-run routing, synchronization handling, and engine invocation. Status and verification follow the same pattern through `PortfolioStatusUseCase` and `VerifySystemUseCase`.
+The engine accepts holdings and quotes and returns immutable
+`HoldingValuation` and `PortfolioValuation` objects. It has no repository access.
+The application layer adds Decimal portfolio weights to the returned holding
+DTOs for presentation consumers.
 
-When an update omits `--date`, `MarketCalendar` reads the unique official date exposed by each latest-only provider. A commonly ingestible date exists only when TWSE and TPEx dates are equal. If publication is staggered, CLI returns a successful no-update outcome before calling the engine. It never treats the earlier date as retrievable, and contains no weekday or holiday tables. Manual requested dates still use strict engine verification. `status` exposes both source dates and current ingestibility; `verify` reports disagreement as WARN.
+The legacy `PortfolioService` delegates its overlapping calculations to
+`ValuationEngine`, preserving snapshot compatibility without duplicating
+valuation formulas.
 
-Manual updates use date-bound `HistoricalTWSEProvider` and `HistoricalTPExProvider` instances. They adapt the exchanges' structured historical JSON documents into the same `MarketDataProvider` record protocol used by latest-only sources. Composition selects historical providers only for an explicit date; the engine remains provider-mode agnostic and retains source-date, mixed-date, completeness, duplicate, and transactional checks.
+## Market data
 
-## Future Supabase migration
+```text
+Official TWSE / TPEx payloads
+             ↓
+Provider date verification
+             ↓
+Normalization and symbol completeness
+             ↓
+MarketDataEngine
+             ↓ one SQLite transaction
+Quotes + aggregate snapshot + position snapshots
+```
 
-A future Supabase adapter should implement the existing repository protocols and preserve domain serialization semantics. Configuration would select the adapter in the composition root. Domain models and services should require no changes; schema migration, authentication, connection lifecycle, and concurrency behavior must be addressed within the new adapter and deployment layer.
+Automatic updates use latest-only providers. `MarketCalendar` reads the
+official date exposed by each provider; a commonly ingestible dataset exists
+only when TWSE and TPEx expose the same date. Staggered publication produces a
+normal no-update result before the engine is called.
+
+Manual updates use date-bound historical providers. Both source dates must
+match the requested date. The engine rejects wrong dates, mixed dates,
+ambiguous freshness, missing requested symbols, suspended/no-trade securities,
+provider failures, and duplicate snapshots. Prices are never relabeled.
+
+`MarketDataEngine.preview()` performs the same retrieval, verification,
+normalization, completeness, and valuation path without persistence.
+
+## Persistence and snapshot grain
+
+SQLite is the local adapter. Schema initialization is ordered, versioned, and
+idempotent.
+
+- `price_quotes`: one normalized symbol/market quote per trade date
+- `daily_snapshots`: one aggregate portfolio row per snapshot date
+- `position_snapshots`: one holding-level valuation row per holding and date
+
+The aggregate and position snapshot grains are distinct. Rows are never copied
+between these tables.
+
+One explicit `BEGIN IMMEDIATE` unit of work surrounds quote upserts, the
+aggregate snapshot, and all position snapshots for an ingestion run. Any
+failure rolls back the complete run.
+
+Historical snapshots are immutable. Transaction-derived holding changes affect
+only future valuations and snapshots.
+
+## Dashboard boundary
+
+`app.py` composes one `ValuatePortfolioUseCase` for Streamlit. Dashboard 2.0
+executes it once per cached page load and reuses the returned
+`PortfolioValuation` for every section:
+
+- Portfolio Summary
+- Largest Positions
+- Allocation
+- Top Winners and Top Losers
+- Full Portfolio Table
+
+Dashboard modules import application DTOs and use cases only. They do not access
+repositories, SQL, providers, the market-data engine, or valuation formulas.
+Sorting and formatting are presentation concerns; displayed financial values
+originate from the application DTO.
+
+## Daily report boundary
+
+```text
+PortfolioValuation
+        ↓
+DailyReportBuilder
+        ↓
+DailyReport
+   ┌────┴────┐
+   ↓         ↓
+Markdown    HTML
+```
+
+`DailyReportBuilder` selects and deterministically orders valuation DTO values
+into a presentation-neutral `DailyReport`. It has no CLI, dashboard,
+repository, or SQL dependency.
+
+`MarkdownReportRenderer` and `HtmlReportRenderer` are independent. The HTML
+renderer produces standalone semantic HTML with no JavaScript or external CSS.
+CLI owns terminal output and UTF-8 file writing.
+
+The former single reporting module is retained as
+`pams.reporting.legacy`; its functions are re-exported by the package for
+backward compatibility.
+
+## Operational boundaries
+
+The CLI follows:
+
+```text
+parse arguments → call composed use case → render DTO → exit
+```
+
+`status` reads local operational state. `verify` checks configuration,
+database/schema health, portfolio inputs, official endpoint reachability,
+market availability, and dependency composition. Source publication
+disagreement is a warning rather than data corruption.
+
+Demo-data generation is isolated from production configuration. It creates a
+complete deterministic SQLite database transactionally and never calls live
+providers. Demo quotes are marked `demo_fixture`.
+
+## Out of scope for v0.8.0
+
+- scheduling and background jobs
+- email, Telegram, or other delivery channels
+- broker imports and corporate actions
+- authentication and multi-user access
+- cloud persistence
+
+Future adapters should implement existing repository protocols and preserve
+transaction, Decimal, source-date, and snapshot-grain semantics.

@@ -1,39 +1,59 @@
 # PAMS roadmap
 
-## v0.2 — Domain and persistence
+## Release status
 
-Typed domain models, portfolio and snapshot calculations, repository contracts, versioned SQLite storage, validated configuration, and safe initial portfolio seeding.
+| Version | Status | Scope |
+|---|---|---|
+| v0.2 | Complete | Domain models, SQLite repositories, schema, configuration |
+| v0.3 | Complete | TWSE/TPEx ingestion, normalization, historical providers |
+| v0.4 | Complete | Operational CLI, market availability, status and verification |
+| v0.5 | Complete | Application layer, immutable DTOs, initial dashboard |
+| v0.6 | Deferred | Notifications and dividend workflow expansion |
+| v0.7 | Complete | Transaction engine, ledger CLI, atomic holding rebuild |
+| v0.8.0 | Release-ready | Valuation Engine, Dashboard 2.0, Daily Report Engine |
 
-## v0.3 — Taiwan price ingestion
+## v0.8.0 — Portfolio valuation and reporting
 
-Implemented foundation: official TWSE/TPEx latest-only and historical date-query provider boundaries, normalization, provenance, quote persistence, and explicit portfolio refresh. Manual updates can retrieve an earlier official trading date while automatic updates retain cross-market latest-publication synchronization. Scheduling remains intentionally out of scope.
+Release date: **2026-07-22**
 
-## v0.4 — Dashboard
+### Sprint 1 — Portfolio Valuation Engine
 
-Sprint 1 implements the local update CLI, JSON/human reporting, dry-run validation, explicit exit codes, and dependency composition. v0.4.1 adds latest-only source synchronization semantics plus operational `status` and `verify` commands. Automatic ingestion waits until both markets publish the same official date. Dashboard views remain a later sprint.
+- Pure Decimal-based `ValuationEngine`
+- Immutable `HoldingValuation` and `PortfolioValuation`
+- Repository-driven `ValuatePortfolioUseCase`
+- Typed missing-quote handling
+- Human and JSON portfolio valuation CLI
+- Existing snapshot workflow delegated to shared valuation calculations
 
-## v0.5 — Application layer
+### Sprint 2 — Dashboard 2.0
 
-Sprint 1 introduces immutable application DTOs and dedicated update, portfolio-status, and system-verification use cases. Sprint 2 adds the single-page Streamlit portfolio dashboard, the `PortfolioOverview` read model, and persisted `PortfolioHistoryUseCase`. CLI, Dashboard, and future automation invoke workflows through composition; presentation entry points do not call repositories, providers, or `MarketDataEngine` directly.
+- Presentation-only Streamlit boundary
+- One cached valuation execution per page load
+- Portfolio Summary and Largest Positions
+- Allocation by holding
+- Top Winners and Top Losers
+- Sortable full Portfolio Table
 
-The dashboard development workflow includes an isolated deterministic demo database command. It produces 30 synthetic history points and is protected from targeting the configured production database. Demo fixtures are not official market data.
+### Sprint 3 — Daily Report Engine
 
-## v0.5 — Notifications and dividends
+- Presentation-neutral `DailyReportBuilder`
+- Deterministic largest-position, winner, loser, and portfolio ordering
+- Independent Markdown renderer
+- Independent semantic HTML renderer
+- CLI stdout and UTF-8 file output
 
-Add explicit notification ports, dividend workflows, scheduling, consent, and delivery observability.
+See the [v0.8.0 release notes](releases/v0.8.0.md) and
+[project changelog](../CHANGELOG.md).
 
-## v0.7 — Transaction engine
+## Post-v0.8 direction
 
-Sprint 1 adds deterministic moving weighted-average BUY/SELL accounting, realized P/L, immutable ledger results, and a protocol-driven dry-run holding projection use case. Sprint 2 adds manual transaction entry/listing, immutable holding change plans, migration warnings, and an explicit atomic apply boundary. Rebuild remains dry-run by default; bootstrap migration requires complete history or explicit unmatched-holding acknowledgement. Historical snapshots are never rewritten.
+Future work requires separate design and acceptance criteria. Candidate areas
+remain intentionally outside v0.8.0:
 
-## v0.8 — Portfolio valuation engine
+- dividend and corporate-action workflows
+- opt-in report delivery and scheduling
+- broker imports and reconciliation
+- authentication and multi-user boundaries
+- production database adapters, backups, and deployment operations
 
-Sprint 1 complete: a pure Decimal-based `ValuationEngine`, immutable holding and portfolio valuation DTOs, application-owned quote loading and missing-quote validation, shared portfolio calculations, and human/JSON `pams portfolio valuate` output.
-
-Sprint 2 complete: Dashboard 2.0 is a presentation-only consumer of one cached `PortfolioValuation`, with summary KPIs, position ranking, allocation, winners, losers, and a sortable holdings table.
-
-Sprint 3 complete: the repository-free `DailyReportBuilder` prepares a structured, presentation-neutral report from `PortfolioValuation`; independent Markdown and semantic HTML renderers support CLI output and UTF-8 files without email, messaging, or scheduling.
-
-## v1.0 — Deployment-ready system
-
-Add production persistence, migrations, authentication, backups, monitoring, security review, deployment automation, and operational documentation.
+No future item is implied to be implemented by this release.

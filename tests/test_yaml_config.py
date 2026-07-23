@@ -10,7 +10,7 @@ from domain import Currency
 
 def test_application_yaml_loads() -> None:
     config = load_app_config()
-    assert config.application.version == "0.2.0"
+    assert config.application.version == "0.8.0"
     assert config.default_currency is Currency.TWD
 
 
