@@ -13,6 +13,7 @@ Current release: **v0.8.0**
 ## Highlights
 
 - Pure Portfolio Valuation Engine shared by CLI, dashboard, snapshots, and reports
+- Canonical immutable `PortfolioValuation` returned through one application use case
 - Official TWSE and TPEx latest and historical market-data providers
 - Strict source-date verification with no stale-price relabeling
 - Transaction ledger with moving weighted-average holding projection
@@ -45,8 +46,10 @@ Aggregate Snapshots → AnalyzePortfolioUseCase → AnalyticsEngine
 ```
 
 The valuation engine is the single source of truth for cost basis, market value,
-unrealized profit or loss, and return. Streamlit and report renderers only
-format, order, and display application-provided values.
+unrealized profit or loss, return, portfolio totals, and holding weights.
+`ValuatePortfolioUseCase` is the single production entry point for current
+valuation. Streamlit and report renderers only format, order, and display
+application-provided values.
 
 ## Requirements
 

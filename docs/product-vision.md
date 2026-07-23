@@ -149,6 +149,10 @@ Future engines:
 
 Each engine must remain independent.
 
+`PortfolioValuation` is the canonical current-valuation result. CLI, Dashboard,
+reports, and future domain capabilities consume it through the Application
+Layer rather than reproducing valuation calculations.
+
 ## Asset Types
 
 Current:

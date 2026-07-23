@@ -8,8 +8,12 @@ from pathlib import Path
 import pytest
 
 from database import initialize_database, initialize_schema
-from domain import Currency, Holding, Market, PriceQuote
-from pams.application import MissingQuoteError, ValuatePortfolioUseCase
+from domain import Currency, Holding, Market, PortfolioValuation, PriceQuote
+from pams.application import (
+    MissingQuoteError,
+    ValuatePortfolioUseCase,
+    ValuationRepositoryError,
+)
 from pams.cli import main
 from repositories import SQLiteHoldingRepository, SQLitePriceQuoteRepository
 from services import ValuationEngine
@@ -58,6 +62,11 @@ def test_multiple_holdings_are_aggregated() -> None:
     assert result.total_cost == Decimal("900")
     assert result.total_market_value == Decimal("1150")
     assert result.total_unrealized_pl == Decimal("250")
+    assert result.holdings[0].portfolio_weight == Decimal("1000") / Decimal("1150")
+    assert result.holdings[1].portfolio_weight == Decimal("150") / Decimal("1150")
+    assert sum(
+        (item.portfolio_weight for item in result.holdings), Decimal("0")
+    ) == Decimal("1")
 
 
 @pytest.mark.parametrize(
@@ -72,6 +81,8 @@ def test_zero_quantity_or_cost_returns_zero(
     )
     assert result.holdings[0].unrealized_return == Decimal(expected_return)
     assert result.total_return == Decimal(expected_return)
+    if quantity == "0":
+        assert result.holdings[0].portfolio_weight == Decimal("0")
 
 
 def test_decimal_precision_is_not_converted_to_float() -> None:
@@ -113,16 +124,69 @@ class QuoteRepo:
         return self.values.get((symbol, market))
 
 
+class FailingHoldingRepo:
+    def list_all(self) -> list[Holding]:
+        raise RuntimeError("sqlite holding detail")
+
+
+class FailingQuoteRepo:
+    def get_latest(self, symbol: str, market: str) -> PriceQuote | None:
+        raise RuntimeError("sqlite quote detail")
+
+
 def test_use_case_loads_inputs_and_returns_valuation() -> None:
     result = ValuatePortfolioUseCase(
         HoldingRepo([holding()]), QuoteRepo([quote()])
     ).execute()
     assert result.total_market_value == Decimal("1000")
+    assert result.holdings[0].portfolio_weight == Decimal("1")
+
+
+def test_use_case_returns_engine_result_without_recalculating() -> None:
+    expected = PortfolioValuation(
+        valuation_date=date(2026, 7, 22),
+        total_cost=Decimal("1"),
+        total_market_value=Decimal("2"),
+        total_unrealized_pl=Decimal("1"),
+        total_return=Decimal("1"),
+        holdings=(),
+    )
+
+    class EngineStub:
+        def valuate(
+            self, holdings: list[Holding], quotes: list[PriceQuote]
+        ) -> PortfolioValuation:
+            return expected
+
+    result = ValuatePortfolioUseCase(
+        HoldingRepo([]), QuoteRepo([]), EngineStub()  # type: ignore[arg-type]
+    ).execute()
+    assert result is expected
 
 
 def test_use_case_raises_typed_error_for_missing_quote() -> None:
     with pytest.raises(MissingQuoteError, match="2330"):
         ValuatePortfolioUseCase(HoldingRepo([holding()]), QuoteRepo([])).execute()
+
+
+def test_holding_repository_failure_is_translated_with_original_cause() -> None:
+    with pytest.raises(
+        ValuationRepositoryError, match="load portfolio holdings"
+    ) as exc:
+        ValuatePortfolioUseCase(  # type: ignore[arg-type]
+            FailingHoldingRepo(), QuoteRepo([])
+        ).execute()
+    assert isinstance(exc.value.__cause__, RuntimeError)
+    assert "sqlite holding detail" not in str(exc.value)
+
+
+def test_quote_repository_failure_is_translated_with_original_cause() -> None:
+    with pytest.raises(ValuationRepositoryError, match="price quotes") as exc:
+        ValuatePortfolioUseCase(  # type: ignore[arg-type]
+            HoldingRepo([holding()]), FailingQuoteRepo()
+        ).execute()
+    assert isinstance(exc.value.__cause__, RuntimeError)
+    assert "sqlite quote detail" not in str(exc.value)
 
 
 @pytest.mark.parametrize("json_output", [False, True])

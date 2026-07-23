@@ -20,6 +20,11 @@ All notable changes to this project will be documented in this file.
   recalculating return or drawdown.
 - Analytics repository and processing failures are translated into controlled
   presentation states.
+- `PortfolioValuation` is the canonical valuation contract for CLI, Dashboard,
+  and reports.
+- Portfolio weights are calculated by `ValuationEngine` instead of the
+  Application Layer or snapshot adapter.
+- Valuation repository failures are translated into a typed Application error.
 
 ## [0.8.0] - 2026-07-22
 

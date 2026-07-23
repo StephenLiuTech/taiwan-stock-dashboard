@@ -28,6 +28,7 @@ from pams.application import (
     AnalyticsRepositoryError,
     InvalidAnalyticsPeriodError,
     PortfolioAnalyticsError,
+    ValuationRepositoryError,
 )
 from pams.composition import (
     compose_application,
@@ -186,6 +187,8 @@ def _error_exit_code(error: Exception) -> ExitCode:
     if isinstance(error, InvalidAnalyticsPeriodError):
         return ExitCode.CLI_ERROR
     if isinstance(error, (AnalyticsDataUnavailableError, AnalyticsRepositoryError)):
+        return ExitCode.CONFIG_OR_DATABASE_ERROR
+    if isinstance(error, ValuationRepositoryError):
         return ExitCode.CONFIG_OR_DATABASE_ERROR
     if isinstance(error, SourceDateError):
         return ExitCode.SOURCE_DATE_ERROR

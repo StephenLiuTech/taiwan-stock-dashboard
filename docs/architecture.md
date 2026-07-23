@@ -75,12 +75,20 @@ quote through repository protocols. An incomplete quote set raises
 
 The engine accepts holdings and quotes and returns immutable
 `HoldingValuation` and `PortfolioValuation` objects. It has no repository access.
-The application layer adds Decimal portfolio weights to the returned holding
-DTOs for presentation consumers.
+It owns every current-valuation calculation, including Decimal portfolio
+weights. `PortfolioValuation` is the canonical valuation contract consumed by
+CLI, Dashboard, and Daily Reports.
+
+`ValuatePortfolioUseCase` is the single production entry point for current
+valuation. It loads holdings and quotes through repository protocols, rejects
+an incomplete quote set, translates repository failures into typed Application
+errors, and returns the engine result without modifying financial values.
 
 The legacy `PortfolioService` delegates its overlapping calculations to
-`ValuationEngine`, preserving snapshot compatibility without duplicating
-valuation formulas.
+`ValuationEngine`, including position weights, preserving snapshot compatibility
+without duplicating current-valuation formulas. Snapshot-only calculations such
+as liabilities, leverage, and previous-close daily movement remain in that
+workflow and are not part of `PortfolioValuation`.
 
 ## Market data
 
@@ -130,7 +138,7 @@ only future valuations and snapshots.
 
 ## Dashboard boundary
 
-`app.py` composes one `ValuatePortfolioUseCase` for Streamlit. Dashboard 2.0
+`app.py` composes `ValuatePortfolioUseCase` for Streamlit. Dashboard 2.0
 executes it once per cached page load and reuses the returned
 `PortfolioValuation` for every section:
 

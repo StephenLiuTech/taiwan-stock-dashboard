@@ -58,7 +58,6 @@ class PortfolioService:
                 holding,
                 quote,
                 valuation_by_key[(holding.symbol, holding.market)],
-                total_market_value,
             )
             for holding, quote in inputs
         ]
@@ -88,7 +87,6 @@ class PortfolioService:
         holding: Holding,
         quote: PriceQuote,
         valuation: HoldingValuation,
-        total_market_value: Decimal,
     ) -> PositionValuation:
         cost_basis = valuation.cost_basis
         market_value = valuation.market_value
@@ -107,11 +105,7 @@ class PortfolioService:
             market_value=market_value,
             unrealized_pnl=valuation.unrealized_pl,
             unrealized_return=valuation.unrealized_return,
-            portfolio_weight=(
-                market_value / total_market_value
-                if total_market_value
-                else Decimal("0")
-            ),
+            portfolio_weight=valuation.portfolio_weight,
             daily_value_change=market_value - previous_value,
             daily_return=(
                 (quote.close_price - quote.previous_close) / quote.previous_close

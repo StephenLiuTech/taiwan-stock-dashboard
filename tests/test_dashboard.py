@@ -178,6 +178,20 @@ def test_dashboard_modules_do_not_import_forbidden_layers() -> None:
         assert imported.isdisjoint(forbidden), path.name
 
 
+def test_report_modules_do_not_import_repositories_or_services() -> None:
+    reporting = Path(__file__).parents[1] / "pams" / "reporting"
+    forbidden = {"repositories", "services"}
+    for path in reporting.glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+        assert imported.isdisjoint(forbidden), path.name
+
+
 def test_dashboard_load_executes_valuation_use_case_once() -> None:
     class FakeUseCase:
         def __init__(self) -> None:

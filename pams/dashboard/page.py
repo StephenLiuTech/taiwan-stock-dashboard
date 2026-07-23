@@ -9,9 +9,11 @@ from pams.application import (
     AnalyticsRepositoryError,
     AnalyzePortfolioUseCase,
     InvalidAnalyticsPeriodError,
+    MissingQuoteError,
     PortfolioAnalytics,
     PortfolioValuation,
     ValuatePortfolioUseCase,
+    ValuationRepositoryError,
 )
 from pams.dashboard.charts import allocation_chart, daily_returns_chart
 from pams.dashboard.formatting import kpi_view_model
@@ -48,8 +50,11 @@ def render_dashboard(
 
     try:
         valuation = _load_valuation(valuation_use_case)
-    except Exception:
-        st.error("Portfolio valuation is unavailable.")
+    except MissingQuoteError:
+        st.info("Portfolio valuation requires a current quote for every holding.")
+        return
+    except ValuationRepositoryError:
+        st.error("Portfolio valuation could not be loaded.")
         return
 
     st.caption(f"Valuation date: {valuation.valuation_date or '—'}")

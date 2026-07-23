@@ -1,5 +1,6 @@
 """Pure Decimal portfolio valuation calculations."""
 
+from dataclasses import replace
 from decimal import Decimal
 
 from domain import Holding, HoldingValuation, PortfolioValuation, PriceQuote
@@ -37,6 +38,17 @@ class ValuationEngine:
         total_cost = sum((item.cost_basis for item in values), Decimal("0"))
         total_market_value = sum((item.market_value for item in values), Decimal("0"))
         total_unrealized = total_market_value - total_cost
+        weighted_values = tuple(
+            replace(
+                item,
+                portfolio_weight=(
+                    item.market_value / total_market_value
+                    if total_market_value
+                    else Decimal("0")
+                ),
+            )
+            for item in values
+        )
         return PortfolioValuation(
             valuation_date=(
                 max(quote.trade_date for quote in quotes) if quotes else None
@@ -47,5 +59,5 @@ class ValuationEngine:
             total_return=(
                 total_unrealized / total_cost if total_cost else Decimal("0")
             ),
-            holdings=tuple(values),
+            holdings=weighted_values,
         )

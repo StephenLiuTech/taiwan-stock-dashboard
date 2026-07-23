@@ -93,3 +93,18 @@ Sprint 3 adds no financial methodology. Allocation analytics, benchmarking,
 cash-flow-adjusted return, TWR, MWR, IRR, XIRR, volatility, Sharpe and Sortino
 ratios, beta, correlation, sector or currency exposure, multi-asset support,
 import adapters, automation, and notifications remain unimplemented.
+
+### Sprint 4 — Valuation Capability
+
+- Canonical immutable `PortfolioValuation` contract
+- One current-valuation Application entry point through
+  `ValuatePortfolioUseCase`
+- Portfolio weights consolidated into the pure `ValuationEngine`
+- CLI, Dashboard, and Daily Reports consume the same valuation result
+- Typed translation of valuation repository failures
+- Existing snapshot workflow delegates overlapping valuation calculations to
+  the same engine
+
+Sprint 4 adds no historical or as-of valuation, allocation, benchmarks,
+cash-flow performance methodology, FX conversion, multi-currency aggregation,
+or multi-asset support.

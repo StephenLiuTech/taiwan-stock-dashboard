@@ -43,6 +43,7 @@ from pams.application.exceptions import (
     PortfolioAnalyticsError,
     ProductionDatabaseProtectedError,
     UnmatchedHoldingsError,
+    ValuationRepositoryError,
 )
 from pams.application.portfolio_history import PortfolioHistoryUseCase
 from pams.application.portfolio_status import PortfolioStatusUseCase
@@ -100,5 +101,6 @@ __all__ = [
     "VerificationLevel",
     "VerificationReport",
     "ValuatePortfolioUseCase",
+    "ValuationRepositoryError",
     "VerifySystemUseCase",
 ]
