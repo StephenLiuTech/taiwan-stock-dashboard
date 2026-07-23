@@ -8,7 +8,7 @@ and producing a Streamlit dashboard and printable daily reports. Financial
 calculations use `Decimal`, and presentation entry points consume immutable
 application DTOs instead of repositories or SQL.
 
-Current release: **v0.8.0**
+Current release: **v1.0.0**
 
 ## Highlights
 
@@ -54,18 +54,70 @@ application-provided values.
 ## Requirements
 
 - Python 3.11 or 3.12
-- SQLite
+- SQLite, included with supported Python installations
 - Network access only when fetching official TWSE or TPEx data
 
-## Quick start
+## Installation
+
+Create and activate an isolated environment:
 
 ```bash
 python -m venv .venv
+```
+
+Linux or macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Install PAMS and its runtime dependencies:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+For development and release validation:
+
+```bash
 python -m pip install -e ".[dev]"
 ```
 
-Copy `.env.example` to `.env` only when configuration overrides are needed.
-The default database is local SQLite.
+Both `python -m pams` and the installed `pams` console command are supported.
+
+Confirm the installed release with:
+
+```bash
+python -m pams --version
+```
+
+## Configuration
+
+PAMS has safe local defaults and does not require credentials. Copy
+`.env.example` to `.env` only when overrides are needed:
+
+```text
+PAMS_ENVIRONMENT=development
+PAMS_LOG_LEVEL=INFO
+PAMS_DATABASE_URL=sqlite:///data/pams.db
+PAMS_APP_TITLE=PAMS
+```
+
+Environment variables override `.env`. The default database path is
+`data/pams.db`; local databases are ignored by Git.
+
+## First run
+
+PAMS has no separate schema-initialization command. The easiest first run is
+the isolated demo workflow, which creates a fully initialized database with
+synthetic holdings, quotes, and snapshots:
 
 Create an isolated synthetic portfolio and launch the dashboard:
 
@@ -74,8 +126,15 @@ python -m pams demo-data
 python -m streamlit run app.py -- --database data/pams_demo.db
 ```
 
+The demo command reports the absolute database path and launch command. By
+default it writes `data/pams_demo.db`.
+
 Demo quotes are deterministic fixtures marked `demo_fixture`. They are intended
 for software demonstration only, not investment decisions.
+
+For a new production-style local database, the existing write workflows
+initialize schema as needed. Read-only commands do not silently create missing
+databases; they return a controlled error with first-run guidance.
 
 ## Dashboard
 
@@ -83,6 +142,12 @@ Launch the configured portfolio:
 
 ```bash
 python -m streamlit run app.py
+```
+
+To launch a specific database:
+
+```bash
+python -m streamlit run app.py -- --database data/pams_demo.db
 ```
 
 Dashboard 2.0 executes `ValuatePortfolioUseCase` once per cached page load and
@@ -105,8 +170,8 @@ the chart rendering boundary.
 ### Portfolio valuation
 
 ```bash
-python -m pams portfolio valuate
-python -m pams portfolio valuate --json
+python -m pams portfolio valuate --database data/pams_demo.db
+python -m pams portfolio valuate --json --database data/pams_demo.db
 ```
 
 ### Portfolio analytics
@@ -114,10 +179,10 @@ python -m pams portfolio valuate --json
 Analyze all aggregate daily snapshots or an inclusive requested period:
 
 ```bash
-python -m pams analytics portfolio
-python -m pams analytics portfolio --from 2026-01-01
-python -m pams analytics portfolio --from 2026-01-01 --to 2026-07-22
-python -m pams analytics portfolio --json
+python -m pams analytics portfolio --database data/pams_demo.db
+python -m pams analytics portfolio --from 2026-01-01 --database data/pams_demo.db
+python -m pams analytics portfolio --from 2026-01-01 --to 2026-07-22 --database data/pams_demo.db
+python -m pams analytics portfolio --json --database data/pams_demo.db
 ```
 
 The application layer loads `DailySnapshot` history and delegates every
@@ -131,11 +196,15 @@ Markdown is printed to standard output by default. Reports can also be written
 as UTF-8 Markdown or standalone HTML files.
 
 ```bash
-python -m pams report generate
-python -m pams report generate --html
-python -m pams report generate --output report.md
-python -m pams report generate --html --output report.html
+python -m pams report generate --database data/pams_demo.db
+python -m pams report generate --html --database data/pams_demo.db
+python -m pams report generate --output report.md --database data/pams_demo.db
+python -m pams report generate --html --output report.html --database data/pams_demo.db
 ```
+
+Without `--output`, reports are written to standard output. Relative output
+paths such as `report.md` and `report.html` are created in the current working
+directory. UTF-8 is used for report files.
 
 Daily reports call `AnalyzePortfolioUseCase` through the existing composition
 root and include a concise snapshot analytics summary. If analytics are
@@ -189,6 +258,10 @@ python -m pams verify
 python -m pams --help
 ```
 
+The actual analytics command includes its required `portfolio` subcommand.
+Run `python -m pams analytics --help` or
+`python -m pams report generate --help` for command-specific options.
+
 Use `--database PATH` on database-backed commands to select another SQLite
 file, and `--verbose` for diagnostic tracebacks.
 
@@ -218,6 +291,7 @@ See:
 - [Architecture](docs/architecture.md)
 - [Database design](docs/database.md)
 - [Roadmap](docs/roadmap.md)
+- [v1.0.0 release notes](docs/releases/v1.0.0.md)
 - [v0.8.0 release notes](docs/releases/v0.8.0.md)
 - [Changelog](CHANGELOG.md)
 - [Contributing guide](CONTRIBUTING.md)
@@ -231,6 +305,7 @@ python -m black --check .
 python -m ruff check .
 python -m pytest --basetemp=.pytest_tmp
 python -m compileall .
+git diff --check
 ```
 
 The test suite is offline and covers domain behavior, repositories, application
@@ -256,7 +331,20 @@ services/          Pure domain/application services
 tests/             Offline unit and integration tests
 ```
 
-## Release scope
+## First-run and unavailable-data behavior
 
-v0.8.0 intentionally does not include scheduling, email or messaging delivery,
-broker imports, corporate actions, authentication, or cloud persistence.
+- Missing database: controlled configuration error; no empty database is created.
+- No holdings: valuation reports that no portfolio holdings are available.
+- Missing quote: valuation identifies the affected holding instead of reusing a
+  stale price.
+- No snapshots: analytics reports that history is unavailable.
+- Missing analytics in a report: the valuation report remains valid and labels
+  analytics unavailable rather than showing a zero return.
+- Use `--verbose` only for local diagnostics when a traceback is needed.
+
+## Known limitations
+
+v1.0 supports Taiwan-listed equity portfolios in one currency context. It does
+not include allocation analytics, benchmarks, TWR, MWR, IRR, XIRR, broker
+imports, multi-asset valuation, FX conversion, scheduling, notifications,
+authentication, cloud persistence, or automated backup management.

@@ -157,6 +157,11 @@ def _compose(
     settings = get_settings()
     configure_logging("DEBUG" if verbose else settings.log_level, logging_config.format)
     database_path = resolve_database_path(database_override)
+    if not initialize and not database_path.exists():
+        raise ValueError(
+            f"Database does not exist: {database_path}. "
+            "Run 'python -m pams demo-data' for a usable first-run database."
+        )
     connection = initialize_database(f"sqlite:///{database_path.as_posix()}")
     try:
         if initialize:

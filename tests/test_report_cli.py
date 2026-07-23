@@ -16,7 +16,7 @@ from repositories import (
 )
 
 
-def report_database(path: Path) -> None:
+def report_database(path: Path, *, include_snapshots: bool = True) -> None:
     connection = initialize_database(f"sqlite:///{path.as_posix()}")
     initialize_schema(connection)
     SQLiteHoldingRepository(connection).upsert(
@@ -42,24 +42,25 @@ def report_database(path: Path) -> None:
             )
         ]
     )
-    snapshots = SQLiteSnapshotRepository(connection)
-    for snapshot_date, value in (
-        (date(2026, 7, 21), Decimal("900")),
-        (date(2026, 7, 22), Decimal("1000")),
-    ):
-        snapshots.add(
-            DailySnapshot(
-                snapshot_date=snapshot_date,
-                total_market_value=value,
-                total_cost_basis=Decimal("0"),
-                total_unrealized_pnl=value,
-                total_liabilities=Decimal("0"),
-                net_asset_value=value,
-                leverage_ratio=Decimal("0"),
-                high_water_mark=value,
-                drawdown=Decimal("0"),
+    if include_snapshots:
+        snapshots = SQLiteSnapshotRepository(connection)
+        for snapshot_date, value in (
+            (date(2026, 7, 21), Decimal("900")),
+            (date(2026, 7, 22), Decimal("1000")),
+        ):
+            snapshots.add(
+                DailySnapshot(
+                    snapshot_date=snapshot_date,
+                    total_market_value=value,
+                    total_cost_basis=Decimal("0"),
+                    total_unrealized_pnl=value,
+                    total_liabilities=Decimal("0"),
+                    net_asset_value=value,
+                    leverage_ratio=Decimal("0"),
+                    high_water_mark=value,
+                    drawdown=Decimal("0"),
+                )
             )
-        )
     connection.commit()
     connection.close()
 
@@ -108,9 +109,7 @@ def test_report_generate_handles_missing_analytics_without_failure(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     database = tmp_path / "report-without-snapshots.db"
-    connection = initialize_database(f"sqlite:///{database.as_posix()}")
-    initialize_schema(connection)
-    connection.close()
+    report_database(database, include_snapshots=False)
     assert main(["report", "generate", "--database", str(database)]) == 0
     output = capsys.readouterr().out
     assert "Portfolio analytics are unavailable until snapshots exist." in output

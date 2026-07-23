@@ -218,17 +218,19 @@ Completed.
 
 Personal Asset Management Platform
 
-Goals:
+Available:
 
 - Stable Domain
 - Stable Application Layer
 - Multiple Presentation Layers
+- Local SQLite persistence
+- Taiwan equity ledger, valuation, analytics, Dashboard, and reports
 
 ### v2.0
 
 Multi-Asset Platform
 
-Goals:
+Planned:
 
 - Multiple asset classes
 - Benchmark analytics

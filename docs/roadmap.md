@@ -10,8 +10,9 @@
 | v0.5 | Complete | Application layer, immutable DTOs, initial dashboard |
 | v0.6 | Deferred | Notifications and dividend workflow expansion |
 | v0.7 | Complete | Transaction engine, ledger CLI, atomic holding rebuild |
-| v0.8.0 | Release-ready | Valuation Engine, Dashboard 2.0, Daily Report Engine |
-| v0.9 | In development | Deterministic snapshot analytics foundation |
+| v0.8.0 | Complete | Valuation Engine, Dashboard 2.0, Daily Report Engine |
+| v0.9 | Complete | Deterministic snapshot analytics and valuation consolidation |
+| v1.0.0 | Release-ready | First usable local portfolio-management release |
 
 ## v0.8.0 — Portfolio valuation and reporting
 
@@ -108,3 +109,20 @@ import adapters, automation, and notifications remain unimplemented.
 Sprint 4 adds no historical or as-of valuation, allocation, benchmarks,
 cash-flow performance methodology, FX conversion, multi-currency aggregation,
 or multi-asset support.
+
+## v1.0.0 — First usable release
+
+Release readiness date: **2026-07-23**
+
+- Transaction ledger and holding projection
+- Official Taiwan market-data ingestion
+- Canonical current portfolio valuation
+- Basic snapshot analytics
+- CLI, Streamlit Dashboard, Markdown, HTML, and JSON presentation
+- SQLite persistence and isolated demo workflow
+- Governance, security policy, and automated CI
+
+Post-v1.0 work remains uncommitted roadmap direction rather than delivered
+functionality. Allocation analytics, benchmarking, cash-flow-adjusted returns,
+multi-asset support, FX conversion, import adapters, automation, and
+notifications are not part of v1.0.0.

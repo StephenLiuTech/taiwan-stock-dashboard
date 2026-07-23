@@ -1,7 +1,11 @@
 """Current portfolio valuation application workflow."""
 
 from pams.application.dto import PortfolioValuation
-from pams.application.exceptions import MissingQuoteError, ValuationRepositoryError
+from pams.application.exceptions import (
+    MissingQuoteError,
+    ValuationDataUnavailableError,
+    ValuationRepositoryError,
+)
 from repositories.interfaces import HoldingRepository, PriceQuoteRepository
 from services import ValuationEngine
 
@@ -27,6 +31,11 @@ class ValuatePortfolioUseCase:
             raise ValuationRepositoryError(
                 "Unable to load portfolio holdings"
             ) from error
+
+        if not holdings:
+            raise ValuationDataUnavailableError(
+                "No portfolio holdings are available for valuation"
+            )
 
         quotes = []
         missing = []

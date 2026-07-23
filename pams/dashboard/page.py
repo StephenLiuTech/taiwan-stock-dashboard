@@ -13,6 +13,7 @@ from pams.application import (
     PortfolioAnalytics,
     PortfolioValuation,
     ValuatePortfolioUseCase,
+    ValuationDataUnavailableError,
     ValuationRepositoryError,
 )
 from pams.dashboard.charts import allocation_chart, daily_returns_chart
@@ -50,6 +51,9 @@ def render_dashboard(
 
     try:
         valuation = _load_valuation(valuation_use_case)
+    except ValuationDataUnavailableError:
+        st.info("No portfolio holdings are available yet.")
+        return
     except MissingQuoteError:
         st.info("Portfolio valuation requires a current quote for every holding.")
         return

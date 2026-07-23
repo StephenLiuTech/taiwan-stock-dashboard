@@ -29,6 +29,10 @@ class MissingQuoteError(ApplicationError, ValueError):
     """Raised when a holding cannot be valued with a latest quote."""
 
 
+class ValuationDataUnavailableError(ApplicationError, ValueError):
+    """Raised when no holdings are available for current valuation."""
+
+
 class ValuationRepositoryError(ApplicationError):
     """Raised when valuation inputs cannot be loaded from persistence."""
 

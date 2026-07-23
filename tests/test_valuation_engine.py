@@ -12,6 +12,7 @@ from domain import Currency, Holding, Market, PortfolioValuation, PriceQuote
 from pams.application import (
     MissingQuoteError,
     ValuatePortfolioUseCase,
+    ValuationDataUnavailableError,
     ValuationRepositoryError,
 )
 from pams.cli import main
@@ -159,7 +160,9 @@ def test_use_case_returns_engine_result_without_recalculating() -> None:
             return expected
 
     result = ValuatePortfolioUseCase(
-        HoldingRepo([]), QuoteRepo([]), EngineStub()  # type: ignore[arg-type]
+        HoldingRepo([holding()]),
+        QuoteRepo([quote()]),
+        EngineStub(),  # type: ignore[arg-type]
     ).execute()
     assert result is expected
 
@@ -167,6 +170,11 @@ def test_use_case_returns_engine_result_without_recalculating() -> None:
 def test_use_case_raises_typed_error_for_missing_quote() -> None:
     with pytest.raises(MissingQuoteError, match="2330"):
         ValuatePortfolioUseCase(HoldingRepo([holding()]), QuoteRepo([])).execute()
+
+
+def test_use_case_distinguishes_empty_portfolio_from_zero_valuation() -> None:
+    with pytest.raises(ValuationDataUnavailableError, match="No portfolio holdings"):
+        ValuatePortfolioUseCase(HoldingRepo([]), QuoteRepo([])).execute()
 
 
 def test_holding_repository_failure_is_translated_with_original_cause() -> None:

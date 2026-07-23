@@ -18,6 +18,7 @@ from market_data import (
     SuspendedSecurityError,
     SymbolNotFoundError,
 )
+from pams import __version__
 from pams.analytics_reporting import (
     analytics_error_message,
     format_portfolio_analytics,
@@ -28,6 +29,7 @@ from pams.application import (
     AnalyticsRepositoryError,
     InvalidAnalyticsPeriodError,
     PortfolioAnalyticsError,
+    ValuationDataUnavailableError,
     ValuationRepositoryError,
 )
 from pams.composition import (
@@ -90,6 +92,9 @@ def parse_decimal(value: str) -> Decimal:
 def build_parser() -> argparse.ArgumentParser:
     """Build the PAMS command parser without side effects."""
     parser = argparse.ArgumentParser(prog="pams")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     update = commands.add_parser("update", help="fetch and value official market data")
     update.add_argument("--date", type=parse_iso_date)
@@ -190,6 +195,8 @@ def _error_exit_code(error: Exception) -> ExitCode:
         return ExitCode.CONFIG_OR_DATABASE_ERROR
     if isinstance(error, ValuationRepositoryError):
         return ExitCode.CONFIG_OR_DATABASE_ERROR
+    if isinstance(error, ValuationDataUnavailableError):
+        return ExitCode.SECURITY_ERROR
     if isinstance(error, SourceDateError):
         return ExitCode.SOURCE_DATE_ERROR
     if isinstance(error, ProviderDataError):

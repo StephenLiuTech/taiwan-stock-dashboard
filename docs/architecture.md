@@ -259,13 +259,28 @@ Demo-data generation is isolated from production configuration. It creates a
 complete deterministic SQLite database transactionally and never calls live
 providers. Demo quotes are marked `demo_fixture`.
 
-## Out of scope for v0.8.0
+## v1.0 deployment boundary
+
+PAMS v1.0 is a local, single-user application installed from the repository.
+The default adapter is file-backed SQLite. `demo-data` is the supported
+first-run workflow and produces an isolated database without provider access.
+Read-only composition rejects a missing database instead of creating an
+uninitialized file.
+
+Expected missing-data states are typed Application outcomes: no holdings,
+missing quotes, and no analytics snapshots are not represented as valid zero
+financial values.
+
+## Out of scope for v1.0.0
 
 - scheduling and background jobs
 - email, Telegram, or other delivery channels
 - broker imports and corporate actions
 - authentication and multi-user access
 - cloud persistence
+- allocation and benchmark analytics
+- TWR, MWR, IRR, XIRR, and risk ratios
+- multi-asset and FX conversion
 
 Future adapters should implement existing repository protocols and preserve
 transaction, Decimal, source-date, and snapshot-grain semantics.
