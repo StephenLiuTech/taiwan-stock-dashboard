@@ -3,7 +3,15 @@
 from datetime import date
 from decimal import Decimal
 
-from domain import Holding, Liability, PortfolioSummary, PositionValuation, PriceQuote
+from domain import (
+    Holding,
+    HoldingValuation,
+    Liability,
+    PortfolioSummary,
+    PositionValuation,
+    PriceQuote,
+)
+from services.valuation_engine import ValuationEngine
 
 
 class MissingPriceQuoteError(ValueError):
@@ -12,6 +20,9 @@ class MissingPriceQuoteError(ValueError):
 
 class PortfolioService:
     """Calculate portfolio positions and aggregate totals."""
+
+    def __init__(self, valuation_engine: ValuationEngine | None = None) -> None:
+        self.valuation_engine = valuation_engine or ValuationEngine()
 
     def value_portfolio(
         self,
@@ -37,17 +48,21 @@ class PortfolioService:
                 raise ValueError(f"Currency mismatch for {holding.symbol}")
             inputs.append((holding, quote))
 
-        total_market_value = sum(
-            (holding.quantity * quote.close_price for holding, quote in inputs),
-            Decimal("0"),
-        )
+        valuation = self.valuation_engine.valuate(holdings, quotes)
+        valuation_by_key = {
+            (item.symbol, item.market): item for item in valuation.holdings
+        }
+        total_market_value = valuation.total_market_value
         positions = [
-            self._value_position(holding, quote, total_market_value)
+            self._value_position(
+                holding,
+                quote,
+                valuation_by_key[(holding.symbol, holding.market)],
+                total_market_value,
+            )
             for holding, quote in inputs
         ]
-        total_cost_basis = sum(
-            (position.cost_basis for position in positions), Decimal("0")
-        )
+        total_cost_basis = valuation.total_cost
         total_liabilities = sum(
             (liability.principal for liability in liabilities), Decimal("0")
         )
@@ -62,7 +77,7 @@ class PortfolioService:
             positions=positions,
             total_market_value=total_market_value,
             total_cost_basis=total_cost_basis,
-            total_unrealized_pnl=total_market_value - total_cost_basis,
+            total_unrealized_pnl=valuation.total_unrealized_pl,
             total_liabilities=total_liabilities,
             net_asset_value=net_asset_value,
             leverage_ratio=leverage_ratio,
@@ -70,12 +85,13 @@ class PortfolioService:
 
     @staticmethod
     def _value_position(
-        holding: Holding, quote: PriceQuote, total_market_value: Decimal
+        holding: Holding,
+        quote: PriceQuote,
+        valuation: HoldingValuation,
+        total_market_value: Decimal,
     ) -> PositionValuation:
-        cost_basis = holding.quantity * holding.average_cost
-        market_value = holding.quantity * quote.close_price
-        unrealized_pnl = market_value - cost_basis
-        unrealized_return = unrealized_pnl / cost_basis if cost_basis else Decimal("0")
+        cost_basis = valuation.cost_basis
+        market_value = valuation.market_value
         previous_value = (
             holding.quantity * quote.previous_close
             if quote.previous_close is not None
@@ -89,8 +105,8 @@ class PortfolioService:
             close_price=quote.close_price,
             cost_basis=cost_basis,
             market_value=market_value,
-            unrealized_pnl=unrealized_pnl,
-            unrealized_return=unrealized_return,
+            unrealized_pnl=valuation.unrealized_pl,
+            unrealized_return=valuation.unrealized_return,
             portfolio_weight=(
                 market_value / total_market_value
                 if total_market_value

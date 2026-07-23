@@ -31,6 +31,7 @@ from pams.reporting import (
     format_holding_change_plan_json,
     format_human_report,
     format_json_report,
+    format_portfolio_valuation,
     format_status_report,
     format_transaction_list,
     format_transaction_record,
@@ -128,6 +129,16 @@ def build_parser() -> argparse.ArgumentParser:
     listing.add_argument("--json", action="store_true", dest="json_output")
     listing.add_argument("--database", type=Path)
     listing.add_argument("--verbose", action="store_true")
+    portfolio = commands.add_parser("portfolio", help="query portfolio values")
+    portfolio_commands = portfolio.add_subparsers(
+        dest="portfolio_command", required=True
+    )
+    valuate = portfolio_commands.add_parser(
+        "valuate", help="value holdings with latest persisted quotes"
+    )
+    valuate.add_argument("--json", action="store_true", dest="json_output")
+    valuate.add_argument("--database", type=Path)
+    valuate.add_argument("--verbose", action="store_true")
     for command_name in ("status", "verify"):
         command = commands.add_parser(command_name)
         command.add_argument("--database", type=Path)
@@ -167,6 +178,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             composer = compose_operations
         with composer(arguments.database, verbose=arguments.verbose) as application:
+            if arguments.command == "portfolio":
+                assert application.valuate_portfolio is not None
+                print(
+                    format_portfolio_valuation(
+                        application.valuate_portfolio.execute(),
+                        json_output=arguments.json_output,
+                    )
+                )
+                return int(ExitCode.SUCCESS)
             if arguments.command == "holdings":
                 assert application.apply_rebuilt_holdings is not None
                 plan = application.apply_rebuilt_holdings.execute(

@@ -6,6 +6,7 @@ PAMS (Personal Asset Management System) is a typed Python and Streamlit applicat
 
 - Validated holdings, transactions, dividends, liabilities, quotes, valuations, and snapshots
 - Portfolio valuation and daily snapshot services
+- Dedicated Decimal-safe valuation engine shared by application entry points
 - Explicit TWSE/TPEx end-of-day ingestion and quote normalization
 - Decimal-safe `price_quotes`, aggregate `daily_snapshots`, and holding-level `position_snapshots` persistence
 - Versioned SQLite schema and domain-specific repositories
@@ -77,6 +78,13 @@ python -m pams status
 python -m pams verify
 ```
 
+Value current holdings from their latest persisted quotes through the application layer:
+
+```bash
+python -m pams portfolio valuate
+python -m pams portfolio valuate --json
+```
+
 Record and query transactions through the application layer:
 
 ```bash
@@ -123,7 +131,7 @@ pams/           Application use cases/DTOs, CLI, dashboard, composition, reporti
 market_calendar/ Official cross-market availability-date resolution
 config/         Environment and validated YAML configuration
 domain/         Framework-independent models and enums
-services/       Portfolio, snapshot, and bootstrap use cases
+services/       Pure valuation plus portfolio, snapshot, and bootstrap services
 repositories/   Persistence protocols and SQLite adapters
 database/       SQLite connection and versioned schema
 tests/          Unit and SQLite integration tests

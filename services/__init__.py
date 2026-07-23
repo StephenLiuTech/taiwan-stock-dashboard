@@ -11,6 +11,7 @@ from services.transaction_engine import (
     TransactionEngineError,
     UnsupportedTransactionTypeError,
 )
+from services.valuation_engine import ValuationEngine
 
 __all__ = [
     "BootstrapService",
@@ -24,4 +25,5 @@ __all__ = [
     "TransactionEngine",
     "TransactionEngineError",
     "UnsupportedTransactionTypeError",
+    "ValuationEngine",
 ]

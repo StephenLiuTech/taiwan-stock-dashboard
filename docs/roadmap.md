@@ -26,6 +26,10 @@ Add explicit notification ports, dividend workflows, scheduling, consent, and de
 
 Sprint 1 adds deterministic moving weighted-average BUY/SELL accounting, realized P/L, immutable ledger results, and a protocol-driven dry-run holding projection use case. Sprint 2 adds manual transaction entry/listing, immutable holding change plans, migration warnings, and an explicit atomic apply boundary. Rebuild remains dry-run by default; bootstrap migration requires complete history or explicit unmatched-holding acknowledgement. Historical snapshots are never rewritten.
 
+## v0.8 — Portfolio valuation engine
+
+Sprint 1 complete: a pure Decimal-based `ValuationEngine`, immutable holding and portfolio valuation DTOs, application-owned quote loading and missing-quote validation, shared portfolio calculations, and human/JSON `pams portfolio valuate` output.
+
 ## v1.0 — Deployment-ready system
 
 Add production persistence, migrations, authentication, backups, monitoring, security review, deployment automation, and operational documentation.

@@ -28,6 +28,7 @@ from pams.application import (
     PortfolioHistoryUseCase,
     PortfolioStatusUseCase,
     UpdatePortfolioUseCase,
+    ValuatePortfolioUseCase,
     VerifySystemUseCase,
 )
 from pams.operations import OperationalStatusService, VerificationService
@@ -62,6 +63,7 @@ class ApplicationContext:
     apply_rebuilt_holdings: ApplyRebuiltHoldingsUseCase | None = None
     add_transaction: AddTransactionUseCase | None = None
     list_transactions: ListTransactionsUseCase | None = None
+    valuate_portfolio: ValuatePortfolioUseCase | None = None
 
 
 def resolve_database_path(override: Path | None = None) -> Path:
@@ -182,6 +184,7 @@ def _compose(
         snapshots = SQLiteSnapshotRepository(connection)
         position_snapshots = SQLitePositionSnapshotRepository(connection)
         quotes = SQLitePriceQuoteRepository(connection)
+        valuate_portfolio = ValuatePortfolioUseCase(holdings, quotes)
         transaction_repository = SQLiteTransactionRepository(connection)
         holding_metadata = {
             (holding.symbol, holding.market, holding.currency): (
@@ -227,6 +230,7 @@ def _compose(
             ),
             add_transaction=AddTransactionUseCase(transaction_repository),
             list_transactions=ListTransactionsUseCase(transaction_repository),
+            valuate_portfolio=valuate_portfolio,
         )
     finally:
         connection.close()

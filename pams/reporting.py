@@ -8,6 +8,7 @@ from pams.application import (
     DemoDataResult,
     HoldingChangePlan,
     PortfolioOverview,
+    PortfolioValuation,
     TransactionList,
     TransactionRecord,
     UpdateMode,
@@ -137,6 +138,36 @@ def format_status_report(status: PortfolioOverview) -> str:
             f"TPEx latest source date: {availability.tpex_latest_date or unavailable}",
             "Commonly ingestible dataset: "
             f"{availability.commonly_ingestible_date or 'not currently available'}",
+        ]
+    )
+
+
+def format_portfolio_valuation(
+    valuation: PortfolioValuation, *, json_output: bool = False
+) -> str:
+    """Render a current portfolio valuation without recalculating its values."""
+    if json_output:
+        return json.dumps(
+            {
+                "valuation_date": valuation.valuation_date,
+                "total_cost": valuation.total_cost,
+                "total_market_value": valuation.total_market_value,
+                "total_unrealized_pl": valuation.total_unrealized_pl,
+                "total_return": valuation.total_return,
+                "holdings": [vars(item) for item in valuation.holdings],
+            },
+            default=_json_default,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    return "\n".join(
+        [
+            "PAMS Portfolio Summary",
+            f"Valuation date: {valuation.valuation_date or 'none'}",
+            f"Market Value: {format_decimal(valuation.total_market_value)}",
+            f"Cost: {format_decimal(valuation.total_cost)}",
+            f"Unrealized: {format_decimal(valuation.total_unrealized_pl)}",
+            f"Return: {format_percentage(valuation.total_return)}",
         ]
     )
 

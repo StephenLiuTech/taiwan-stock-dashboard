@@ -23,3 +23,7 @@ class UnmatchedHoldingsError(HoldingRebuildError):
 
 class DuplicateTransactionError(ApplicationError, ValueError):
     """Raised when a transaction ID already exists."""
+
+
+class MissingQuoteError(ApplicationError, ValueError):
+    """Raised when a holding cannot be valued with a latest quote."""

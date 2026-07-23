@@ -20,6 +20,7 @@ from domain.models import (
     PriceQuote,
     Transaction,
 )
+from domain.valuation import HoldingValuation, PortfolioValuation
 
 __all__ = [
     "Currency",
@@ -28,10 +29,12 @@ __all__ = [
     "DividendStatus",
     "Holding",
     "HoldingType",
+    "HoldingValuation",
     "Liability",
     "LiabilityType",
     "Market",
     "PortfolioSummary",
+    "PortfolioValuation",
     "PortfolioLedger",
     "PositionSnapshot",
     "PositionValuation",

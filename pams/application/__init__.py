@@ -9,12 +9,14 @@ from pams.application.dto import (
     HoldingChangeItem,
     HoldingChangePlan,
     HoldingOverview,
+    HoldingValuation,
     LedgerPositionResult,
     MarketAvailabilitySummary,
     PortfolioHistory,
     PortfolioHistoryPoint,
     PortfolioOverview,
     PortfolioTotals,
+    PortfolioValuation,
     PositionSummary,
     ProjectedHoldingResult,
     RebuildHoldingsResult,
@@ -31,6 +33,7 @@ from pams.application.exceptions import (
     DuplicateTransactionError,
     EmptyTransactionHistoryError,
     HoldingRebuildError,
+    MissingQuoteError,
     ProductionDatabaseProtectedError,
     UnmatchedHoldingsError,
 )
@@ -39,6 +42,7 @@ from pams.application.portfolio_status import PortfolioStatusUseCase
 from pams.application.rebuild_holdings import RebuildHoldingsUseCase
 from pams.application.transactions import AddTransactionUseCase, ListTransactionsUseCase
 from pams.application.update_portfolio import UpdatePortfolioUseCase
+from pams.application.valuate_portfolio import ValuatePortfolioUseCase
 from pams.application.verify_system import VerifySystemUseCase
 
 __all__ = [
@@ -54,14 +58,17 @@ __all__ = [
     "HoldingChangeItem",
     "HoldingChangePlan",
     "HoldingOverview",
+    "HoldingValuation",
     "HoldingRebuildError",
     "LedgerPositionResult",
     "ListTransactionsUseCase",
     "MarketAvailabilitySummary",
+    "MissingQuoteError",
     "PortfolioHistory",
     "PortfolioHistoryPoint",
     "PortfolioHistoryUseCase",
     "PortfolioOverview",
+    "PortfolioValuation",
     "PortfolioStatusUseCase",
     "PortfolioTotals",
     "PositionSummary",
@@ -78,5 +85,6 @@ __all__ = [
     "VerificationItem",
     "VerificationLevel",
     "VerificationReport",
+    "ValuatePortfolioUseCase",
     "VerifySystemUseCase",
 ]

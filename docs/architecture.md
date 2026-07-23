@@ -5,7 +5,7 @@
 Dependencies flow in one direction: **entry point → application layer → domain/services → repository protocols → database adapters**. Domain models sit at the center and do not import Streamlit, CLI, SQLite, Pandas, Plotly, or external APIs.
 
 ```text
-CLI / future Dashboard / future Automation
+CLI / Dashboard / future Automation
                     |
                     v
        Application use cases + DTOs
@@ -22,6 +22,8 @@ CLI / future Dashboard / future Automation
 The `pams` command package is a composition surface. `cli.py` owns only argument parsing, DTO rendering, and exit codes. `composition.py` constructs concrete dependencies and complete use cases. `pams.application` owns the update, status, and verification workflows and returns immutable DTOs; it has no CLI or Streamlit dependency. `reporting.py` only serializes those DTOs. Importing the package creates no services or database connections.
 
 The Streamlit dashboard follows the same boundary. `app.py` is a small composition root and passes composed application use cases into `pams.dashboard`. Dashboard modules import application DTOs and use cases only; they contain no SQLite, repository, provider, market-engine, domain-service, or SQL access. `PortfolioStatusUseCase` returns `PortfolioOverview`, including persisted KPIs and holding rows. `PortfolioHistoryUseCase` returns chronological aggregate `PortfolioHistory` points. The UI formats these values but does not recalculate them.
+
+`ValuatePortfolioUseCase` loads holdings and their latest quotes through repository protocols, rejects incomplete quote sets with `MissingQuoteError`, and invokes the pure `ValuationEngine`. The engine has no persistence dependencies and is the single source for cost basis, market value, unrealized profit/loss, and return calculations. It returns immutable Decimal-based `PortfolioValuation` and `HoldingValuation` DTOs consumed by CLI and the dashboard application boundary.
 
 Dashboard read queries use an explicit 60-second Streamlit data cache. Update operations are never cached and the dashboard invokes `UpdatePortfolioUseCase` only with `dry_run=True`. Missing quotes, snapshots, allocation, or history render as unavailable values or empty-state messages. Source disagreement is a neutral waiting condition rather than a system failure.
 
