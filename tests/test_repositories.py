@@ -1,7 +1,7 @@
 """SQLite repository integration tests."""
 
 import sqlite3
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -21,6 +21,7 @@ from repositories import (
     SQLiteDividendRepository,
     SQLiteHoldingRepository,
     SQLiteLiabilityRepository,
+    SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
     SQLiteTransactionRepository,
 )
@@ -171,3 +172,23 @@ def test_snapshot_date_is_unique(connection: sqlite3.Connection) -> None:
     repository.add(snapshot)
     with pytest.raises(sqlite3.IntegrityError):
         repository.add(snapshot)
+
+
+def test_report_delivery_sent_failed_and_retry_state(
+    connection: sqlite3.Connection,
+) -> None:
+    repository = SQLiteReportDeliveryRepository(connection)
+    report_date = date(2026, 7, 22)
+    recipient = "recipient@example.com"
+    repository.mark_failed("daily", report_date, recipient, "temporary")
+    assert repository.claim("daily", report_date, recipient) is True
+    assert repository.claim("daily", report_date, recipient) is False
+    repository.mark_sent(
+        "daily",
+        report_date,
+        recipient,
+        datetime.fromisoformat("2026-07-22T10:00:00+00:00"),
+    )
+    assert repository.claim("daily", report_date, recipient) is False
+    count = connection.execute("SELECT COUNT(*) FROM report_deliveries").fetchone()[0]
+    assert count == 1

@@ -53,7 +53,7 @@ Future work requires separate design and acceptance criteria. Candidate areas
 remain intentionally outside v0.8.0:
 
 - dividend and corporate-action workflows
-- opt-in report delivery and scheduling
+- additional delivery adapters and scheduling
 - broker imports and reconciliation
 - authentication and multi-user boundaries
 - production database adapters, backups, and deployment operations
@@ -126,3 +126,13 @@ Post-v1.0 work remains uncommitted roadmap direction rather than delivered
 functionality. Allocation analytics, benchmarking, cash-flow-adjusted returns,
 multi-asset support, FX conversion, import adapters, automation, and
 notifications are not part of v1.0.0.
+## Post-v1.0 operational delivery
+
+- Idempotent daily portfolio report delivery
+- Persisted SENT/FAILED outcomes with an atomic send claim
+- Multipart HTML and plain-text reports
+- Resend REST transport recommended for personal installations
+- Microsoft Graph delegated OAuth2 transport for enterprise installations
+- Locally cached MSAL tokens for non-interactive subsequent delivery
+- Optional authenticated STARTTLS SMTP adapter for non-Microsoft providers
+- Automatic update orchestration, explicit snapshot dates, dry-run, and force

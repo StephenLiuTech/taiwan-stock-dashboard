@@ -69,13 +69,18 @@ class MarketDataEngine:
             )
         )
 
-    def refresh(self, trade_date: date) -> MarketDataRefreshResult:
+    def refresh(
+        self,
+        trade_date: date,
+        *,
+        holdings_override: tuple[Holding, ...] | None = None,
+    ) -> MarketDataRefreshResult:
         """Run one caller-triggered market-data refresh; no scheduling is implied."""
         if self.unit_of_work.daily_snapshots.get_by_date(trade_date):
             raise DuplicateSnapshotError(
                 f"Snapshot already exists for {trade_date.isoformat()}"
             )
-        result = self.preview(trade_date)
+        result = self.preview(trade_date, holdings_override=holdings_override)
         position_snapshots = [
             PositionSnapshot(snapshot_date=trade_date, **position.model_dump())
             for position in result.summary.positions
@@ -94,9 +99,40 @@ class MarketDataEngine:
             verified_source_date=result.verified_source_date,
         )
 
-    def preview(self, trade_date: date) -> MarketDataRefreshResult:
+    def rebuild(
+        self,
+        trade_date: date,
+        *,
+        holdings_override: tuple[Holding, ...] | None = None,
+    ) -> MarketDataRefreshResult:
+        """Explicitly replace one date while preserving refresh's duplicate guard."""
+        result = self.preview(trade_date, holdings_override=holdings_override)
+        position_snapshots = [
+            PositionSnapshot(snapshot_date=trade_date, **position.model_dump())
+            for position in result.summary.positions
+        ]
+        with self.unit_of_work.transaction():
+            self.unit_of_work.price_quotes.replace_many_for_date(
+                trade_date, list(result.quotes)
+            )
+            self.unit_of_work.daily_snapshots.replace(result.snapshot)
+            self.unit_of_work.position_snapshots.replace_many(
+                trade_date, position_snapshots
+            )
+        return result
+
+    def preview(
+        self,
+        trade_date: date,
+        *,
+        holdings_override: tuple[Holding, ...] | None = None,
+    ) -> MarketDataRefreshResult:
         """Run full validation and valuation without market-data persistence."""
-        holdings = self.holdings.list_all()
+        holdings = (
+            list(holdings_override)
+            if holdings_override is not None
+            else self.holdings.list_all()
+        )
         requested = {
             market: {holding.symbol for holding in holdings if holding.market == market}
             for market in Market

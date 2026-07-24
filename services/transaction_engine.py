@@ -172,6 +172,50 @@ class TransactionEngine:
                 )
         return tuple(projected)
 
+    def project_current_holdings(
+        self,
+        transactions: list[Transaction],
+        existing_holdings: list[Holding],
+    ) -> tuple[Holding, ...]:
+        """Overlay transaction-derived positions on holdings without ledger history."""
+        if not transactions:
+            return tuple(existing_holdings)
+        existing_by_key = {
+            (holding.symbol, holding.market, holding.currency): holding
+            for holding in existing_holdings
+        }
+        metadata = {
+            key: HoldingProjectionMetadata(holding.name, holding.holding_type)
+            for key, holding in existing_by_key.items()
+        }
+        for transaction in transactions:
+            key = (transaction.symbol, transaction.market, transaction.currency)
+            metadata.setdefault(
+                key,
+                HoldingProjectionMetadata(transaction.symbol, HoldingType.STOCK),
+            )
+        ledger = self.build_ledger(transactions)
+        projected = self.project_holdings(ledger, metadata, existing_holdings)
+        transaction_keys = {
+            (transaction.symbol, transaction.market, transaction.currency)
+            for transaction in transactions
+        }
+        unchanged = (
+            holding
+            for key, holding in existing_by_key.items()
+            if key not in transaction_keys
+        )
+        return tuple(
+            sorted(
+                (*projected, *unchanged),
+                key=lambda holding: (
+                    holding.symbol,
+                    holding.market.value,
+                    holding.currency.value,
+                ),
+            )
+        )
+
     @staticmethod
     def _validate_transaction(transaction: Transaction) -> None:
         if transaction.quantity <= 0:

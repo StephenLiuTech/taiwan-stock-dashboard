@@ -27,6 +27,8 @@ from pams.application import (
     AddTransactionCommand,
     AnalyticsDataUnavailableError,
     AnalyticsRepositoryError,
+    DailyReportDeliveryError,
+    DailyReportSnapshotMissingError,
     InvalidAnalyticsPeriodError,
     PortfolioAnalyticsError,
     ValuationDataUnavailableError,
@@ -34,9 +36,12 @@ from pams.application import (
 )
 from pams.composition import (
     compose_application,
+    compose_daily_report,
     compose_demo_data,
+    compose_email_authorization,
     compose_ledger_operations,
     compose_operations,
+    selected_email_transport,
 )
 from pams.reporting import (
     DailyReportBuilder,
@@ -100,6 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--date", type=parse_iso_date)
     update.add_argument("--database", type=Path)
     update.add_argument("--dry-run", action="store_true")
+    update.add_argument("--force", action="store_true")
     update.add_argument("--json", action="store_true", dest="json_output")
     update.add_argument("--verbose", action="store_true")
     demo = commands.add_parser("demo-data", help="create an isolated demo database")
@@ -181,6 +187,26 @@ def build_parser() -> argparse.ArgumentParser:
     analytics_portfolio.add_argument("--json", action="store_true", dest="json_output")
     analytics_portfolio.add_argument("--database", type=Path)
     analytics_portfolio.add_argument("--verbose", action="store_true")
+    daily_report = commands.add_parser(
+        "daily-report", help="generate and deliver a persisted daily report"
+    )
+    daily_report_commands = daily_report.add_subparsers(
+        dest="daily_report_command", required=True
+    )
+    send = daily_report_commands.add_parser("send", help="send the daily report")
+    send.add_argument("--date", type=parse_iso_date)
+    send.add_argument("--dry-run", action="store_true")
+    send.add_argument("--force", action="store_true")
+    send.add_argument("--debug", action="store_true")
+    send.add_argument("--database", type=Path)
+    send.add_argument("--verbose", action="store_true")
+    email = commands.add_parser("email", help="manage email authorization")
+    email_commands = email.add_subparsers(dest="email_command", required=True)
+    authorize = email_commands.add_parser(
+        "authorize", help="authorize Microsoft Graph email delivery"
+    )
+    authorize.add_argument("--verbose", action="store_true")
+    authorize.add_argument("--debug", action="store_true")
     for command_name in ("status", "verify"):
         command = commands.add_parser(command_name)
         command.add_argument("--database", type=Path)
@@ -189,6 +215,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _error_exit_code(error: Exception) -> ExitCode:
+    if isinstance(error, DailyReportDeliveryError):
+        return ExitCode.PROVIDER_ERROR
+    if isinstance(error, DailyReportSnapshotMissingError):
+        return ExitCode.CONFIG_OR_DATABASE_ERROR
     if isinstance(error, InvalidAnalyticsPeriodError):
         return ExitCode.CLI_ERROR
     if isinstance(error, (AnalyticsDataUnavailableError, AnalyticsRepositoryError)):
@@ -218,7 +248,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = compose_demo_data().execute(arguments.database)
             print(format_demo_data_report(result))
             return int(ExitCode.SUCCESS)
-        if arguments.command == "update":
+        if arguments.command == "email":
+            authorization = compose_email_authorization()
+            authorization.execute(_show_device_authorization_prompt)
+            print("Microsoft email authorization complete; token cache updated.")
+            return int(ExitCode.SUCCESS)
+        if arguments.command == "daily-report":
+            print(f"Email Transport : {selected_email_transport()}")
+            composer = lambda database, verbose: compose_daily_report(  # noqa: E731
+                database, verbose=verbose, dry_run=arguments.dry_run
+            )
+        elif arguments.command == "update":
             composer = compose_application
         elif (arguments.command == "holdings" and arguments.apply) or (
             arguments.command == "transaction"
@@ -227,7 +267,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             composer = compose_ledger_operations
         else:
             composer = compose_operations
-        with composer(arguments.database, verbose=arguments.verbose) as application:
+        with composer(
+            arguments.database,
+            verbose=getattr(arguments, "verbose", False),
+        ) as application:
+            if arguments.command == "daily-report":
+                assert application.send_daily_report is not None
+                result = application.send_daily_report.execute(
+                    arguments.date,
+                    dry_run=arguments.dry_run,
+                    force=arguments.force,
+                )
+                print(_format_daily_report_delivery(result))
+                return int(ExitCode.SUCCESS)
             if arguments.command == "analytics":
                 assert application.analyze_portfolio is not None
                 analytics = application.analyze_portfolio.execute(
@@ -328,7 +380,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     else ExitCode.SUCCESS
                 )
             result = application.update_portfolio.execute(
-                arguments.date, dry_run=arguments.dry_run
+                arguments.date,
+                dry_run=arguments.dry_run,
+                force=arguments.force,
             )
             report = (
                 format_json_report(result)
@@ -339,6 +393,35 @@ def main(argv: Sequence[str] | None = None) -> int:
             return int(ExitCode.SUCCESS)
     except Exception as error:
         print(f"pams: {error}", file=sys.stderr)
-        if arguments.verbose:
+        if getattr(arguments, "verbose", False) or getattr(arguments, "debug", False):
             traceback.print_exc()
         return int(_error_exit_code(error))
+
+
+def _format_daily_report_delivery(result: object) -> str:
+    """Render a stable operational delivery outcome."""
+    from pams.application import DailyReportSendResult
+
+    assert isinstance(result, DailyReportSendResult)
+    lines = [
+        "PAMS Daily Report",
+        f"Report date: {result.report_date}",
+        f"Recipient: {result.recipient}",
+    ]
+    if result.status == "already_sent":
+        lines.append(
+            f"No email sent: report already delivered for {result.report_date}"
+        )
+    elif result.status == "dry_run":
+        lines.extend((f"Subject: {result.subject}", "Result: dry-run; no email sent"))
+    else:
+        lines.append("Result: sent")
+    return "\n".join(lines)
+
+
+def _show_device_authorization_prompt(verification_url: str, user_code: str) -> None:
+    """Display only the safe fields needed for interactive device consent."""
+    print("Microsoft Email Authorization")
+    print(f"Verification URL: {verification_url}")
+    print(f"User code: {user_code}")
+    print("Waiting for authorization...")

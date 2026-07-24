@@ -3,6 +3,7 @@
 import sqlite3
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from domain import (
     DailySnapshot,
@@ -410,6 +411,14 @@ class SQLiteSnapshotRepository:
         if self.auto_commit:
             self.connection.commit()
 
+    def replace(self, snapshot: DailySnapshot) -> None:
+        """Replace the one aggregate row at this snapshot's date."""
+        self.connection.execute(
+            "DELETE FROM daily_snapshots WHERE snapshot_date = ?",
+            (snapshot.snapshot_date.isoformat(),),
+        )
+        self.add(snapshot)
+
     @staticmethod
     def _from_row(row: sqlite3.Row) -> DailySnapshot:
         values = dict(row)
@@ -467,6 +476,14 @@ class SQLitePriceQuoteRepository:
         )
         if self.auto_commit:
             self.connection.commit()
+
+    def replace_many_for_date(self, trade_date: date, quotes: list[PriceQuote]) -> None:
+        """Replace the complete normalized quote set for one date."""
+        self.connection.execute(
+            "DELETE FROM price_quotes WHERE trade_date = ?",
+            (trade_date.isoformat(),),
+        )
+        self.upsert_many(quotes)
 
     def list_by_date(self, trade_date: date) -> list[PriceQuote]:
         rows = self.connection.execute(
@@ -537,6 +554,16 @@ class SQLitePositionSnapshotRepository:
         if self.auto_commit:
             self.connection.commit()
 
+    def replace_many(
+        self, snapshot_date: date, snapshots: list[PositionSnapshot]
+    ) -> None:
+        """Replace every holding-grain row for one snapshot date."""
+        self.connection.execute(
+            "DELETE FROM position_snapshots WHERE snapshot_date = ?",
+            (snapshot_date.isoformat(),),
+        )
+        self.add_many(snapshots)
+
     def list_by_date(self, snapshot_date: date) -> list[PositionSnapshot]:
         rows = self.connection.execute(
             """SELECT * FROM position_snapshots
@@ -571,3 +598,74 @@ class SQLitePositionSnapshotRepository:
         if values["daily_return"] is not None:
             values["daily_return"] = _decimal(values["daily_return"])
         return PositionSnapshot.model_validate(values)
+
+
+class SQLiteReportDeliveryRepository:
+    """Persist idempotent report-delivery outcomes."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def claim(self, report_type: str, report_date: date, recipient: str) -> bool:
+        """Atomically claim a new or previously failed delivery."""
+        cursor = self.connection.execute(
+            """INSERT INTO report_deliveries
+            (id, report_type, report_date, recipient, status, sent_at,
+             error_message, created_at)
+            VALUES (?, ?, ?, ?, 'SENDING', NULL, NULL, datetime('now'))
+            ON CONFLICT(report_type, report_date, recipient) DO UPDATE SET
+                status = 'SENDING',
+                sent_at = NULL,
+                error_message = NULL
+            WHERE report_deliveries.status = 'FAILED'""",
+            (str(uuid4()), report_type, report_date.isoformat(), recipient),
+        )
+        self.connection.commit()
+        return cursor.rowcount == 1
+
+    def mark_sent(
+        self, report_type: str, report_date: date, recipient: str, sent_at: datetime
+    ) -> None:
+        self._upsert(
+            report_type,
+            report_date,
+            recipient,
+            "SENT",
+            sent_at.isoformat(),
+            None,
+        )
+
+    def mark_failed(
+        self, report_type: str, report_date: date, recipient: str, error: str
+    ) -> None:
+        self._upsert(report_type, report_date, recipient, "FAILED", None, error)
+
+    def _upsert(
+        self,
+        report_type: str,
+        report_date: date,
+        recipient: str,
+        status: str,
+        sent_at: str | None,
+        error_message: str | None,
+    ) -> None:
+        self.connection.execute(
+            """INSERT INTO report_deliveries
+            (id, report_type, report_date, recipient, status, sent_at,
+             error_message, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(report_type, report_date, recipient) DO UPDATE SET
+                status = excluded.status,
+                sent_at = excluded.sent_at,
+                error_message = excluded.error_message""",
+            (
+                str(uuid4()),
+                report_type,
+                report_date.isoformat(),
+                recipient,
+                status,
+                sent_at,
+                error_message,
+            ),
+        )
+        self.connection.commit()

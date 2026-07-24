@@ -23,6 +23,7 @@ Current release: **v1.0.0**
 - Pure snapshot-based basic performance analytics foundation
 - Shared analytics presentation across CLI, Dashboard, Markdown, and HTML reports
 - Operational `status`, `verify`, dry-run, and JSON CLI modes
+- Resend delivery for personal installations; Microsoft Graph for enterprises
 - Isolated synthetic demo-data workflow
 
 ## Product flow
@@ -238,10 +239,16 @@ Manual mode uses official historical date-query providers:
 ```bash
 python -m pams update --date 2026-07-22
 python -m pams update --date 2026-07-22 --dry-run --json
+python -m pams update --date 2026-07-22 --force
 ```
 
 The source date from each exchange must match the requested date. PAMS never
 relabels a latest payload as historical data.
+
+An existing snapshot remains an idempotent no-op unless `--force` is supplied.
+Forced update rebuilds holdings from the complete current transaction ledger
+and atomically replaces that date's quotes, aggregate snapshot, and position
+snapshots. The regular Market Data Engine duplicate guard remains active.
 
 ### Transactions and holdings
 
@@ -354,5 +361,128 @@ tests/             Offline unit and integration tests
 
 v1.0 supports Taiwan-listed equity portfolios in one currency context. It does
 not include allocation analytics, benchmarks, TWR, MWR, IRR, XIRR, broker
-imports, multi-asset valuation, FX conversion, scheduling, notifications,
+imports, multi-asset valuation, FX conversion, scheduling, non-email notifications,
 authentication, cloud persistence, or automated backup management.
+## Daily report email delivery
+
+PAMS can update the portfolio, build a report from persisted aggregate and
+position snapshots, and deliver plain-text/HTML email. Resend is recommended
+for personal installations because it requires only an API key and a verified
+sender. Microsoft Graph remains available for enterprise Microsoft 365
+environments. PAMS does not use basic SMTP authentication for Hotmail or
+Outlook.com.
+
+```bash
+python -m pams daily-report send
+python -m pams daily-report send --date 2026-07-22
+python -m pams daily-report send --dry-run
+python -m pams daily-report send --force
+```
+
+Automatic mode runs the existing idempotent market update and then uses the
+latest successfully persisted aggregate snapshot. Explicit mode requires the
+exact requested snapshot and never falls back to another date.
+
+### Choosing an Email Transport
+
+Set exactly one `PAMS_EMAIL_TRANSPORT` value. Only the selected adapter's
+credentials are validated; sender and recipient are common to every adapter.
+The CLI prints the selected adapter before delivery without printing
+credentials.
+
+Resend:
+
+```dotenv
+PAMS_EMAIL_TRANSPORT=resend
+PAMS_RESEND_API_KEY=your-resend-sending-api-key
+PAMS_EMAIL_FROM=PAMS <reports@your-verified-domain.example>
+PAMS_EMAIL_TO=recipient@example.com
+```
+
+Microsoft Graph:
+
+```dotenv
+PAMS_EMAIL_TRANSPORT=microsoft_graph
+PAMS_MICROSOFT_CLIENT_ID=your-public-client-application-id
+PAMS_MICROSOFT_TENANT=consumers
+PAMS_MICROSOFT_TOKEN_CACHE=data/msal_token_cache.json
+PAMS_EMAIL_FROM=your-account@example.com
+PAMS_EMAIL_TO=recipient@example.com
+```
+
+SMTP:
+
+```dotenv
+PAMS_EMAIL_TRANSPORT=smtp
+PAMS_SMTP_HOST=smtp.example.com
+PAMS_SMTP_PORT=587
+PAMS_SMTP_USERNAME=your-smtp-user
+PAMS_SMTP_PASSWORD=your-local-secret
+PAMS_EMAIL_FROM=sender@example.com
+PAMS_EMAIL_TO=recipient@example.com
+```
+
+### Personal users: Resend (recommended)
+
+Create a Resend API key restricted to sending email, verify a sending domain,
+then copy `.env.example` to `.env` and configure:
+
+```dotenv
+PAMS_EMAIL_TRANSPORT=resend
+PAMS_RESEND_API_KEY=your-resend-sending-api-key
+PAMS_EMAIL_FROM=PAMS <reports@your-verified-domain.example>
+PAMS_EMAIL_TO=recipient@example.com
+```
+
+The `PAMS_EMAIL_FROM` domain must be verified in Resend. Resend's testing mode
+may restrict delivery to the account owner's address until a domain is
+verified. API keys are loaded as secret settings and are never included in
+application output or transport errors.
+
+### Enterprise users: Microsoft Graph
+
+1. In Microsoft Entra, register an application that supports personal
+   Microsoft accounts or the required enterprise accounts.
+2. Under **Authentication**, enable public-client flows. Device-code flow does
+   not require a redirect URI or client secret.
+3. Add only the delegated Microsoft Graph `Mail.Send` permission. The MSAL
+   public-client flow also requests the standard `openid`, `profile`, and
+   `offline_access` scopes needed for sign-in and silent token renewal.
+4. Copy `.env.example` to `.env` and set:
+
+```dotenv
+PAMS_EMAIL_TRANSPORT=microsoft_graph
+PAMS_MICROSOFT_CLIENT_ID=your-public-client-application-id
+PAMS_MICROSOFT_TENANT=consumers
+PAMS_MICROSOFT_TOKEN_CACHE=data/msal_token_cache.json
+PAMS_EMAIL_FROM=your-account@hotmail.com
+PAMS_EMAIL_TO=recipient@example.com
+```
+
+Complete first-time consent interactively:
+
+```bash
+python -m pams email authorize
+```
+
+The command prints Microsoft's verification URL and user code, waits for
+consent, and stores the MSAL cache locally. It never prints access or refresh
+tokens. The cache and `.env` are ignored by Git; keep both accessible only to
+the local Windows user. Subsequent scheduled invocations acquire or refresh a
+token silently. If the cache is absent or consent has expired, the
+non-interactive send fails with instructions to run `email authorize` again.
+
+The sender must be the personal account that grants consent. PAMS sends the
+standards-compliant MIME message to Graph's `/me/sendMail` endpoint, preserving
+both plain-text and HTML alternatives.
+
+`PAMS_EMAIL_TRANSPORT=smtp` remains available for providers that
+support authenticated STARTTLS. Configure the `PAMS_SMTP_*` variables shown in
+`.env.example`; do not select SMTP basic authentication for Hotmail or
+Outlook.com.
+
+`--dry-run` requires only sender and recipient settings. It renders the
+intended recipient and subject without starting OAuth, reading a token, making
+a network connection, or creating a SENT record. Delivery is idempotent for
+`(report type, report date, recipient)`; FAILED attempts remain retryable and
+`--force` intentionally resends.

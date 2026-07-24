@@ -1,6 +1,7 @@
 """Offline tests for CLI routing, reporting, and exit policies."""
 
 import json
+import smtplib
 import sqlite3
 import subprocess
 import sys
@@ -25,6 +26,8 @@ from market_data import (
 )
 from market_data.engine import MarketDataRefreshResult
 from pams.application import (
+    DailyReportDeliveryError,
+    DailyReportSendResult,
     PortfolioStatusUseCase,
     UpdatePortfolioUseCase,
     VerifySystemUseCase,
@@ -114,6 +117,7 @@ class FakeEngine:
         self.error = error
         self.preview_called = False
         self.refresh_called = False
+        self.rebuild_called = False
 
     def preview(self, trade_date: date) -> MarketDataRefreshResult:
         self.preview_called = True
@@ -123,6 +127,12 @@ class FakeEngine:
 
     def refresh(self, trade_date: date) -> MarketDataRefreshResult:
         self.refresh_called = True
+        if self.error:
+            raise self.error
+        return sample_result()
+
+    def rebuild(self, trade_date: date) -> MarketDataRefreshResult:
+        self.rebuild_called = True
         if self.error:
             raise self.error
         return sample_result()
@@ -280,6 +290,20 @@ def test_repeated_automatic_update_exits_successfully_without_traceback(
     captured = capsys.readouterr()
     assert "No update performed: snapshot already exists for 2026-07-22" in captured.out
     assert "Traceback" not in captured.err
+    assert engine.refresh_called is False
+    assert engine.preview_called is False
+
+
+def test_repeated_automatic_update_force_routes_to_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = FakeEngine()
+    install_fake_composition(
+        monkeypatch, engine, existing_snapshot_date=date(2026, 7, 22)
+    )
+
+    assert main(["update", "--force"]) == ExitCode.SUCCESS
+    assert engine.rebuild_called is True
     assert engine.refresh_called is False
     assert engine.preview_called is False
 
@@ -474,6 +498,199 @@ def test_verbose_error_prints_traceback(
     install_fake_composition(monkeypatch, FakeEngine(ProviderDataError("offline")))
     assert main(["update", "--date", "2026-07-22", "--verbose"]) == 3
     assert "Traceback" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        (
+            DailyReportSendResult(
+                date(2026, 7, 22),
+                "recipient@example.com",
+                "PAMS Daily Portfolio Report - 2026-07-22",
+                "sent",
+            ),
+            "Result: sent",
+        ),
+        (
+            DailyReportSendResult(
+                date(2026, 7, 22), "recipient@example.com", "", "already_sent"
+            ),
+            "No email sent: report already delivered for 2026-07-22",
+        ),
+        (
+            DailyReportSendResult(
+                date(2026, 7, 22),
+                "recipient@example.com",
+                "PAMS Daily Portfolio Report - 2026-07-22",
+                "dry_run",
+            ),
+            "Result: dry-run; no email sent",
+        ),
+    ],
+)
+def test_daily_report_cli_successful_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    result: DailyReportSendResult,
+    expected: str,
+) -> None:
+    class SendStub:
+        def execute(self, *_args: object, **_kwargs: object) -> DailyReportSendResult:
+            return result
+
+    @contextmanager
+    def compose(*_args: object, **_kwargs: object) -> Iterator[object]:
+        yield type("Context", (), {"send_daily_report": SendStub()})()
+
+    monkeypatch.setattr(pams.cli, "compose_daily_report", compose)
+    monkeypatch.setattr(pams.cli, "selected_email_transport", lambda: "resend")
+    arguments = ["daily-report", "send"]
+    if result.status == "dry_run":
+        arguments.append("--dry-run")
+    assert main(arguments) == ExitCode.SUCCESS
+    output = capsys.readouterr().out
+    assert "PAMS Daily Report" in output
+    assert "Email Transport : resend" in output
+    assert "Recipient: recipient@example.com" in output
+    assert expected in output
+
+
+@pytest.mark.parametrize("transport", ["resend", "microsoft_graph", "smtp"])
+def test_daily_report_cli_prints_selected_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    transport: str,
+) -> None:
+    class SendStub:
+        def execute(self, *_args: object, **_kwargs: object) -> DailyReportSendResult:
+            return DailyReportSendResult(
+                date(2026, 7, 22),
+                "recipient@example.com",
+                "PAMS report",
+                "sent",
+            )
+
+    @contextmanager
+    def compose(*_args: object, **_kwargs: object) -> Iterator[object]:
+        yield type("Context", (), {"send_daily_report": SendStub()})()
+
+    monkeypatch.setattr(pams.cli, "compose_daily_report", compose)
+    monkeypatch.setattr(pams.cli, "selected_email_transport", lambda: transport)
+
+    assert main(["daily-report", "send"]) == ExitCode.SUCCESS
+    assert f"Email Transport : {transport}" in capsys.readouterr().out
+
+
+def test_daily_report_cli_failure_never_prints_smtp_password(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    secret = "never-print-this-password"
+
+    class SendStub:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise DailyReportDeliveryError("daily report delivery failed")
+
+    @contextmanager
+    def compose(*_args: object, **_kwargs: object) -> Iterator[object]:
+        yield type("Context", (), {"send_daily_report": SendStub()})()
+
+    monkeypatch.setattr(pams.cli, "compose_daily_report", compose)
+    monkeypatch.setenv("PAMS_SMTP_PASSWORD", secret)
+    assert main(["daily-report", "send", "--verbose"]) == ExitCode.PROVIDER_ERROR
+    captured = capsys.readouterr()
+    assert secret not in captured.out
+    assert secret not in captured.err
+
+
+def test_daily_report_debug_prints_complete_chained_smtp_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class SendStub:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            smtp_error = smtplib.SMTPAuthenticationError(535, b"authentication failed")
+            raise DailyReportDeliveryError(
+                "daily report delivery failed: SMTPAuthenticationError: "
+                "(535, b'authentication failed')"
+            ) from smtp_error
+
+    @contextmanager
+    def compose(*_args: object, **_kwargs: object) -> Iterator[object]:
+        yield type("Context", (), {"send_daily_report": SendStub()})()
+
+    monkeypatch.setattr(pams.cli, "compose_daily_report", compose)
+    assert main(["daily-report", "send", "--debug"]) == ExitCode.PROVIDER_ERROR
+    captured = capsys.readouterr()
+    assert "Traceback" in captured.err
+    assert "SMTPAuthenticationError" in captured.err
+    assert "DailyReportDeliveryError" in captured.err
+    assert "authentication failed" in captured.err
+
+
+def test_daily_report_normal_failure_omits_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class SendStub:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise DailyReportDeliveryError(
+                "daily report delivery failed: TimeoutError: timed out"
+            )
+
+    @contextmanager
+    def compose(*_args: object, **_kwargs: object) -> Iterator[object]:
+        yield type("Context", (), {"send_daily_report": SendStub()})()
+
+    monkeypatch.setattr(pams.cli, "compose_daily_report", compose)
+    assert main(["daily-report", "send"]) == ExitCode.PROVIDER_ERROR
+    captured = capsys.readouterr()
+    assert "daily report delivery failed: TimeoutError: timed out" in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("diagnostic_flag", ["--debug", "--verbose"])
+def test_email_authorize_cli_prints_device_prompt_without_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    diagnostic_flag: str,
+) -> None:
+    class AuthorizationStub:
+        def execute(self, show_prompt: object) -> None:
+            show_prompt(  # type: ignore[operator]
+                "https://microsoft.com/devicelogin", "ABCD-EFGH"
+            )
+
+    monkeypatch.setattr(
+        pams.cli, "compose_email_authorization", lambda: AuthorizationStub()
+    )
+
+    assert main(["email", "authorize", diagnostic_flag]) == ExitCode.SUCCESS
+    captured = capsys.readouterr()
+    assert "https://microsoft.com/devicelogin" in captured.out
+    assert "ABCD-EFGH" in captured.out
+    assert "token cache updated" in captured.out
+    assert "access_token" not in captured.out
+    assert "refresh_token" not in captured.out
+
+
+@pytest.mark.parametrize("diagnostic_flag", ["--debug", "--verbose"])
+def test_email_authorize_diagnostic_flags_print_failures_without_attribute_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    diagnostic_flag: str,
+) -> None:
+    class AuthorizationStub:
+        def execute(self, _show_prompt: object) -> None:
+            raise RuntimeError("authorization failed")
+
+    monkeypatch.setattr(
+        pams.cli, "compose_email_authorization", lambda: AuthorizationStub()
+    )
+
+    assert main(["email", "authorize", diagnostic_flag]) == ExitCode.INTERNAL_ERROR
+    captured = capsys.readouterr()
+    assert "authorization failed" in captured.err
+    assert "Traceback" in captured.err
+    assert "AttributeError" not in captured.err
 
 
 def test_reporting_formats_decimals_and_percentages() -> None:

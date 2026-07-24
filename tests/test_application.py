@@ -104,6 +104,22 @@ def test_repeated_automatic_update_returns_no_op_without_refresh() -> None:
     assert engine.preview_called is False
 
 
+def test_repeated_automatic_update_force_rebuilds_existing_snapshot() -> None:
+    selected_date = date(2026, 7, 22)
+    engine = FakeEngine()
+    result = UpdatePortfolioUseCase(
+        CalendarStub(selected_date, selected_date),  # type: ignore[arg-type]
+        engine,  # type: ignore[arg-type]
+        Path("pams.db"),
+        snapshot_repository=SnapshotsStub(selected_date),  # type: ignore[arg-type]
+    ).execute(force=True)
+
+    assert result.mode is UpdateMode.UPDATED
+    assert result.requested_date == selected_date
+    assert engine.rebuild_called is True
+    assert engine.refresh_called is False
+
+
 def test_repeated_explicit_update_is_idempotent() -> None:
     selected_date = date(2026, 7, 22)
     calendar = CalendarStub(selected_date, selected_date)

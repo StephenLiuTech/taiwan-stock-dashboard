@@ -1,6 +1,7 @@
 """Streamlit entry point for the PAMS portfolio dashboard."""
 
 import argparse
+import traceback
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -29,10 +30,11 @@ def main(argv: Sequence[str] | None = None) -> None:
                 application.valuate_portfolio,
                 application.analyze_portfolio,
             )
-    except Exception:
+    except Exception as error:
         st.title("PAMS")
         st.caption("Personal Asset Management System")
-        st.error("Dashboard unavailable. Check configuration and database access.")
+        st.exception(error)
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

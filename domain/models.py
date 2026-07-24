@@ -192,6 +192,13 @@ class DailySnapshot(DomainModel):
     drawdown: Decimal = Field(le=0)
     created_at: datetime = Field(default_factory=utc_now)
 
+    @property
+    def total_return(self) -> Decimal:
+        """Return the persisted snapshot's unrealized return."""
+        if self.total_cost_basis == 0:
+            return Decimal("0")
+        return self.total_unrealized_pnl / self.total_cost_basis
+
 
 class PortfolioSummary(DomainModel):
     """Calculated portfolio totals for a valuation date."""

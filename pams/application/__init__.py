@@ -2,6 +2,7 @@
 
 from pams.application.analyze_portfolio import AnalyzePortfolioUseCase
 from pams.application.apply_rebuilt_holdings import ApplyRebuiltHoldingsUseCase
+from pams.application.authorize_email import AuthorizeMicrosoftEmailUseCase
 from pams.application.demo_data import DemoDataUseCase
 from pams.application.dto import (
     AddTransactionCommand,
@@ -49,6 +50,13 @@ from pams.application.exceptions import (
 from pams.application.portfolio_history import PortfolioHistoryUseCase
 from pams.application.portfolio_status import PortfolioStatusUseCase
 from pams.application.rebuild_holdings import RebuildHoldingsUseCase
+from pams.application.send_daily_report import (
+    DailyReportDeliveryError,
+    DailyReportError,
+    DailyReportSendResult,
+    DailyReportSnapshotMissingError,
+    SendDailyReportUseCase,
+)
 from pams.application.transactions import AddTransactionUseCase, ListTransactionsUseCase
 from pams.application.update_portfolio import UpdatePortfolioUseCase
 from pams.application.valuate_portfolio import ValuatePortfolioUseCase
@@ -63,8 +71,13 @@ __all__ = [
     "AnalyticsRepositoryError",
     "AnalyzePortfolioUseCase",
     "ApplyRebuiltHoldingsUseCase",
+    "AuthorizeMicrosoftEmailUseCase",
     "DemoDataResult",
     "DemoDataUseCase",
+    "DailyReportDeliveryError",
+    "DailyReportError",
+    "DailyReportSendResult",
+    "DailyReportSnapshotMissingError",
     "DuplicateTransactionError",
     "EmptyTransactionHistoryError",
     "HoldingChangeAction",
@@ -92,6 +105,7 @@ __all__ = [
     "ProjectedHoldingResult",
     "RebuildHoldingsResult",
     "RebuildHoldingsUseCase",
+    "SendDailyReportUseCase",
     "TransactionList",
     "TransactionRecord",
     "UnmatchedHoldingsError",

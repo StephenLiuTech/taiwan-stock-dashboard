@@ -3,9 +3,11 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
+
+from pydantic import SecretStr
 
 from config import get_settings, load_logging_config
 from core.constants import PROJECT_ROOT
@@ -24,13 +26,23 @@ from pams.application import (
     AddTransactionUseCase,
     AnalyzePortfolioUseCase,
     ApplyRebuiltHoldingsUseCase,
+    AuthorizeMicrosoftEmailUseCase,
     DemoDataUseCase,
     ListTransactionsUseCase,
     PortfolioHistoryUseCase,
     PortfolioStatusUseCase,
+    SendDailyReportUseCase,
     UpdatePortfolioUseCase,
     ValuatePortfolioUseCase,
     VerifySystemUseCase,
+)
+from pams.application.send_daily_report import EmailEnvelope
+from pams.delivery import (
+    DailyEmailReportRenderer,
+    MicrosoftGraphAuthenticator,
+    MicrosoftGraphEmailTransport,
+    ResendEmailTransport,
+    SMTPEmailTransport,
 )
 from pams.operations import OperationalStatusService, VerificationService
 from repositories import (
@@ -40,10 +52,11 @@ from repositories import (
     SQLiteMarketDataUnitOfWork,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
+    SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
     SQLiteTransactionRepository,
 )
-from services import BootstrapService, HoldingProjectionMetadata
+from services import BootstrapService, HoldingProjectionMetadata, TransactionEngine
 
 
 @dataclass(frozen=True)
@@ -66,6 +79,13 @@ class ApplicationContext:
     list_transactions: ListTransactionsUseCase | None = None
     valuate_portfolio: ValuatePortfolioUseCase | None = None
     analyze_portfolio: AnalyzePortfolioUseCase | None = None
+    send_daily_report: SendDailyReportUseCase | None = None
+
+
+class _DryRunEmailTransport:
+    def send(self, envelope: EmailEnvelope) -> None:
+        del envelope
+        raise RuntimeError("dry-run transport must never be called")
 
 
 def resolve_database_path(override: Path | None = None) -> Path:
@@ -106,6 +126,154 @@ def compose_application(
         bootstrap=True,
     ) as context:
         yield context
+
+
+@contextmanager
+def compose_daily_report(
+    database_override: Path | None = None,
+    *,
+    verbose: bool = False,
+    dry_run: bool = False,
+    providers: tuple[MarketDataProvider, ...] | None = None,
+) -> Iterator[ApplicationContext]:
+    """Compose updating, persisted-report, and configured email delivery."""
+    with compose_application(
+        database_override, verbose=verbose, providers=providers
+    ) as context:
+        settings = get_settings()
+        required: dict[str, str | SecretStr | None] = {
+            "PAMS_EMAIL_FROM": settings.email_from,
+            "PAMS_EMAIL_TO": settings.email_to,
+        }
+        if not dry_run:
+            if settings.email_transport == "microsoft_graph":
+                required.update(
+                    {
+                        "PAMS_MICROSOFT_CLIENT_ID": settings.microsoft_client_id,
+                        "PAMS_MICROSOFT_TENANT": settings.microsoft_tenant,
+                        "PAMS_MICROSOFT_TOKEN_CACHE": (
+                            str(settings.microsoft_token_cache)
+                            if settings.microsoft_token_cache is not None
+                            else None
+                        ),
+                    }
+                )
+            elif settings.email_transport == "resend":
+                required["PAMS_RESEND_API_KEY"] = settings.resend_api_key
+            else:
+                required.update(
+                    {
+                        "PAMS_SMTP_HOST": settings.smtp_host,
+                        "PAMS_SMTP_USERNAME": settings.smtp_username,
+                        "PAMS_SMTP_PASSWORD": settings.smtp_password,
+                    }
+                )
+        configured = _require_transport_configuration(
+            _transport_display_name(settings.email_transport), required
+        )
+        sender = configured["PAMS_EMAIL_FROM"]
+        recipient = configured["PAMS_EMAIL_TO"]
+        if dry_run:
+            transport = _DryRunEmailTransport()
+        elif settings.email_transport == "microsoft_graph":
+            transport = MicrosoftGraphEmailTransport(
+                MicrosoftGraphAuthenticator(
+                    configured["PAMS_MICROSOFT_CLIENT_ID"],
+                    configured["PAMS_MICROSOFT_TENANT"],
+                    _resolve_local_path(Path(configured["PAMS_MICROSOFT_TOKEN_CACHE"])),
+                )
+            )
+        elif settings.email_transport == "resend":
+            transport = ResendEmailTransport(configured["PAMS_RESEND_API_KEY"])
+        else:
+            transport = SMTPEmailTransport(
+                configured["PAMS_SMTP_HOST"],
+                settings.smtp_port,
+                configured["PAMS_SMTP_USERNAME"],
+                configured["PAMS_SMTP_PASSWORD"],
+            )
+        snapshots = SQLiteSnapshotRepository(context.connection)
+        positions = SQLitePositionSnapshotRepository(context.connection)
+        holdings = SQLiteHoldingRepository(context.connection)
+        use_case = SendDailyReportUseCase(
+            context.update_portfolio,
+            snapshots,
+            positions,
+            holdings,
+            SQLiteReportDeliveryRepository(context.connection),
+            DailyEmailReportRenderer(),
+            transport,
+            sender,
+            recipient,
+        )
+        yield replace(context, send_daily_report=use_case)
+
+
+def compose_email_authorization() -> AuthorizeMicrosoftEmailUseCase:
+    """Compose first-time Microsoft delegated device authorization."""
+    settings = get_settings()
+    if settings.email_transport != "microsoft_graph":
+        raise ValueError(
+            "PAMS_EMAIL_TRANSPORT must be microsoft_graph for Microsoft authorization"
+        )
+    configured = _require_transport_configuration(
+        "Microsoft Graph",
+        {
+            "PAMS_MICROSOFT_CLIENT_ID": settings.microsoft_client_id,
+            "PAMS_MICROSOFT_TENANT": settings.microsoft_tenant,
+            "PAMS_MICROSOFT_TOKEN_CACHE": (
+                str(settings.microsoft_token_cache)
+                if settings.microsoft_token_cache is not None
+                else None
+            ),
+        },
+    )
+    authenticator = MicrosoftGraphAuthenticator(
+        configured["PAMS_MICROSOFT_CLIENT_ID"],
+        configured["PAMS_MICROSOFT_TENANT"],
+        _resolve_local_path(Path(configured["PAMS_MICROSOFT_TOKEN_CACHE"])),
+    )
+    return AuthorizeMicrosoftEmailUseCase(authenticator)
+
+
+def _resolve_local_path(path: Path) -> Path:
+    expanded = path.expanduser()
+    if not expanded.is_absolute():
+        expanded = PROJECT_ROOT / expanded
+    return expanded.resolve()
+
+
+def selected_email_transport() -> str:
+    """Return the selected adapter name without exposing credentials."""
+    return get_settings().email_transport
+
+
+def _transport_display_name(transport: str) -> str:
+    return {
+        "microsoft_graph": "Microsoft Graph",
+        "resend": "Resend",
+        "smtp": "SMTP",
+    }[transport]
+
+
+def _require_transport_configuration(
+    transport_name: str,
+    values: dict[str, str | SecretStr | None],
+) -> dict[str, str]:
+    configured: dict[str, str] = {}
+    missing: list[str] = []
+    for name, value in values.items():
+        raw_value = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if raw_value is None or not raw_value.strip():
+            missing.append(name)
+        else:
+            configured[name] = raw_value.strip()
+    if missing:
+        raise ValueError(
+            f"Missing configuration for {transport_name} transport:\n"
+            + "\n".join(missing)
+        )
+    return configured
 
 
 @contextmanager
@@ -191,8 +359,14 @@ def _compose(
         snapshots = SQLiteSnapshotRepository(connection)
         position_snapshots = SQLitePositionSnapshotRepository(connection)
         quotes = SQLitePriceQuoteRepository(connection)
-        valuate_portfolio = ValuatePortfolioUseCase(holdings, quotes)
         transaction_repository = SQLiteTransactionRepository(connection)
+        transaction_engine = TransactionEngine()
+        valuate_portfolio = ValuatePortfolioUseCase(
+            holdings,
+            quotes,
+            transactions=transaction_repository,
+            transaction_engine=transaction_engine,
+        )
         holding_metadata = {
             (holding.symbol, holding.market, holding.currency): (
                 HoldingProjectionMetadata(holding.name, holding.holding_type)
@@ -225,6 +399,9 @@ def _compose(
                 database_path,
                 historical_engine,
                 snapshots,
+                transaction_repository,
+                holdings,
+                transaction_engine,
             ),
             portfolio_status=PortfolioStatusUseCase(
                 calendar,

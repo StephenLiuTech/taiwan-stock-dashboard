@@ -77,6 +77,79 @@ def test_multiple_buys_use_exact_weighted_average() -> None:
     assert position.average_cost == Decimal("2000") / Decimal("150")
 
 
+def test_current_holdings_aggregate_same_day_buys_by_instrument() -> None:
+    existing = [
+        Holding(
+            id="holding-0050",
+            symbol="0050",
+            name="ETF",
+            market=Market.TWSE,
+            currency=Currency.TWD,
+            quantity=Decimal("5800"),
+            average_cost=Decimal("83.95"),
+            holding_type=HoldingType.ETF,
+        )
+    ]
+    same_day = date(2026, 7, 24)
+    projected = TransactionEngine().project_current_holdings(
+        [
+            transaction(
+                "buy-5800",
+                TransactionType.BUY,
+                "5800",
+                "83.95",
+                symbol="0050",
+                trade_date=same_day,
+                settlement_date=same_day,
+            ),
+            transaction(
+                "buy-100",
+                TransactionType.BUY,
+                "100",
+                "101.70",
+                symbol="0050",
+                trade_date=same_day,
+                settlement_date=same_day,
+            ),
+        ],
+        existing,
+    )
+
+    assert len(projected) == 1
+    assert projected[0].quantity == Decimal("5900")
+    assert projected[0].quantity * projected[0].average_cost == Decimal("497080")
+    assert projected[0].average_cost == Decimal("497080") / Decimal("5900")
+
+
+def test_current_holdings_do_not_merge_same_symbol_across_markets() -> None:
+    projected = TransactionEngine().project_current_holdings(
+        [
+            transaction(
+                "twse-buy",
+                TransactionType.BUY,
+                "10",
+                "20",
+                symbol="0050",
+                market=Market.TWSE,
+            ),
+            transaction(
+                "tpex-buy",
+                TransactionType.BUY,
+                "5",
+                "30",
+                symbol="0050",
+                market=Market.TPEX,
+            ),
+        ],
+        [],
+    )
+
+    assert [(item.market, item.quantity, item.average_cost) for item in projected] == [
+        (Market.TPEX, Decimal("5"), Decimal("30")),
+        (Market.TWSE, Decimal("10"), Decimal("20")),
+    ]
+
+
 def test_partial_sell_keeps_average_cost_and_deducts_fees_and_tax() -> None:
     ledger = TransactionEngine().build_ledger(
         [

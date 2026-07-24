@@ -59,6 +59,15 @@ commits CREATE, UPDATE, and CLOSE operations atomically. Closing a holding sets
 quantity and average cost to zero; it does not delete historical identity or
 rewrite snapshots.
 
+Operational update and current-valuation workflows load the complete
+transaction ledger and call `TransactionEngine.project_current_holdings`.
+Transaction-backed instruments replace their persisted seed projection;
+persisted instruments without ledger history remain available. The projection
+groups by `(symbol, market, currency)`, includes every same-day transaction,
+and uses the engine's moving weighted-average cost method. The resulting
+holdings are passed unchanged into market update, position snapshots, current
+portfolio valuation, Dashboard, and daily-report snapshot rendering.
+
 ### Valuation
 
 `ValuatePortfolioUseCase` loads holdings and each holding's latest matching
@@ -134,8 +143,16 @@ One explicit `BEGIN IMMEDIATE` unit of work surrounds quote upserts, the
 aggregate snapshot, and all position snapshots for an ingestion run. Any
 failure rolls back the complete run.
 
-Historical snapshots are immutable. Transaction-derived holding changes affect
-only future valuations and snapshots.
+Normal repeated updates remain idempotent and do not call providers. An
+explicit forced update uses `MarketDataEngine.rebuild`, leaving the regular
+`refresh` duplicate guard intact. Rebuild computes transaction-derived holdings
+first, then atomically replaces the selected date's complete quote set,
+aggregate snapshot, and position snapshots. Forced daily-report delivery
+invokes this rebuild before loading report facts, so it cannot intentionally
+resend a stale persisted snapshot.
+
+Historical snapshots are immutable during normal operation. Only the explicit
+force workflow may replace a selected date after transaction-ledger correction.
 
 ## Dashboard boundary
 
@@ -275,7 +292,7 @@ financial values.
 ## Out of scope for v1.0.0
 
 - scheduling and background jobs
-- email, Telegram, or other delivery channels
+- Telegram and other delivery channels
 - broker imports and corporate actions
 - authentication and multi-user access
 - cloud persistence
@@ -285,3 +302,50 @@ financial values.
 
 Future adapters should implement existing repository protocols and preserve
 transaction, Decimal, source-date, and snapshot-grain semantics.
+## Daily report delivery
+
+```text
+UpdatePortfolioUseCase (automatic mode only)
+                ↓
+Persisted aggregate + position snapshots
+                ↓
+SendDailyReportUseCase
+        ┌───────┴────────┐
+        ↓                ↓
+Email renderer    Delivery repository claim
+        └───────┬────────┘
+                ↓
+       EmailTransport protocol
+     ┌──────────┬──────────┐
+     ↓          ↓          ↓
+  Resend   Microsoft Graph  SMTP
+ REST API  delegated OAuth2 fallback
+```
+
+Explicit dates require an exact aggregate snapshot. Automatic delivery reuses
+the idempotent update workflow and reports only a successfully persisted
+snapshot. `report_deliveries` has one row per report type, date, and recipient;
+an atomic `SENDING` claim prevents concurrent duplicate sends. SENT is a normal
+no-op, FAILED is retryable, and dry-run performs neither a claim,
+authentication, nor a network call.
+
+The `EmailTransport` protocol keeps delivery infrastructure outside the
+application workflow. Personal installations default to the Resend REST
+adapter, which sends the existing plain-text and HTML report representations
+using an environment-provided secret API key. Resend authentication, HTTP, and
+response handling remain infrastructure concerns and do not change delivery
+claims or report construction.
+
+Enterprise Microsoft delivery uses a
+public-client MSAL device-code flow with tenant `consumers`. First-time
+interactive authorization is isolated behind
+`AuthorizeMicrosoftEmailUseCase`; normal delivery acquires or refreshes a
+delegated token silently from a locally persisted, ignored cache. The Graph
+adapter sends multipart/alternative MIME through `/me/sendMail`. Only
+`Mail.Send` plus MSAL's reserved `openid`, `profile`, and `offline_access`
+scopes are involved. Tokens and authorization headers never enter application
+DTOs or logs, and this flow uses no client secret.
+
+Authenticated STARTTLS SMTP remains an optional infrastructure adapter for
+non-Microsoft providers and is selected explicitly through environment-backed
+configuration.

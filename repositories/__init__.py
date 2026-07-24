@@ -20,6 +20,7 @@ from repositories.sqlite import (
     SQLiteLiabilityRepository,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
+    SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
     SQLiteTransactionRepository,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "SQLiteMarketDataUnitOfWork",
     "SQLitePositionSnapshotRepository",
     "SQLitePriceQuoteRepository",
+    "SQLiteReportDeliveryRepository",
     "SQLiteSnapshotRepository",
     "SQLiteTransactionRepository",
     "SnapshotRepository",

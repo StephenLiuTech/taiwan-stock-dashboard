@@ -4,6 +4,7 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
+from domain import Holding
 from market_calendar import MarketAvailability, MarketCalendar
 from market_data.engine import MarketDataEngine, MarketDataRefreshResult
 from pams.application.dto import (
@@ -13,7 +14,8 @@ from pams.application.dto import (
     UpdateMode,
     UpdateResult,
 )
-from repositories import SnapshotRepository
+from repositories import HoldingRepository, SnapshotRepository, TransactionRepository
+from services import TransactionEngine
 
 
 def _availability_dto(value: MarketAvailability) -> MarketAvailabilitySummary:
@@ -34,15 +36,25 @@ class UpdatePortfolioUseCase:
         database_path: Path,
         historical_engine_factory: Callable[[date], MarketDataEngine] | None = None,
         snapshot_repository: SnapshotRepository | None = None,
+        transaction_repository: TransactionRepository | None = None,
+        holding_repository: HoldingRepository | None = None,
+        transaction_engine: TransactionEngine | None = None,
     ) -> None:
         self.calendar = calendar
         self.engine = engine
         self.database_path = database_path
         self.historical_engine_factory = historical_engine_factory
         self.snapshot_repository = snapshot_repository
+        self.transaction_repository = transaction_repository
+        self.holding_repository = holding_repository
+        self.transaction_engine = transaction_engine or TransactionEngine()
 
     def execute(
-        self, requested_date: date | None = None, *, dry_run: bool = False
+        self,
+        requested_date: date | None = None,
+        *,
+        dry_run: bool = False,
+        force: bool = False,
     ) -> UpdateResult:
         """Run an explicit update or the newest jointly available market date."""
         automatic = requested_date is None
@@ -55,7 +67,8 @@ class UpdatePortfolioUseCase:
             sources_synchronized = source_availability.synchronized
 
         if (
-            self.snapshot_repository is not None
+            not force
+            and self.snapshot_repository is not None
             and self.snapshot_repository.get_by_date(requested_date) is not None
         ):
             return UpdateResult(
@@ -76,13 +89,41 @@ class UpdatePortfolioUseCase:
             if needs_historical_provider
             else self.engine
         )
-        engine_result = (
-            selected_engine.preview(requested_date)
-            if dry_run
-            else selected_engine.refresh(requested_date)
-        )
+        projected_holdings = self._project_current_holdings()
+        if dry_run:
+            engine_result = (
+                selected_engine.preview(requested_date)
+                if projected_holdings is None
+                else selected_engine.preview(
+                    requested_date, holdings_override=projected_holdings
+                )
+            )
+        elif force:
+            engine_result = (
+                selected_engine.rebuild(requested_date)
+                if projected_holdings is None
+                else selected_engine.rebuild(
+                    requested_date, holdings_override=projected_holdings
+                )
+            )
+        else:
+            engine_result = (
+                selected_engine.refresh(requested_date)
+                if projected_holdings is None
+                else selected_engine.refresh(
+                    requested_date, holdings_override=projected_holdings
+                )
+            )
         return self._result_dto(
             engine_result, requested_date, dry_run=dry_run, availability=availability
+        )
+
+    def _project_current_holdings(self) -> tuple[Holding, ...] | None:
+        if self.transaction_repository is None or self.holding_repository is None:
+            return None
+        return self.transaction_engine.project_current_holdings(
+            self.transaction_repository.list_all(),
+            self.holding_repository.list_all(),
         )
 
     def _result_dto(

@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -69,6 +69,19 @@ CREATE TABLE IF NOT EXISTS position_snapshots (
 );
 CREATE INDEX IF NOT EXISTS ix_position_snapshots_symbol_date
     ON position_snapshots(symbol, snapshot_date DESC);
+CREATE TABLE IF NOT EXISTS report_deliveries (
+    id TEXT PRIMARY KEY,
+    report_type TEXT NOT NULL,
+    report_date TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('SENDING', 'SENT', 'FAILED')),
+    sent_at TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (report_type, report_date, recipient)
+);
+CREATE INDEX IF NOT EXISTS ix_report_deliveries_date
+    ON report_deliveries(report_type, report_date);
 """
 
 

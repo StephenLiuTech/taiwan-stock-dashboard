@@ -28,6 +28,8 @@ venv/
 *.sqlite3
 data/*
 !data/.gitkeep
+# Delegated OAuth tokens must never enter version control.
+data/msal_token_cache.json
 
 # Editors and operating systems
 .idea/

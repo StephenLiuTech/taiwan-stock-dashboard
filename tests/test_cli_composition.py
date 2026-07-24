@@ -3,15 +3,19 @@
 import sqlite3
 from collections.abc import Sequence
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+import pams.composition
 from config import get_settings
 from domain import Market
 from market_data.transport import JSONRecord
+from pams.application import AddTransactionCommand
 from pams.composition import (
     compose_application,
+    compose_daily_report,
     compose_ledger_operations,
     resolve_database_path,
 )
@@ -30,12 +34,12 @@ class StaticProvider:
         return self.records
 
 
-def providers() -> tuple[StaticProvider, ...]:
+def providers(source_date: str = "1150722") -> tuple[StaticProvider, ...]:
     return (
         StaticProvider(
             Market.TWSE,
             [
-                {"Date": "1150722", "Code": symbol, "ClosingPrice": "100"}
+                {"Date": source_date, "Code": symbol, "ClosingPrice": "100"}
                 for symbol in ("0050", "2027", "2330")
             ],
         ),
@@ -43,7 +47,7 @@ def providers() -> tuple[StaticProvider, ...]:
             Market.TPEX,
             [
                 {
-                    "Date": "1150722",
+                    "Date": source_date,
                     "SecuritiesCompanyCode": symbol,
                     "Close": "100",
                 }
@@ -123,6 +127,257 @@ def test_application_update_is_idempotent_and_engine_protects_duplicate(
             application.engine.refresh(date(2026, 7, 22))
 
 
+def test_update_projects_all_same_day_transactions_into_shared_position(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "transaction-projection.db"
+    trade_date = date(2026, 7, 24)
+    with compose_application(database, providers=providers("1150724")) as application:
+        assert application.add_transaction is not None
+        application.add_transaction.execute(
+            AddTransactionCommand(
+                symbol="0050",
+                market="TWSE",
+                transaction_type="buy",
+                trade_date=trade_date,
+                settlement_date=trade_date,
+                quantity=Decimal("5800"),
+                price=Decimal("83.95"),
+                fees=Decimal("0"),
+                taxes=Decimal("0"),
+                currency="TWD",
+                transaction_id="0050-initial",
+            )
+        )
+        first = application.update_portfolio.execute()
+        assert next(
+            item for item in first.positions if item.symbol == "0050"
+        ).shares == (Decimal("5800"))
+
+        application.add_transaction.execute(
+            AddTransactionCommand(
+                symbol="0050",
+                market="TWSE",
+                transaction_type="buy",
+                trade_date=trade_date,
+                settlement_date=trade_date,
+                quantity=Decimal("100"),
+                price=Decimal("101.70"),
+                fees=Decimal("0"),
+                taxes=Decimal("0"),
+                currency="TWD",
+                transaction_id="0050-additional",
+            )
+        )
+        skipped = application.update_portfolio.execute()
+        assert skipped.mode.value == "no_update_snapshot_exists"
+        stale_position = application.connection.execute(
+            """SELECT quantity FROM position_snapshots
+               WHERE snapshot_date = ? AND symbol = ?""",
+            (trade_date.isoformat(), "0050"),
+        ).fetchone()
+        assert Decimal(stale_position[0]) == Decimal("5800")
+
+        result = application.update_portfolio.execute(force=True)
+        position = next(item for item in result.positions if item.symbol == "0050")
+        assert position.shares == Decimal("5900")
+        assert position.average_cost == Decimal("497080") / Decimal("5900")
+        snapshot_position = application.connection.execute(
+            """SELECT quantity, average_cost, cost_basis
+               FROM position_snapshots
+               WHERE snapshot_date = ? AND symbol = ?""",
+            (trade_date.isoformat(), "0050"),
+        ).fetchone()
+        assert tuple(Decimal(value) for value in snapshot_position) == (
+            Decimal("5900"),
+            Decimal("497080") / Decimal("5900"),
+            Decimal("497080"),
+        )
+
+        assert application.valuate_portfolio is not None
+        valuation = application.valuate_portfolio.execute()
+        valued = next(item for item in valuation.holdings if item.symbol == "0050")
+        assert valued.quantity == Decimal("5900")
+        assert valued.average_cost == Decimal("497080") / Decimal("5900")
+        assert valued.cost_basis == Decimal("497080")
+
+
+def test_dashboard_use_cases_are_composed_for_populated_database(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "dashboard.db"
+    with compose_application(database, providers=providers()) as application:
+        application.update_portfolio.execute()
+        assert application.valuate_portfolio is not None
+        assert application.analyze_portfolio is not None
+        valuation = application.valuate_portfolio.execute()
+        analytics = application.analyze_portfolio.execute()
+
+    assert valuation.valuation_date == date(2026, 7, 22)
+    assert analytics.end_date == date(2026, 7, 22)
+
+
+def test_daily_report_production_composition_dry_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "daily-report.db"
+    monkeypatch.setenv("PAMS_EMAIL_FROM", "sender@example.com")
+    monkeypatch.setenv("PAMS_EMAIL_TO", "recipient@example.com")
+    get_settings.cache_clear()
+    try:
+        with compose_daily_report(
+            database, dry_run=True, providers=providers()
+        ) as application:
+            application.engine.refresh(date(2026, 7, 22))
+            assert application.send_daily_report is not None
+            result = application.send_daily_report.execute(
+                date(2026, 7, 22), dry_run=True
+            )
+            delivery_count = row_count(application.connection, "report_deliveries")
+        assert result.status == "dry_run"
+        assert result.recipient == "recipient@example.com"
+        assert delivery_count == 0
+    finally:
+        get_settings.cache_clear()
+
+
+def test_daily_report_production_composition_selects_microsoft_graph(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "graph-report.db"
+    cache_path = tmp_path / "msal-cache.json"
+    created: dict[str, object] = {}
+
+    class AuthenticatorStub:
+        def __init__(self, client_id: str, tenant: str, path: Path) -> None:
+            created["authenticator"] = (client_id, tenant, path)
+
+    class TransportStub:
+        def __init__(self, authenticator: object) -> None:
+            created["transport"] = authenticator
+
+        def send(self, envelope: object) -> None:
+            created["envelope"] = envelope
+
+    monkeypatch.setattr(
+        pams.composition, "MicrosoftGraphAuthenticator", AuthenticatorStub
+    )
+    monkeypatch.setattr(pams.composition, "MicrosoftGraphEmailTransport", TransportStub)
+    monkeypatch.setenv("PAMS_EMAIL_TRANSPORT", "microsoft_graph")
+    monkeypatch.setenv("PAMS_MICROSOFT_CLIENT_ID", "public-client-id")
+    monkeypatch.setenv("PAMS_MICROSOFT_TENANT", "consumers")
+    monkeypatch.setenv("PAMS_MICROSOFT_TOKEN_CACHE", str(cache_path))
+    monkeypatch.setenv("PAMS_EMAIL_FROM", "sender@hotmail.com")
+    monkeypatch.setenv("PAMS_EMAIL_TO", "recipient@example.com")
+    get_settings.cache_clear()
+    try:
+        with compose_daily_report(database, providers=providers()) as application:
+            application.engine.refresh(date(2026, 7, 22))
+            assert application.send_daily_report is not None
+            result = application.send_daily_report.execute(date(2026, 7, 22))
+        assert result.status == "sent"
+        assert created["authenticator"] == (
+            "public-client-id",
+            "consumers",
+            cache_path.resolve(),
+        )
+        assert "envelope" in created
+    finally:
+        get_settings.cache_clear()
+
+
+def test_daily_report_production_composition_selects_resend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "resend-report.db"
+    created: dict[str, object] = {}
+
+    class TransportStub:
+        def __init__(self, api_key: str) -> None:
+            created["api_key"] = api_key
+
+        def send(self, envelope: object) -> None:
+            created["envelope"] = envelope
+
+    monkeypatch.setattr(pams.composition, "ResendEmailTransport", TransportStub)
+    monkeypatch.setenv("PAMS_EMAIL_TRANSPORT", "resend")
+    monkeypatch.setenv("PAMS_RESEND_API_KEY", "re_test-key")
+    monkeypatch.setenv("PAMS_EMAIL_FROM", "reports@example.com")
+    monkeypatch.setenv("PAMS_EMAIL_TO", "recipient@example.com")
+    get_settings.cache_clear()
+    try:
+        with compose_daily_report(database, providers=providers()) as application:
+            application.engine.refresh(date(2026, 7, 22))
+            assert application.send_daily_report is not None
+            result = application.send_daily_report.execute(date(2026, 7, 22))
+        assert result.status == "sent"
+        assert created["api_key"] == "re_test-key"
+        assert "envelope" in created
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("transport", "configured", "missing", "display_name"),
+    [
+        (
+            "resend",
+            {},
+            "PAMS_RESEND_API_KEY",
+            "Resend",
+        ),
+        (
+            "smtp",
+            {
+                "PAMS_SMTP_USERNAME": "user",
+                "PAMS_SMTP_PASSWORD": "secret",
+            },
+            "PAMS_SMTP_HOST",
+            "SMTP",
+        ),
+        (
+            "microsoft_graph",
+            {},
+            "PAMS_MICROSOFT_CLIENT_ID",
+            "Microsoft Graph",
+        ),
+    ],
+)
+def test_daily_report_validates_only_selected_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    transport: str,
+    configured: dict[str, str],
+    missing: str,
+    display_name: str,
+) -> None:
+    monkeypatch.setenv("PAMS_EMAIL_TRANSPORT", transport)
+    monkeypatch.setenv("PAMS_EMAIL_FROM", "reports@example.com")
+    monkeypatch.setenv("PAMS_EMAIL_TO", "recipient@example.com")
+    for name in (
+        "PAMS_RESEND_API_KEY",
+        "PAMS_SMTP_HOST",
+        "PAMS_SMTP_USERNAME",
+        "PAMS_SMTP_PASSWORD",
+        "PAMS_MICROSOFT_CLIENT_ID",
+    ):
+        monkeypatch.setenv(name, "")
+    for name, value in configured.items():
+        monkeypatch.setenv(name, value)
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(
+            ValueError,
+            match=rf"Missing configuration for {display_name} transport:\n{missing}",
+        ):
+            with compose_daily_report(
+                tmp_path / f"{transport}.db", providers=providers()
+            ):
+                pass
+    finally:
+        get_settings.cache_clear()
+
+
 def test_operational_status_reports_database_state(tmp_path: Path) -> None:
     database = tmp_path / "status.db"
     with compose_application(database, providers=providers()) as application:
@@ -134,7 +389,7 @@ def test_operational_status_reports_database_state(tmp_path: Path) -> None:
         assert status.latest_position_snapshot == date(2026, 7, 22)
         assert status.holdings_count == 5
         assert status.liabilities_count == 2
-        assert status.schema_version == 3
+        assert status.schema_version == 4
         assert status.database_size_bytes > 0
 
 

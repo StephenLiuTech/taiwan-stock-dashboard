@@ -194,11 +194,17 @@ Supported interfaces:
 - CLI
 - Dashboard
 - Report
+- Email delivery
 - JSON API (future)
 
 All interfaces consume the same Application Layer.
 
 No duplicated business logic.
+
+Email delivery is replaceable infrastructure behind an application transport
+protocol. Personal installations can use Resend, while enterprise Microsoft
+accounts can use delegated Graph OAuth2 rather than password-based SMTP.
+Provider authentication and credential storage do not enter the Domain.
 
 ## Roadmap
 
