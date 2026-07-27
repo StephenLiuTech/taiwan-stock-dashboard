@@ -1,6 +1,5 @@
 """Resend REST API email transport."""
 
-import base64
 import json
 from collections.abc import Callable
 from typing import Any
@@ -34,6 +33,10 @@ class ResendEmailTransport:
 
     def send(self, envelope: EmailEnvelope) -> None:
         """POST one email containing both text and HTML representations."""
+        if envelope.inline_images:
+            raise ResendEmailError(
+                "Resend delivery requires published HTTPS report assets"
+            )
         message = {
             "from": envelope.sender,
             "to": [envelope.recipient],
@@ -41,15 +44,6 @@ class ResendEmailTransport:
             "text": envelope.plain_text,
             "html": envelope.html,
         }
-        if envelope.inline_images:
-            message["attachments"] = [
-                {
-                    "content": base64.b64encode(image.content).decode("ascii"),
-                    "filename": image.filename,
-                    "contentId": image.content_id,
-                }
-                for image in envelope.inline_images
-            ]
         payload = json.dumps(message).encode("utf-8")
         request = Request(
             self._endpoint,

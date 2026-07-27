@@ -52,6 +52,7 @@ from pams.delivery import (
     MicrosoftGraphEmailTransport,
     ResendEmailTransport,
     SMTPEmailTransport,
+    SupabaseReportAssetStore,
 )
 from pams.operations import OperationalStatusService, VerificationService
 from repositories.provider import RepositoryBundle, create_repositories
@@ -163,7 +164,16 @@ def compose_daily_report(
                     }
                 )
             elif settings.email_transport == "resend":
-                required["PAMS_RESEND_API_KEY"] = settings.resend_api_key
+                required.update(
+                    {
+                        "PAMS_RESEND_API_KEY": settings.resend_api_key,
+                        "PAMS_SUPABASE_URL": settings.supabase_url,
+                        "PAMS_SUPABASE_SERVICE_ROLE_KEY": (
+                            settings.supabase_service_role_key
+                        ),
+                        "PAMS_REPORT_ASSET_BUCKET": settings.report_asset_bucket,
+                    }
+                )
             else:
                 required.update(
                     {
@@ -177,6 +187,7 @@ def compose_daily_report(
         )
         sender = configured["PAMS_EMAIL_FROM"]
         recipient = configured["PAMS_EMAIL_TO"]
+        asset_store = None
         if dry_run:
             transport = _DryRunEmailTransport()
         elif settings.email_transport == "microsoft_graph":
@@ -189,6 +200,12 @@ def compose_daily_report(
             )
         elif settings.email_transport == "resend":
             transport = ResendEmailTransport(configured["PAMS_RESEND_API_KEY"])
+            asset_store = SupabaseReportAssetStore(
+                configured["PAMS_SUPABASE_URL"],
+                configured["PAMS_SUPABASE_SERVICE_ROLE_KEY"],
+                configured["PAMS_REPORT_ASSET_BUCKET"],
+                settings.report_asset_prefix,
+            )
         else:
             transport = SMTPEmailTransport(
                 configured["PAMS_SMTP_HOST"],
@@ -208,6 +225,7 @@ def compose_daily_report(
             transport,
             sender,
             recipient,
+            asset_store,
         )
         yield replace(context, send_daily_report=use_case)
 

@@ -205,6 +205,9 @@ Email delivery is replaceable infrastructure behind an application transport
 protocol. Personal installations can use Resend, while enterprise Microsoft
 accounts can use delegated Graph OAuth2 rather than password-based SMTP.
 Provider authentication and credential storage do not enter the Domain.
+Report images use replaceable asset-storage infrastructure: MIME-capable
+transports may consume CID assets, while REST transports may consume published
+HTTPS assets without changing report or portfolio calculations.
 The V1.0 daily report consumes the same persisted position and aggregate
 snapshot facts as the other presentation interfaces, including signed daily
 movement, position contribution impact, and a locally embedded recent

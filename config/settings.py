@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     app_title: str = Field(default="PAMS")
     email_transport: Literal["microsoft_graph", "resend", "smtp"] = "resend"
     resend_api_key: SecretStr | None = None
+    supabase_url: str | None = None
+    supabase_service_role_key: SecretStr | None = None
+    report_asset_bucket: str = "pams-report-assets"
+    report_asset_prefix: str | None = None
     microsoft_client_id: str | None = None
     microsoft_tenant: str = "consumers"
     microsoft_token_cache: Path | None = Path("data/msal_token_cache.json")

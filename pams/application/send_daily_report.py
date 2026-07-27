@@ -30,6 +30,14 @@ class DailyReportDeliveryError(DailyReportError):
 
 
 @dataclass(frozen=True)
+class ChartSource:
+    """Transport-neutral HTML URI and optional MIME-related image."""
+
+    uri: str
+    attachment: "InlineImage | None" = None
+
+
+@dataclass(frozen=True)
 class DailyEmailPosition:
     symbol: str
     name: str
@@ -109,7 +117,20 @@ class EmailTransport(Protocol):
 
 
 class DailyEmailRenderer(Protocol):
-    def render(self, report: DailyEmailReport) -> RenderedEmail: ...
+    def render(
+        self, report: DailyEmailReport, chart_source: ChartSource | None = None
+    ) -> RenderedEmail: ...
+
+
+class ReportAssetStore(Protocol):
+    """Publish a generated report asset and return its public HTTPS URL."""
+
+    def publish(
+        self,
+        content: bytes,
+        content_type: str,
+        object_name: str,
+    ) -> str: ...
 
 
 class ReportDeliveryRepository(Protocol):
@@ -138,6 +159,7 @@ class SendDailyReportUseCase:
         transport: EmailTransport,
         sender: str,
         recipient: str,
+        asset_store: ReportAssetStore | None = None,
     ) -> None:
         self._update_portfolio = update_portfolio
         self._snapshots = snapshots
@@ -148,6 +170,7 @@ class SendDailyReportUseCase:
         self._transport = transport
         self._sender = sender
         self._recipient = recipient
+        self._asset_store = asset_store
 
     def execute(
         self,
@@ -195,15 +218,28 @@ class SendDailyReportUseCase:
             return DailyReportSendResult(
                 report_date, self._recipient, rendered.subject, "already_sent"
             )
-        envelope = EmailEnvelope(
-            self._sender,
-            self._recipient,
-            rendered.subject,
-            rendered.plain_text,
-            rendered.html,
-            rendered.inline_images,
-        )
         try:
+            if self._asset_store is not None and rendered.inline_images:
+                chart = rendered.inline_images[0]
+                chart_url = self._asset_store.publish(
+                    chart.content,
+                    chart.content_type,
+                    (f"daily-report/{report_date.isoformat()}/" "asset-change.png"),
+                )
+                if not chart_url.startswith("https://"):
+                    raise ValueError("report asset store must return an HTTPS URL")
+                rendered = self._renderer.render(
+                    report,
+                    ChartSource(uri=chart_url),
+                )
+            envelope = EmailEnvelope(
+                self._sender,
+                self._recipient,
+                rendered.subject,
+                rendered.plain_text,
+                rendered.html,
+                rendered.inline_images,
+            )
             self._transport.send(envelope)
         except Exception as error:
             self._deliveries.mark_failed(

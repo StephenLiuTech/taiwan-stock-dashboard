@@ -56,6 +56,7 @@ from pams.application.portfolio_history import PortfolioHistoryUseCase
 from pams.application.portfolio_status import PortfolioStatusUseCase
 from pams.application.rebuild_holdings import RebuildHoldingsUseCase
 from pams.application.send_daily_report import (
+    ChartSource,
     DailyReportDeliveryError,
     DailyReportError,
     DailyReportSendResult,
@@ -77,6 +78,7 @@ __all__ = [
     "AnalyzePortfolioUseCase",
     "ApplyRebuiltHoldingsUseCase",
     "AuthorizeMicrosoftEmailUseCase",
+    "ChartSource",
     "DemoDataResult",
     "DemoDataUseCase",
     "DailyReportDeliveryError",

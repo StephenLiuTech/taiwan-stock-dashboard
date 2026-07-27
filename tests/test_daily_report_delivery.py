@@ -184,6 +184,27 @@ class TransportStub:
         self.messages.append(envelope)
 
 
+class AssetStoreStub:
+    def __init__(
+        self,
+        url: str = (
+            "https://project.supabase.co/storage/v1/object/public/"
+            "pams-report-assets/random-prefix/daily-report/"
+            "2026-07-22/asset-change.png"
+        ),
+        error: Exception | None = None,
+    ) -> None:
+        self.url = url
+        self.error = error
+        self.calls: list[tuple[bytes, str, str]] = []
+
+    def publish(self, content: bytes, content_type: str, object_name: str) -> str:
+        self.calls.append((content, content_type, object_name))
+        if self.error:
+            raise self.error
+        return self.url
+
+
 def use_case(
     *,
     value: DailySnapshot | None = None,
@@ -191,6 +212,7 @@ def use_case(
     transport: TransportStub | None = None,
     history: list[DailySnapshot] | None = None,
     position_values: list[PositionSnapshot] | None = None,
+    asset_store: AssetStoreStub | None = None,
 ) -> tuple[SendDailyReportUseCase, UpdateStub, DeliveryStub, TransportStub]:
     update = UpdateStub()
     deliveries = delivery or DeliveryStub()
@@ -206,6 +228,7 @@ def use_case(
             email,
             "sender@example.com",
             "recipient@example.com",
+            asset_store,
         ),
         update,
         deliveries,
@@ -488,6 +511,84 @@ def test_multiple_snapshots_create_embedded_png_and_readable_text_history() -> N
         assert chart.size == (1200, 650)
     assert "2026-07-20 to 2026-07-22 (3 available snapshots)" in message.plain_text
     assert "2026-07-21 | NT$1,100.00 | NT$1,000.00" in message.plain_text
+
+
+def test_resend_asset_flow_publishes_png_and_uses_https_without_attachment() -> None:
+    history = [
+        snapshot(date(2026, 7, 21), market_value="1100", net_asset_value="1000"),
+        snapshot(),
+    ]
+    store = AssetStoreStub()
+    case, _, _, transport = use_case(
+        value=snapshot(), history=history, asset_store=store
+    )
+
+    case.execute(date(2026, 7, 22))
+
+    assert len(store.calls) == 1
+    content, content_type, object_name = store.calls[0]
+    assert content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert content_type == "image/png"
+    assert object_name == "daily-report/2026-07-22/asset-change.png"
+    message = transport.messages[0]
+    assert f'src="{store.url}"' in message.html
+    assert "cid:" not in message.html
+    assert message.inline_images == ()
+    assert "2026-07-21 | NT$1,100.00 | NT$1,000.00" in message.plain_text
+
+
+def test_forced_resend_upserts_the_same_date_object_path() -> None:
+    history = [snapshot(date(2026, 7, 21)), snapshot()]
+    store = AssetStoreStub()
+    delivery = DeliveryStub()
+    delivery.status = "SENT"
+    case, _, _, transport = use_case(
+        value=snapshot(),
+        history=history,
+        delivery=delivery,
+        asset_store=store,
+    )
+
+    case.execute(date(2026, 7, 22), force=True)
+    case.execute(date(2026, 7, 22), force=True)
+
+    assert [call[2] for call in store.calls] == [
+        "daily-report/2026-07-22/asset-change.png",
+        "daily-report/2026-07-22/asset-change.png",
+    ]
+    assert len(transport.messages) == 2
+
+
+def test_asset_upload_failure_marks_retryable_and_prevents_email() -> None:
+    history = [snapshot(date(2026, 7, 21)), snapshot()]
+    delivery = DeliveryStub()
+    store = AssetStoreStub(error=RuntimeError("storage unavailable"))
+    case, _, _, transport = use_case(
+        value=snapshot(),
+        history=history,
+        delivery=delivery,
+        asset_store=store,
+    )
+
+    with pytest.raises(
+        DailyReportDeliveryError,
+        match="daily report delivery failed: RuntimeError: storage unavailable",
+    ):
+        case.execute(date(2026, 7, 22))
+
+    assert transport.messages == []
+    assert delivery.status == "FAILED"
+
+
+def test_one_snapshot_resend_fallback_does_not_publish_asset() -> None:
+    store = AssetStoreStub()
+    case, _, _, transport = use_case(value=snapshot(), asset_store=store)
+
+    case.execute(date(2026, 7, 22))
+
+    assert store.calls == []
+    assert transport.messages[0].inline_images == ()
+    assert "a trend chart requires at least two snapshots" in transport.messages[0].html
 
 
 def test_fewer_than_thirty_snapshots_are_rendered_without_padding() -> None:

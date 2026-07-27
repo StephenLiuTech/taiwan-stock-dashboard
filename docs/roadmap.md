@@ -145,3 +145,5 @@ notifications are not part of v1.0.0.
 - Transactional, row-count-validated SQLite-to-PostgreSQL migration command
 - Weekday GitHub Actions delivery through Supabase PostgreSQL and Resend
 - Manual idempotent or explicit forced report execution with concurrency control
+- Resend chart publication through deterministic Supabase Storage HTTPS assets
+- SMTP and Microsoft Graph retain PAMS-controlled multipart/related CID charts

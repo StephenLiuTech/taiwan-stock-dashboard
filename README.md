@@ -431,6 +431,10 @@ Configure these repository-level GitHub Actions secrets:
 | `PAMS_RESEND_API_KEY` | Resend sending API key |
 | `PAMS_EMAIL_FROM` | Sender on a Resend-verified domain |
 | `PAMS_EMAIL_TO` | Daily-report recipient |
+| `PAMS_SUPABASE_URL` | Supabase project HTTPS URL for Storage |
+| `PAMS_SUPABASE_SERVICE_ROLE_KEY` | Server-side Storage upload credential |
+| `PAMS_REPORT_ASSET_BUCKET` | Public report-image bucket |
+| `PAMS_REPORT_ASSET_PREFIX` | Stable random deployment-specific object prefix |
 
 The job sets `PAMS_EMAIL_TRANSPORT=resend`,
 `PAMS_ENVIRONMENT=production`, and `PAMS_LOG_LEVEL=INFO`; these values are not
@@ -497,16 +501,17 @@ daily P/L impact and percentage, ranked by absolute monetary contribution
 rather than price-change percentage. Email-safe summary cards and explicit
 green, red, or neutral styling preserve both color and signed values.
 It also includes the most recent 30 available aggregate snapshots as total
-stock market value and net stock equity: HTML email embeds a generated PNG
-through a CID attachment (never a public image URL), while plain text includes
-the same dated values as a readable table. Histories shorter than 30 are valid;
-a single snapshot produces an explicit no-trend-yet message.
+stock market value and net stock equity, while plain text includes the same
+dated values as a readable table. Histories shorter than 30 are valid; a
+single snapshot produces an explicit no-trend-yet message.
 
-The PNG is generated at high resolution and referenced only as an inline CID
-resource. SMTP and Microsoft Graph mark the related MIME part
-`Content-Disposition: inline` without a downloadable filename; Resend uses its
-equivalent `contentId` representation. The displayed image scales to the
-email width for Outlook, Gmail, Apple Mail, and mobile clients.
+The PNG is generated at high resolution. SMTP and Microsoft Graph keep the
+multipart/related CID resource controlled by PAMS and mark it
+`Content-Disposition: inline` without a downloadable filename. Resend never
+receives a chart attachment or `contentId`: PAMS first upserts the PNG to a
+public Supabase Storage object and renders its HTTPS URL in the HTML. The
+displayed image scales to the email width for Outlook, Gmail, Apple Mail, and
+mobile clients.
 
 ```bash
 python -m pams daily-report send
@@ -540,6 +545,10 @@ Resend:
 ```dotenv
 PAMS_EMAIL_TRANSPORT=resend
 PAMS_RESEND_API_KEY=your-resend-sending-api-key
+PAMS_SUPABASE_URL=https://your-project.supabase.co
+PAMS_SUPABASE_SERVICE_ROLE_KEY=your-server-side-service-role-key
+PAMS_REPORT_ASSET_BUCKET=pams-report-assets
+PAMS_REPORT_ASSET_PREFIX=your-stable-random-deployment-prefix
 PAMS_EMAIL_FROM=PAMS <reports@your-verified-domain.example>
 PAMS_EMAIL_TO=recipient@example.com
 ```
@@ -575,6 +584,10 @@ then copy `.env.example` to `.env` and configure:
 ```dotenv
 PAMS_EMAIL_TRANSPORT=resend
 PAMS_RESEND_API_KEY=your-resend-sending-api-key
+PAMS_SUPABASE_URL=https://your-project.supabase.co
+PAMS_SUPABASE_SERVICE_ROLE_KEY=your-server-side-service-role-key
+PAMS_REPORT_ASSET_BUCKET=pams-report-assets
+PAMS_REPORT_ASSET_PREFIX=your-stable-random-deployment-prefix
 PAMS_EMAIL_FROM=PAMS <reports@your-verified-domain.example>
 PAMS_EMAIL_TO=recipient@example.com
 ```
@@ -583,6 +596,25 @@ The `PAMS_EMAIL_FROM` domain must be verified in Resend. Resend's testing mode
 may restrict delivery to the account owner's address until a domain is
 verified. API keys are loaded as secret settings and are never included in
 application output or transport errors.
+
+Create a **public** Supabase Storage bucket named `pams-report-assets`, or set
+`PAMS_REPORT_ASSET_BUCKET` to another public bucket. The service-role key is
+used only by the server-side upload step and must remain a GitHub/local secret.
+Set `PAMS_REPORT_ASSET_PREFIX` to a stable random value unique to the
+deployment. If omitted, PAMS derives a stable opaque prefix from the deployment
+configuration without exposing the key.
+
+Chart objects use one deterministic path per report date:
+
+```text
+<prefix>/daily-report/YYYY-MM-DD/asset-change.png
+```
+
+Forced rebuilds upsert that same object rather than creating duplicates.
+Public Storage URLs can be accessed by anyone who obtains the URL; object names
+therefore contain no portfolio values, recipient addresses, account IDs, or
+credentials. Unexpected Storage authentication, upload, or network failures
+fail the delivery before Resend is called.
 
 ### Enterprise users: Microsoft Graph
 

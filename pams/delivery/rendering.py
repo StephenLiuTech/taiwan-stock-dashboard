@@ -7,6 +7,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 
 from pams.application.send_daily_report import (
+    ChartSource,
     DailyEmailHistoryPoint,
     DailyEmailPosition,
     DailyEmailReport,
@@ -232,7 +233,9 @@ def _summary_card(label: str, value: str, *, color: str = "#111827") -> str:
 class DailyEmailReportRenderer:
     """Render persisted daily portfolio facts into multipart email content."""
 
-    def render(self, report: DailyEmailReport) -> RenderedEmail:
+    def render(
+        self, report: DailyEmailReport, chart_source: ChartSource | None = None
+    ) -> RenderedEmail:
         """Return deterministic plain text, HTML, subject, and inline chart."""
         subject = f"PAMS Daily Portfolio Report - {report.report_date}"
         contributors = _ranked_contributors(report.positions)
@@ -353,19 +356,23 @@ class DailyEmailReportRenderer:
             )
 
         if len(report.history) > 1:
-            chart_html = (
-                f'<img src="cid:{CHART_CONTENT_ID}" '
-                'alt="30-day stock market value and net stock equity chart" '
-                'width="760" style="display:block;width:100%;max-width:760px;'
-                'height:auto;border:0">'
-            )
-            inline_images = (
-                InlineImage(
+            source = chart_source or ChartSource(
+                uri=f"cid:{CHART_CONTENT_ID}",
+                attachment=InlineImage(
                     CHART_CONTENT_ID,
                     CHART_FILENAME,
                     "image/png",
                     _chart_png(report.history),
                 ),
+            )
+            chart_html = (
+                f'<img src="{escape(source.uri, quote=True)}" '
+                'alt="30-day stock market value and net stock equity chart" '
+                'width="760" style="display:block;width:100%;max-width:760px;'
+                'height:auto;border:0">'
+            )
+            inline_images = (
+                (source.attachment,) if source.attachment is not None else ()
             )
         else:
             chart_html = (

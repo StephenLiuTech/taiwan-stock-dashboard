@@ -1,5 +1,6 @@
 """Email delivery adapters and daily-report renderers."""
 
+from pams.delivery.assets import ReportAssetPublishError, SupabaseReportAssetStore
 from pams.delivery.microsoft_graph import (
     MicrosoftAuthorizationError,
     MicrosoftAuthorizationRequiredError,
@@ -20,5 +21,7 @@ __all__ = [
     "MicrosoftGraphEmailTransport",
     "ResendEmailError",
     "ResendEmailTransport",
+    "ReportAssetPublishError",
     "SMTPEmailTransport",
+    "SupabaseReportAssetStore",
 ]

@@ -78,7 +78,7 @@ def test_resend_transport_rejects_non_success_response() -> None:
         transport.send(envelope())
 
 
-def test_resend_transport_sends_inline_image_as_cid_attachment() -> None:
+def test_resend_transport_rejects_cid_attachments_without_sending() -> None:
     requests: list[Request] = []
 
     class Response:
@@ -96,24 +96,59 @@ def test_resend_transport_sends_inline_image_as_cid_attachment() -> None:
         return Response()
 
     message = envelope()
+    with pytest.raises(
+        ResendEmailError,
+        match="requires published HTTPS report assets",
+    ):
+        ResendEmailTransport("re_secret", opener=open_request).send(
+            EmailEnvelope(
+                message.sender,
+                message.recipient,
+                message.subject,
+                message.plain_text,
+                '<img src="cid:chart">',
+                (InlineImage("chart", "chart.png", "image/png", b"png-content"),),
+            )
+        )
+    assert requests == []
+
+
+def test_resend_https_chart_payload_has_no_attachment_or_cid() -> None:
+    requests: list[Request] = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def open_request(request: Request, *, timeout: float) -> Response:
+        assert timeout == 30
+        requests.append(request)
+        return Response()
+
+    message = envelope()
+    chart_url = (
+        "https://project.supabase.co/storage/v1/object/public/"
+        "pams-report-assets/random/daily-report/2026-07-27/asset-change.png"
+    )
     ResendEmailTransport("re_secret", opener=open_request).send(
         EmailEnvelope(
             message.sender,
             message.recipient,
             message.subject,
             message.plain_text,
-            '<img src="cid:chart">',
-            (InlineImage("chart", "chart.png", "image/png", b"png-content"),),
+            f'<img src="{chart_url}">',
         )
     )
-
-    assert json.loads(requests[0].data)["attachments"] == [
-        {
-            "content": "cG5nLWNvbnRlbnQ=",
-            "filename": "chart.png",
-            "contentId": "chart",
-        }
-    ]
+    payload = json.loads(requests[0].data)
+    assert payload["html"] == f'<img src="{chart_url}">'
+    assert "attachments" not in payload
+    assert "contentId" not in json.dumps(payload)
+    assert "cid:" not in payload["html"]
 
 
 def test_resend_transport_translates_http_error_without_exposing_key() -> None:

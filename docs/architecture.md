@@ -404,13 +404,23 @@ price-change percentage alone.
 
 At the presentation boundary, `DailyEmailReportRenderer` maps those immutable
 Decimal values to plain text and an email chart. Multiple snapshots produce a
-local PNG attached with a CID reference; one snapshot produces a controlled
-fallback message. SMTP and Microsoft Graph share MIME construction, and Resend
-uses its equivalent CID attachment payload. No report image is hosted
-externally, and financial values remain Decimal until chart pixel mapping.
-The MIME-related PNG is inline-only and has no attachment filename in SMTP or
-Graph messages, minimizing downloadable attachment previews. Its high-resolution
-source is responsively constrained by email-safe inline HTML attributes.
+local PNG; one snapshot produces a controlled fallback message. A
+transport-neutral `ChartSource` selects either a CID URI with an inline image
+or an HTTPS URI without an attachment. Financial values remain Decimal until
+chart pixel mapping.
+
+SMTP and Microsoft Graph share PAMS-controlled MIME construction. Their PNG is
+inline-only, has a matching CID, and has no attachment filename. Resend does
+not receive CID data or attachments. `SendDailyReportUseCase` publishes the
+generated PNG through the `ReportAssetStore` protocol, rerenders with the
+returned HTTPS URL, and only then invokes Resend. Supabase Storage is one
+replaceable infrastructure implementation; business and portfolio services do
+not depend on it.
+
+Supabase objects are upserted at a stable, deployment-prefixed path per report
+date. Storage failures enter the existing typed retryable delivery path and
+prevent a broken email from being sent. Public URLs are intentionally
+unguessable by prefix but remain accessible to anyone who obtains the URL.
 
 The `EmailTransport` protocol keeps delivery infrastructure outside the
 application workflow. Personal installations default to the Resend REST

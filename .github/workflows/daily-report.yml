@@ -2,7 +2,7 @@ name: Daily Portfolio Report
 
 on:
   schedule:
-    - cron: "35 5 * * 1-5"
+    - cron: "35 6 * * 1-5"
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -51,6 +51,10 @@ jobs:
           PAMS_RESEND_API_KEY: ${{ secrets.PAMS_RESEND_API_KEY }}
           PAMS_EMAIL_FROM: ${{ secrets.PAMS_EMAIL_FROM }}
           PAMS_EMAIL_TO: ${{ secrets.PAMS_EMAIL_TO }}
+          PAMS_SUPABASE_URL: ${{ secrets.PAMS_SUPABASE_URL }}
+          PAMS_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PAMS_SUPABASE_SERVICE_ROLE_KEY }}
+          PAMS_REPORT_ASSET_BUCKET: ${{ secrets.PAMS_REPORT_ASSET_BUCKET }}
+          PAMS_REPORT_ASSET_PREFIX: ${{ secrets.PAMS_REPORT_ASSET_PREFIX }}
         run: python -m pams daily-report send --debug
 
       - name: Force rebuild and send daily report
@@ -60,4 +64,8 @@ jobs:
           PAMS_RESEND_API_KEY: ${{ secrets.PAMS_RESEND_API_KEY }}
           PAMS_EMAIL_FROM: ${{ secrets.PAMS_EMAIL_FROM }}
           PAMS_EMAIL_TO: ${{ secrets.PAMS_EMAIL_TO }}
+          PAMS_SUPABASE_URL: ${{ secrets.PAMS_SUPABASE_URL }}
+          PAMS_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PAMS_SUPABASE_SERVICE_ROLE_KEY }}
+          PAMS_REPORT_ASSET_BUCKET: ${{ secrets.PAMS_REPORT_ASSET_BUCKET }}
+          PAMS_REPORT_ASSET_PREFIX: ${{ secrets.PAMS_REPORT_ASSET_PREFIX }}
         run: python -m pams daily-report send --force --debug

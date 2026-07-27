@@ -299,9 +299,25 @@ def test_daily_report_production_composition_selects_resend(
         def send(self, envelope: object) -> None:
             created["envelope"] = envelope
 
+    class AssetStoreStub:
+        def __init__(self, url: str, key: str, bucket: str, prefix: str | None) -> None:
+            created["asset_store"] = (url, key, bucket, prefix)
+
+        def publish(self, content: bytes, content_type: str, object_name: str) -> str:
+            created["published"] = (content, content_type, object_name)
+            return (
+                "https://project.supabase.co/storage/v1/object/public/"
+                "bucket/prefix/chart.png"
+            )
+
     monkeypatch.setattr(pams.composition, "ResendEmailTransport", TransportStub)
+    monkeypatch.setattr(pams.composition, "SupabaseReportAssetStore", AssetStoreStub)
     monkeypatch.setenv("PAMS_EMAIL_TRANSPORT", "resend")
     monkeypatch.setenv("PAMS_RESEND_API_KEY", "re_test-key")
+    monkeypatch.setenv("PAMS_SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setenv("PAMS_SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+    monkeypatch.setenv("PAMS_REPORT_ASSET_BUCKET", "report-assets")
+    monkeypatch.setenv("PAMS_REPORT_ASSET_PREFIX", "random-prefix")
     monkeypatch.setenv("PAMS_EMAIL_FROM", "reports@example.com")
     monkeypatch.setenv("PAMS_EMAIL_TO", "recipient@example.com")
     get_settings.cache_clear()
@@ -312,6 +328,12 @@ def test_daily_report_production_composition_selects_resend(
             result = application.send_daily_report.execute(date(2026, 7, 22))
         assert result.status == "sent"
         assert created["api_key"] == "re_test-key"
+        assert created["asset_store"] == (
+            "https://project.supabase.co",
+            "service-role-key",
+            "report-assets",
+            "random-prefix",
+        )
         assert "envelope" in created
     finally:
         get_settings.cache_clear()
@@ -356,6 +378,10 @@ def test_daily_report_validates_only_selected_transport(
     monkeypatch.setenv("PAMS_EMAIL_TO", "recipient@example.com")
     for name in (
         "PAMS_RESEND_API_KEY",
+        "PAMS_SUPABASE_URL",
+        "PAMS_SUPABASE_SERVICE_ROLE_KEY",
+        "PAMS_REPORT_ASSET_BUCKET",
+        "PAMS_REPORT_ASSET_PREFIX",
         "PAMS_SMTP_HOST",
         "PAMS_SMTP_USERNAME",
         "PAMS_SMTP_PASSWORD",

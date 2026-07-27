@@ -58,6 +58,12 @@ def test_workflow_scopes_required_secrets_to_runtime_steps() -> None:
         "PAMS_RESEND_API_KEY": "${{ secrets.PAMS_RESEND_API_KEY }}",
         "PAMS_EMAIL_FROM": "${{ secrets.PAMS_EMAIL_FROM }}",
         "PAMS_EMAIL_TO": "${{ secrets.PAMS_EMAIL_TO }}",
+        "PAMS_SUPABASE_URL": "${{ secrets.PAMS_SUPABASE_URL }}",
+        "PAMS_SUPABASE_SERVICE_ROLE_KEY": (
+            "${{ secrets.PAMS_SUPABASE_SERVICE_ROLE_KEY }}"
+        ),
+        "PAMS_REPORT_ASSET_BUCKET": "${{ secrets.PAMS_REPORT_ASSET_BUCKET }}",
+        "PAMS_REPORT_ASSET_PREFIX": "${{ secrets.PAMS_REPORT_ASSET_PREFIX }}",
     }
     assert by_name["Send idempotent daily report"]["env"] == delivery_environment
     assert by_name["Force rebuild and send daily report"]["env"] == delivery_environment
