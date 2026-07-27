@@ -2,7 +2,7 @@ name: Daily Portfolio Report
 
 on:
   schedule:
-    - cron: "35 6 * * 1-5"
+    - cron: "0 17 * * 0-4"
   workflow_dispatch:
     inputs:
       force_rebuild:
