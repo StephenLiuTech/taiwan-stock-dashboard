@@ -1,6 +1,5 @@
 """Concrete dependency composition for local PAMS commands."""
 
-import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -12,8 +11,17 @@ from pydantic import SecretStr
 from config import get_settings, load_logging_config
 from core.constants import PROJECT_ROOT
 from core.logging import configure_logging
-from database import initialize_database, initialize_schema
-from market_calendar import MarketCalendar, OfficialMarketDateProvider
+from database.provider import (
+    database_url_for_override,
+    open_database,
+    resolve_sqlite_path,
+)
+from domain import Market
+from market_calendar import (
+    MarketCalendar,
+    OfficialHistoricalMarketDateProvider,
+    OfficialMarketDateProvider,
+)
 from market_data.engine import MarketDataEngine
 from market_data.providers import (
     HistoricalTPExProvider,
@@ -29,6 +37,7 @@ from pams.application import (
     AuthorizeMicrosoftEmailUseCase,
     DemoDataUseCase,
     ListTransactionsUseCase,
+    MigrateDatabaseUseCase,
     PortfolioHistoryUseCase,
     PortfolioStatusUseCase,
     SendDailyReportUseCase,
@@ -45,17 +54,7 @@ from pams.delivery import (
     SMTPEmailTransport,
 )
 from pams.operations import OperationalStatusService, VerificationService
-from repositories import (
-    SQLiteHoldingRebuildUnitOfWork,
-    SQLiteHoldingRepository,
-    SQLiteLiabilityRepository,
-    SQLiteMarketDataUnitOfWork,
-    SQLitePositionSnapshotRepository,
-    SQLitePriceQuoteRepository,
-    SQLiteReportDeliveryRepository,
-    SQLiteSnapshotRepository,
-    SQLiteTransactionRepository,
-)
+from repositories.provider import RepositoryBundle, create_repositories
 from services import BootstrapService, HoldingProjectionMetadata, TransactionEngine
 
 
@@ -63,7 +62,7 @@ from services import BootstrapService, HoldingProjectionMetadata, TransactionEng
 class ApplicationContext:
     """Resources composed for one local CLI invocation."""
 
-    connection: sqlite3.Connection
+    connection: object
     engine: MarketDataEngine
     database_path: Path
     seeded: bool
@@ -73,6 +72,7 @@ class ApplicationContext:
     update_portfolio: UpdatePortfolioUseCase
     portfolio_status: PortfolioStatusUseCase
     verify_system: VerifySystemUseCase
+    repositories: RepositoryBundle | None = None
     portfolio_history: PortfolioHistoryUseCase | None = None
     apply_rebuilt_holdings: ApplyRebuiltHoldingsUseCase | None = None
     add_transaction: AddTransactionUseCase | None = None
@@ -92,22 +92,26 @@ def resolve_database_path(override: Path | None = None) -> Path:
     """Resolve an override or configured SQLite URL to an absolute path."""
     if override is not None:
         return override.expanduser().resolve()
-    database_url = get_settings().database_url
-    prefix = "sqlite:///"
-    if not database_url.startswith(prefix):
-        raise ValueError("CLI supports only sqlite:/// database URLs")
-    raw_path = database_url.removeprefix(prefix)
-    if not raw_path or raw_path == ":memory:":
-        raise ValueError("CLI requires a file-backed SQLite database")
-    path = Path(raw_path)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    return path.resolve()
+    return resolve_sqlite_path(get_settings().database_url)
 
 
 def compose_demo_data() -> DemoDataUseCase:
     """Build the isolated demo-data workflow with production protection."""
-    return DemoDataUseCase(resolve_database_path())
+    database_url = get_settings().database_url
+    production_location = (
+        resolve_sqlite_path(database_url)
+        if database_url.startswith("sqlite:///")
+        else Path("PostgreSQL")
+    )
+    return DemoDataUseCase(production_location)
+
+
+def compose_database_migration() -> MigrateDatabaseUseCase:
+    """Compose the explicitly configured SQLite-to-PostgreSQL migration."""
+    settings = get_settings()
+    if not settings.migration_source_url:
+        raise ValueError("PAMS_MIGRATION_SOURCE_URL is required for database migration")
+    return MigrateDatabaseUseCase(settings.migration_source_url, settings.database_url)
 
 
 @contextmanager
@@ -192,15 +196,14 @@ def compose_daily_report(
                 configured["PAMS_SMTP_USERNAME"],
                 configured["PAMS_SMTP_PASSWORD"],
             )
-        snapshots = SQLiteSnapshotRepository(context.connection)
-        positions = SQLitePositionSnapshotRepository(context.connection)
-        holdings = SQLiteHoldingRepository(context.connection)
+        if context.repositories is None:
+            raise RuntimeError("database repositories are not composed")
         use_case = SendDailyReportUseCase(
             context.update_portfolio,
-            snapshots,
-            positions,
-            holdings,
-            SQLiteReportDeliveryRepository(context.connection),
+            context.repositories.daily_snapshots,
+            context.repositories.position_snapshots,
+            context.repositories.holdings,
+            context.repositories.report_deliveries,
             DailyEmailReportRenderer(),
             transport,
             sender,
@@ -324,42 +327,68 @@ def _compose(
     logging_config = load_logging_config()
     settings = get_settings()
     configure_logging("DEBUG" if verbose else settings.log_level, logging_config.format)
-    database_path = resolve_database_path(database_override)
-    if not initialize and not database_path.exists():
+    database_url = database_url_for_override(database_override, settings.database_url)
+    if (
+        not initialize
+        and database_url.startswith("sqlite:///")
+        and not resolve_sqlite_path(database_url).exists()
+    ):
+        missing_path = resolve_sqlite_path(database_url)
+        raise ValueError(
+            f"Database does not exist: {missing_path}. "
+            "Run 'python -m pams demo-data' for a usable first-run database."
+        )
+    database = open_database(database_url)
+    database_path = database.location
+    if not initialize and not database.exists():
         raise ValueError(
             f"Database does not exist: {database_path}. "
             "Run 'python -m pams demo-data' for a usable first-run database."
         )
-    connection = initialize_database(f"sqlite:///{database_path.as_posix()}")
+    connection = database.connection
     try:
-        if initialize:
-            initialize_schema(connection)
-        holdings = SQLiteHoldingRepository(connection)
-        liabilities = SQLiteLiabilityRepository(connection)
+        if initialize or database.backend == "postgresql":
+            database.initialize_schema()
+        repositories = create_repositories(database.backend, connection)
+        holdings = repositories.holdings
+        liabilities = repositories.liabilities
         seeded = (
             BootstrapService(connection, holdings, liabilities).initialize()
             if bootstrap
             else False
         )
+        using_default_providers = providers is None
         market_providers = providers or (TWSEProvider(), TPExProvider())
         engine = MarketDataEngine(
             market_providers,
             holdings,
             liabilities,
-            SQLiteMarketDataUnitOfWork(connection),
+            repositories.market_data_uow,
         )
-        date_providers = tuple(
-            OfficialMarketDateProvider(provider) for provider in market_providers
-        )
+        if using_default_providers:
+            date_providers = (
+                OfficialHistoricalMarketDateProvider(
+                    Market.TWSE, HistoricalTWSEProvider
+                ),
+                OfficialHistoricalMarketDateProvider(
+                    Market.TPEX, HistoricalTPExProvider
+                ),
+            )
+        else:
+            date_providers = tuple(
+                OfficialMarketDateProvider(provider) for provider in market_providers
+            )
         calendar = MarketCalendar(date_providers)
-        status_service = OperationalStatusService(connection, database_path)
+        status_service = OperationalStatusService(
+            connection, database_path, repositories, database.size_bytes
+        )
         verification_service = VerificationService(
             connection, database_path, date_providers, calendar, engine
         )
-        snapshots = SQLiteSnapshotRepository(connection)
-        position_snapshots = SQLitePositionSnapshotRepository(connection)
-        quotes = SQLitePriceQuoteRepository(connection)
-        transaction_repository = SQLiteTransactionRepository(connection)
+        snapshots = repositories.daily_snapshots
+        position_snapshots = repositories.position_snapshots
+        quotes = repositories.price_quotes
+        transaction_repository = repositories.transactions
         transaction_engine = TransactionEngine()
         valuate_portfolio = ValuatePortfolioUseCase(
             holdings,
@@ -382,11 +411,12 @@ def _compose(
                 ),
                 holdings,
                 liabilities,
-                SQLiteMarketDataUnitOfWork(connection),
+                repositories.market_data_uow,
             )
 
         yield ApplicationContext(
             connection=connection,
+            repositories=repositories,
             engine=engine,
             database_path=database_path,
             seeded=seeded,
@@ -402,6 +432,7 @@ def _compose(
                 transaction_repository,
                 holdings,
                 transaction_engine,
+                prefer_historical_for_automatic=using_default_providers,
             ),
             portfolio_status=PortfolioStatusUseCase(
                 calendar,
@@ -414,7 +445,7 @@ def _compose(
             verify_system=VerifySystemUseCase(verification_service),
             portfolio_history=PortfolioHistoryUseCase(snapshots),
             apply_rebuilt_holdings=ApplyRebuiltHoldingsUseCase(
-                SQLiteHoldingRebuildUnitOfWork(connection), holding_metadata
+                repositories.holding_rebuild_uow, holding_metadata
             ),
             add_transaction=AddTransactionUseCase(transaction_repository),
             list_transactions=ListTransactionsUseCase(transaction_repository),

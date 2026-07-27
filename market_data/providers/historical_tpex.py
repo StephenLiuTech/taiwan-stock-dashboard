@@ -5,7 +5,7 @@ from datetime import date
 from urllib.parse import urlencode
 
 from domain import Market
-from market_data.exceptions import ProviderDataError
+from market_data.exceptions import MarketDateUnavailableError, ProviderDataError
 from market_data.transport import (
     JSONDocumentTransport,
     JSONRecord,
@@ -64,7 +64,7 @@ class HistoricalTPExProvider:
                         }
                     )
             if not records:
-                raise ProviderDataError(
+                raise MarketDateUnavailableError(
                     "TPEx has no historical data for requested date"
                 )
             return records

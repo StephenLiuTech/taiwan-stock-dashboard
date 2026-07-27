@@ -9,7 +9,7 @@ from urllib.request import Request
 
 import pytest
 
-from pams.application.send_daily_report import EmailEnvelope
+from pams.application.send_daily_report import EmailEnvelope, InlineImage
 from pams.delivery import (
     MicrosoftAuthorizationRequiredError,
     MicrosoftGraphAuthenticator,
@@ -177,6 +177,54 @@ def test_graph_transport_posts_multipart_alternative_mime() -> None:
     assert message.get_body(preferencelist=("html",)).get_content().strip() == (
         "<p>HTML report</p>"
     )
+
+
+def test_graph_transport_embeds_inline_png_by_content_id() -> None:
+    requests: list[Request] = []
+
+    class Authenticator:
+        def acquire_token_silent(self) -> str:
+            return "opaque-token"
+
+    class Response:
+        status = 202
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def open_request(request: Request, *, timeout: float) -> Response:
+        assert timeout == 30
+        requests.append(request)
+        return Response()
+
+    MicrosoftGraphEmailTransport(
+        Authenticator(),  # type: ignore[arg-type]
+        opener=open_request,
+    ).send(
+        EmailEnvelope(
+            "sender@hotmail.com",
+            "recipient@example.com",
+            "PAMS report",
+            "Plain report",
+            '<img src="cid:chart">',
+            (InlineImage("chart", "chart.png", "image/png", b"png-content"),),
+        )
+    )
+
+    message = BytesParser(policy=policy.default).parsebytes(
+        base64.b64decode(requests[0].data)
+    )
+    attachment = next(
+        part for part in message.walk() if part.get_content_type() == "image/png"
+    )
+    assert attachment["Content-ID"] == "<chart>"
+    assert attachment.get_content_disposition() == "inline"
+    assert attachment.get_filename() is None
+    assert attachment.get_content_type() == "image/png"
+    assert attachment.get_payload(decode=True) == b"png-content"
 
 
 def test_graph_transport_rejects_non_accepted_response() -> None:

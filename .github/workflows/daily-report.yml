@@ -1,0 +1,63 @@
+name: Daily Portfolio Report
+
+on:
+  schedule:
+    - cron: "35 6 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: Rebuild the latest live market-date snapshot before sending
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pams-daily-report
+  cancel-in-progress: false
+
+jobs:
+  send-daily-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PAMS_ENVIRONMENT: production
+      PAMS_LOG_LEVEL: INFO
+      PAMS_EMAIL_TRANSPORT: resend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install PAMS runtime dependencies
+        run: python -m pip install .
+
+      - name: Verify production configuration and dependencies
+        env:
+          PAMS_DATABASE_URL: ${{ secrets.PAMS_DATABASE_URL }}
+        run: python -m pams verify
+
+      - name: Send idempotent daily report
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.force_rebuild }}
+        env:
+          PAMS_DATABASE_URL: ${{ secrets.PAMS_DATABASE_URL }}
+          PAMS_RESEND_API_KEY: ${{ secrets.PAMS_RESEND_API_KEY }}
+          PAMS_EMAIL_FROM: ${{ secrets.PAMS_EMAIL_FROM }}
+          PAMS_EMAIL_TO: ${{ secrets.PAMS_EMAIL_TO }}
+        run: python -m pams daily-report send --debug
+
+      - name: Force rebuild and send daily report
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild }}
+        env:
+          PAMS_DATABASE_URL: ${{ secrets.PAMS_DATABASE_URL }}
+          PAMS_RESEND_API_KEY: ${{ secrets.PAMS_RESEND_API_KEY }}
+          PAMS_EMAIL_FROM: ${{ secrets.PAMS_EMAIL_FROM }}
+          PAMS_EMAIL_TO: ${{ secrets.PAMS_EMAIL_TO }}
+        run: python -m pams daily-report send --force --debug

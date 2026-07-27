@@ -39,6 +39,7 @@ class UpdatePortfolioUseCase:
         transaction_repository: TransactionRepository | None = None,
         holding_repository: HoldingRepository | None = None,
         transaction_engine: TransactionEngine | None = None,
+        prefer_historical_for_automatic: bool = False,
     ) -> None:
         self.calendar = calendar
         self.engine = engine
@@ -48,6 +49,7 @@ class UpdatePortfolioUseCase:
         self.transaction_repository = transaction_repository
         self.holding_repository = holding_repository
         self.transaction_engine = transaction_engine or TransactionEngine()
+        self.prefer_historical_for_automatic = prefer_historical_for_automatic
 
     def execute(
         self,
@@ -79,7 +81,11 @@ class UpdatePortfolioUseCase:
                 availability=availability,
             )
 
-        needs_historical_provider = not automatic or not sources_synchronized
+        needs_historical_provider = (
+            not automatic
+            or not sources_synchronized
+            or self.prefer_historical_for_automatic
+        )
         if needs_historical_provider and self.historical_engine_factory is None:
             raise ValueError(
                 "Historical market-data providers are required for the requested date"

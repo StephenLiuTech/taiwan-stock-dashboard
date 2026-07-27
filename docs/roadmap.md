@@ -136,3 +136,12 @@ notifications are not part of v1.0.0.
 - Locally cached MSAL tokens for non-interactive subsequent delivery
 - Optional authenticated STARTTLS SMTP adapter for non-Microsoft providers
 - Automatic update orchestration, explicit snapshot dates, dry-run, and force
+- Signed daily portfolio P/L from persisted position movements
+- Contribution-ranked position daily P/L in summary and holdings presentations
+- Embedded 30-snapshot stock-value and net-equity PNG with text fallback
+- Live official automatic report-date resolution independent of persisted dates
+- Database-provider composition for SQLite and PostgreSQL
+- PostgreSQL implementations for every persisted repository and atomic unit of work
+- Transactional, row-count-validated SQLite-to-PostgreSQL migration command
+- Weekday GitHub Actions delivery through Supabase PostgreSQL and Resend
+- Manual idempotent or explicit forced report execution with concurrency control

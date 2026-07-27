@@ -1,7 +1,7 @@
 """Domain-specific repository contracts."""
 
 from contextlib import AbstractContextManager
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol
 
 from domain import (
@@ -70,6 +70,7 @@ class SnapshotRepository(Protocol):
     def get_highest(self) -> DailySnapshot | None: ...
     def list_between_dates(self, start: date, end: date) -> list[DailySnapshot]: ...
     def add(self, snapshot: DailySnapshot) -> None: ...
+    def replace(self, snapshot: DailySnapshot) -> None: ...
 
 
 class PriceQuoteRepository(Protocol):
@@ -78,6 +79,10 @@ class PriceQuoteRepository(Protocol):
     def upsert_many(self, quotes: list[PriceQuote]) -> None: ...
     def list_by_date(self, trade_date: date) -> list[PriceQuote]: ...
     def get_latest(self, symbol: str, market: str) -> PriceQuote | None: ...
+    def get_latest_date(self) -> date | None: ...
+    def replace_many_for_date(
+        self, trade_date: date, quotes: list[PriceQuote]
+    ) -> None: ...
 
 
 class PositionSnapshotRepository(Protocol):
@@ -85,6 +90,32 @@ class PositionSnapshotRepository(Protocol):
 
     def add_many(self, snapshots: list[PositionSnapshot]) -> None: ...
     def list_by_date(self, snapshot_date: date) -> list[PositionSnapshot]: ...
+    def get_latest_date(self) -> date | None: ...
+    def replace_many(
+        self, snapshot_date: date, snapshots: list[PositionSnapshot]
+    ) -> None: ...
+
+
+class ReportDeliveryRepository(Protocol):
+    """Idempotent report delivery persistence."""
+
+    def claim(self, report_type: str, report_date: date, recipient: str) -> bool: ...
+    def mark_sent(
+        self, report_type: str, report_date: date, recipient: str, sent_at: datetime
+    ) -> None: ...
+    def mark_failed(
+        self, report_type: str, report_date: date, recipient: str, error: str
+    ) -> None: ...
+
+
+class MarketDataUnitOfWork(Protocol):
+    """Atomic persistence boundary for one valuation snapshot."""
+
+    price_quotes: PriceQuoteRepository
+    daily_snapshots: SnapshotRepository
+    position_snapshots: PositionSnapshotRepository
+
+    def transaction(self) -> AbstractContextManager[None]: ...
 
 
 class HoldingRebuildRepository(Protocol):

@@ -164,6 +164,25 @@ def test_update_automatic_uses_historical_engine_for_joint_date(
     assert latest_engine.refresh_called is False
 
 
+def test_update_automatic_uses_date_bound_engine_for_live_resolved_date() -> None:
+    selected_date = date(2026, 7, 27)
+    latest_engine = FakeEngine()
+    historical_engine = FakeEngine()
+    selected_dates: list[date] = []
+    result = UpdatePortfolioUseCase(
+        CalendarStub(selected_date, selected_date),  # type: ignore[arg-type]
+        latest_engine,  # type: ignore[arg-type]
+        Path("pams.db"),
+        lambda selected: selected_dates.append(selected) or historical_engine,  # type: ignore[arg-type]
+        prefer_historical_for_automatic=True,
+    ).execute()
+
+    assert result.requested_date == selected_date
+    assert selected_dates == [selected_date]
+    assert historical_engine.refresh_called is True
+    assert latest_engine.refresh_called is False
+
+
 def test_update_explicit_date_bypasses_calendar_and_honors_dry_run() -> None:
     calendar = CalendarStub(date(2026, 7, 21), date(2026, 7, 22))
     engine = FakeEngine()

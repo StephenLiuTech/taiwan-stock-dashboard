@@ -3,6 +3,7 @@
 from market_data.engine import MarketDataEngine, MarketDataRefreshResult
 from market_data.exceptions import (
     MarketDataError,
+    MarketDateUnavailableError,
     ProviderDataError,
     SourceDateError,
     SourceDateMismatchError,
@@ -21,6 +22,7 @@ __all__ = [
     "HistoricalTPExProvider",
     "HistoricalTWSEProvider",
     "MarketDataEngine",
+    "MarketDateUnavailableError",
     "MarketDataError",
     "MarketDataRefreshResult",
     "QuoteNormalizationError",

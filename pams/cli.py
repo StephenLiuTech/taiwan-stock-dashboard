@@ -10,8 +10,10 @@ from decimal import Decimal, InvalidOperation
 from enum import IntEnum
 from pathlib import Path
 
+from config import get_settings
 from config.yaml_loader import ConfigurationError
 from core.constants import PROJECT_ROOT
+from database.provider import redact_database_url
 from market_data import (
     ProviderDataError,
     SourceDateError,
@@ -29,6 +31,7 @@ from pams.application import (
     AnalyticsRepositoryError,
     DailyReportDeliveryError,
     DailyReportSnapshotMissingError,
+    DatabaseMigrationError,
     InvalidAnalyticsPeriodError,
     PortfolioAnalyticsError,
     ValuationDataUnavailableError,
@@ -37,6 +40,7 @@ from pams.application import (
 from pams.composition import (
     compose_application,
     compose_daily_report,
+    compose_database_migration,
     compose_demo_data,
     compose_email_authorization,
     compose_ledger_operations,
@@ -113,6 +117,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--database", type=Path, default=PROJECT_ROOT / "data" / "pams_demo.db"
     )
     demo.add_argument("--verbose", action="store_true")
+    migrate = commands.add_parser(
+        "migrate", help="migrate configured SQLite data to PostgreSQL"
+    )
+    migrate.add_argument("--verbose", action="store_true")
     holdings = commands.add_parser("holdings", help="manage projected holdings")
     holding_commands = holdings.add_subparsers(dest="holdings_command", required=True)
     rebuild = holding_commands.add_parser(
@@ -217,6 +225,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _error_exit_code(error: Exception) -> ExitCode:
     if isinstance(error, DailyReportDeliveryError):
         return ExitCode.PROVIDER_ERROR
+    if isinstance(error, DatabaseMigrationError):
+        return ExitCode.CONFIG_OR_DATABASE_ERROR
     if isinstance(error, DailyReportSnapshotMissingError):
         return ExitCode.CONFIG_OR_DATABASE_ERROR
     if isinstance(error, InvalidAnalyticsPeriodError):
@@ -247,6 +257,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.command == "demo-data":
             result = compose_demo_data().execute(arguments.database)
             print(format_demo_data_report(result))
+            return int(ExitCode.SUCCESS)
+        if arguments.command == "migrate":
+            result = compose_database_migration().execute()
+            print(_format_database_migration(result))
             return int(ExitCode.SUCCESS)
         if arguments.command == "email":
             authorization = compose_email_authorization()
@@ -392,6 +406,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(report)
             return int(ExitCode.SUCCESS)
     except Exception as error:
+        if arguments.command == "migrate":
+            settings = get_settings()
+            print("PAMS Database Migration", file=sys.stderr)
+            print(
+                "Source database: "
+                + (
+                    redact_database_url(settings.migration_source_url)
+                    if settings.migration_source_url
+                    else "not configured"
+                ),
+                file=sys.stderr,
+            )
+            print(
+                f"Destination database: {redact_database_url(settings.database_url)}",
+                file=sys.stderr,
+            )
+            print("Rows copied: 0", file=sys.stderr)
+            print("Elapsed time: unavailable", file=sys.stderr)
+            print("Result: failure", file=sys.stderr)
         print(f"pams: {error}", file=sys.stderr)
         if getattr(arguments, "verbose", False) or getattr(arguments, "debug", False):
             traceback.print_exc()
@@ -417,6 +450,25 @@ def _format_daily_report_delivery(result: object) -> str:
     else:
         lines.append("Result: sent")
     return "\n".join(lines)
+
+
+def _format_database_migration(result: object) -> str:
+    """Render one successful database migration."""
+    from pams.application import DatabaseMigrationResult
+
+    assert isinstance(result, DatabaseMigrationResult)
+    rows = "\n".join(f"  {table}: {count}" for table, count in result.rows_copied)
+    return "\n".join(
+        (
+            "PAMS Database Migration",
+            f"Source database: {result.source_database}",
+            f"Destination database: {result.destination_database}",
+            f"Rows copied: {result.total_rows}",
+            rows,
+            f"Elapsed time: {result.elapsed_seconds:.3f} seconds",
+            "Result: success",
+        )
+    )
 
 
 def _show_device_authorization_prompt(verification_url: str, user_code: str) -> None:

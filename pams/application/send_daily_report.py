@@ -12,6 +12,7 @@ from repositories import (
     PositionSnapshotRepository,
     SnapshotRepository,
 )
+from services import PortfolioService
 
 REPORT_TYPE = "daily_portfolio"
 
@@ -40,6 +41,16 @@ class DailyEmailPosition:
     unrealized_pnl: Decimal
     unrealized_return: Decimal
     portfolio_weight: Decimal
+    daily_profit_loss: Decimal
+    daily_profit_loss_percentage: Decimal
+    daily_profit_loss_share: Decimal | None
+
+
+@dataclass(frozen=True)
+class DailyEmailHistoryPoint:
+    snapshot_date: date
+    total_market_value: Decimal
+    net_asset_value: Decimal
 
 
 @dataclass(frozen=True)
@@ -53,9 +64,10 @@ class DailyEmailReport:
     total_liabilities: Decimal
     net_asset_value: Decimal
     liability_ratio: Decimal
+    daily_profit_loss: Decimal
+    daily_profit_loss_percentage: Decimal
+    history: tuple[DailyEmailHistoryPoint, ...]
     positions: tuple[DailyEmailPosition, ...]
-    top_gainer: DailyEmailPosition | None
-    top_loser: DailyEmailPosition | None
 
 
 @dataclass(frozen=True)
@@ -63,6 +75,15 @@ class RenderedEmail:
     subject: str
     plain_text: str
     html: str
+    inline_images: tuple["InlineImage", ...] = ()
+
+
+@dataclass(frozen=True)
+class InlineImage:
+    content_id: str
+    filename: str
+    content_type: str
+    content: bytes
 
 
 @dataclass(frozen=True)
@@ -72,6 +93,7 @@ class EmailEnvelope:
     subject: str
     plain_text: str
     html: str
+    inline_images: tuple[InlineImage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -137,8 +159,13 @@ class SendDailyReportUseCase:
         """Perform one automatic or explicit-date delivery workflow."""
         if requested_date is None:
             update = self._update_portfolio.execute(dry_run=dry_run, force=force)
-            snapshot = self._snapshots.get_latest()
-            verified_source_date = update.verified_source_date
+            resolved_date = update.requested_date or update.verified_source_date
+            if resolved_date is None:
+                raise DailyReportSnapshotMissingError(
+                    "automatic market-date resolution returned no report date"
+                )
+            snapshot = self._snapshots.get_by_date(resolved_date)
+            verified_source_date = update.verified_source_date or resolved_date
         elif force:
             update = self._update_portfolio.execute(
                 requested_date, dry_run=dry_run, force=True
@@ -174,6 +201,7 @@ class SendDailyReportUseCase:
             rendered.subject,
             rendered.plain_text,
             rendered.html,
+            rendered.inline_images,
         )
         try:
             self._transport.send(envelope)
@@ -199,20 +227,33 @@ class SendDailyReportUseCase:
     ) -> DailyEmailReport:
         names = {holding.id: holding.name for holding in self._holdings.list_all()}
         persisted = self._positions.list_by_date(snapshot.snapshot_date)
+        daily_performance = PortfolioService.calculate_daily_performance(persisted)
+        contribution_by_holding = {
+            item.holding_id: item for item in daily_performance.positions
+        }
+        historical_snapshots = sorted(
+            self._snapshots.list_between_dates(date.min, snapshot.snapshot_date),
+            key=lambda item: item.snapshot_date,
+        )[-30:]
+        if not historical_snapshots:
+            historical_snapshots = [snapshot]
+        history = tuple(
+            DailyEmailHistoryPoint(
+                item.snapshot_date,
+                item.total_market_value,
+                item.net_asset_value,
+            )
+            for item in historical_snapshots
+        )
         positions = tuple(
-            self._position(item, names.get(item.holding_id, item.symbol))
+            self._position(
+                item,
+                names.get(item.holding_id, item.symbol),
+                contribution_by_holding[item.holding_id].profit_loss,
+                contribution_by_holding[item.holding_id].return_percentage,
+                contribution_by_holding[item.holding_id].portfolio_profit_loss_share,
+            )
             for item in sorted(persisted, key=lambda value: value.symbol)
-        )
-        ranked = [item for item in positions if item.daily_return is not None]
-        top_gainer = (
-            max(ranked, key=lambda item: (item.daily_return, item.symbol))
-            if ranked
-            else None
-        )
-        top_loser = (
-            min(ranked, key=lambda item: (item.daily_return, item.symbol))
-            if ranked
-            else None
         )
         return DailyEmailReport(
             snapshot.snapshot_date,
@@ -224,13 +265,20 @@ class SendDailyReportUseCase:
             snapshot.total_liabilities,
             snapshot.net_asset_value,
             snapshot.leverage_ratio,
+            daily_performance.profit_loss,
+            daily_performance.return_percentage,
+            history,
             positions,
-            top_gainer,
-            top_loser,
         )
 
     @staticmethod
-    def _position(value: PositionSnapshot, name: str) -> DailyEmailPosition:
+    def _position(
+        value: PositionSnapshot,
+        name: str,
+        daily_profit_loss: Decimal,
+        daily_profit_loss_percentage: Decimal,
+        daily_profit_loss_share: Decimal | None,
+    ) -> DailyEmailPosition:
         return DailyEmailPosition(
             value.symbol,
             name,
@@ -242,4 +290,7 @@ class SendDailyReportUseCase:
             value.unrealized_pnl,
             value.unrealized_return,
             value.portfolio_weight,
+            daily_profit_loss,
+            daily_profit_loss_percentage,
+            daily_profit_loss_share,
         )

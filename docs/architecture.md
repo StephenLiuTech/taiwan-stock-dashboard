@@ -1,5 +1,56 @@
 # PAMS architecture
 
+## Database-provider boundary
+
+`PAMS_DATABASE_URL` is interpreted only by composition and infrastructure.
+`sqlite:///` selects the preserved SQLite repository family;
+`postgresql://` selects the PostgreSQL family. Application use cases and domain
+engines receive the same repository and Unit of Work protocols in either case,
+so no business rule branches on the configured database.
+
+Schema creation and the existing schema-version history are idempotent for both
+providers. Market ingestion and holding rebuilds use provider-specific atomic
+transactions: SQLite retains `BEGIN IMMEDIATE`, while PostgreSQL uses its native
+transaction.
+
+SQLite-to-PostgreSQL migration is an Application Layer orchestration:
+
+```text
+SQLite source -> MigrateDatabaseUseCase -> PostgreSQL destination
+```
+
+It copies every persisted repository table plus schema-version metadata,
+validates each destination row count, and commits once. The destination must be
+empty to avoid merging independent ledgers. Failure rolls back all copied rows;
+the SQLite source is read-only and is never deleted.
+
+## Cloud automation boundary
+
+The production scheduler is deployment infrastructure rather than business
+logic:
+
+```text
+GitHub Actions schedule/manual dispatch
+        â†“
+PAMS CLI
+        â†“
+Application use cases
+        â†“
+Supabase PostgreSQL + official market providers + Resend
+```
+
+`.github/workflows/daily-report.yml` invokes `verify` and then the existing
+`daily-report send` Application workflow. It does not separately update,
+calculate, render, or deliver portfolio data. Scheduled runs use the normal
+idempotent path; a Boolean manual input is the only route to the existing
+explicit force behavior. A non-cancelling concurrency group prevents two
+delivery jobs from executing simultaneously.
+
+GitHub Actions secrets enter only as process environment variables. The
+workflow has `contents: read` permission and no repository write capability.
+Persistent application state remains in PostgreSQL; runners and dependency
+caches hold no portfolio data.
+
 ## Architectural principles
 
 PAMS uses inward-facing dependencies:
@@ -115,9 +166,15 @@ Quotes + aggregate snapshot + position snapshots
 
 For automatic updates, `MarketCalendar` reads the latest official date exposed
 by each market and selects `min(TWSE, TPEx)` as the newest date jointly
-available. Matching latest dates use latest providers. Staggered publication
-uses the existing date-bound historical providers for the selected common
-date. `synchronized` remains available as informational publication state.
+available. Production resolution probes the official historical date-query
+endpoints from the current date backward. It assumes neither weekends nor
+holidays: only the typed absence of an official dataset advances to the prior
+calendar date, while transport, structure, or source-date failures abort.
+Date-provider results are not cached. Production automatic ingestion uses the
+same date-bound historical providers for the selected common date, ensuring
+the fetched dataset is exactly the one discovered by live resolution.
+Injected/offline latest providers retain their existing test and adapter
+contract. `synchronized` remains available as informational publication state.
 
 Manual updates use date-bound historical providers. Both source dates must
 match the requested date. The engine rejects wrong dates, mixed dates,
@@ -323,11 +380,37 @@ Email renderer    Delivery repository claim
 ```
 
 Explicit dates require an exact aggregate snapshot. Automatic delivery reuses
-the idempotent update workflow and reports only a successfully persisted
-snapshot. `report_deliveries` has one row per report type, date, and recipient;
+the idempotent update workflow and loads the exact live-resolved date returned
+by that workflow; it never substitutes `SnapshotRepository.get_latest()`.
+Forced delivery rebuilds that resolved date. Normal delivery reuses its
+snapshot or creates it when absent. `report_deliveries` has one row per report
+type, date, and recipient;
 an atomic `SENDING` claim prevents concurrent duplicate sends. SENT is a normal
 no-op, FAILED is retryable, and dry-run performs neither a claim,
 authentication, nor a network call.
+
+The V1.0 renderer receives two additional application-prepared facts. Signed
+daily portfolio movement is calculated in the pure `PortfolioService` by
+aggregating the already-persisted per-position `daily_value_change` values and
+dividing by their derived previous market value. The application use case
+loads at most the latest 30 aggregate snapshots through `SnapshotRepository`;
+it does not recalculate holdings or valuation.
+
+The same service returns immutable per-position daily contribution facts:
+amount, return against previous position market value, and share of net
+portfolio daily P/L when the net total is non-zero. The email renderer ranks
+these facts by absolute monetary impact; it never ranks portfolio impact from
+price-change percentage alone.
+
+At the presentation boundary, `DailyEmailReportRenderer` maps those immutable
+Decimal values to plain text and an email chart. Multiple snapshots produce a
+local PNG attached with a CID reference; one snapshot produces a controlled
+fallback message. SMTP and Microsoft Graph share MIME construction, and Resend
+uses its equivalent CID attachment payload. No report image is hosted
+externally, and financial values remain Decimal until chart pixel mapping.
+The MIME-related PNG is inline-only and has no attachment filename in SMTP or
+Graph messages, minimizing downloadable attachment previews. Its high-resolution
+source is responsively constrained by email-safe inline HTML attributes.
 
 The `EmailTransport` protocol keeps delivery infrastructure outside the
 application workflow. Personal installations default to the Resend REST

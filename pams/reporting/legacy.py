@@ -134,16 +134,20 @@ def format_status_report(status: PortfolioOverview) -> str:
         [
             "PAMS Operational Status",
             f"Database: {status.database_path}",
-            f"Latest quote date: {status.latest_quote_date or unavailable}",
-            f"Latest daily snapshot: {status.latest_daily_snapshot or unavailable}",
-            f"Latest position snapshot: {status.latest_position_snapshot or unavailable}",
+            f"Latest persisted quote date: {status.latest_quote_date or unavailable}",
+            "Latest persisted daily snapshot: "
+            f"{status.latest_daily_snapshot or unavailable}",
+            "Latest persisted position snapshot: "
+            f"{status.latest_position_snapshot or unavailable}",
             f"Holdings count: {status.holdings_count}",
             f"Liabilities count: {status.liabilities_count}",
             f"Schema version: {status.schema_version or unavailable}",
             f"Database size: {status.database_size_bytes:,} bytes",
-            f"TWSE latest source date: {availability.twse_latest_date or unavailable}",
-            f"TPEx latest source date: {availability.tpex_latest_date or unavailable}",
-            "Commonly ingestible dataset: "
+            "Latest live TWSE source date: "
+            f"{availability.twse_latest_date or unavailable}",
+            "Latest live TPEx source date: "
+            f"{availability.tpex_latest_date or unavailable}",
+            "Latest live commonly ingestible date: "
             f"{availability.commonly_ingestible_date or 'not currently available'}",
         ]
     )

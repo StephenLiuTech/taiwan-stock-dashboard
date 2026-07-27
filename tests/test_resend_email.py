@@ -6,7 +6,7 @@ from urllib.request import Request
 
 import pytest
 
-from pams.application.send_daily_report import EmailEnvelope
+from pams.application.send_daily_report import EmailEnvelope, InlineImage
 from pams.delivery import ResendEmailError, ResendEmailTransport
 
 
@@ -76,6 +76,44 @@ def test_resend_transport_rejects_non_success_response() -> None:
 
     with pytest.raises(ResendEmailError, match="HTTP 500"):
         transport.send(envelope())
+
+
+def test_resend_transport_sends_inline_image_as_cid_attachment() -> None:
+    requests: list[Request] = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def open_request(request: Request, *, timeout: float) -> Response:
+        assert timeout == 30
+        requests.append(request)
+        return Response()
+
+    message = envelope()
+    ResendEmailTransport("re_secret", opener=open_request).send(
+        EmailEnvelope(
+            message.sender,
+            message.recipient,
+            message.subject,
+            message.plain_text,
+            '<img src="cid:chart">',
+            (InlineImage("chart", "chart.png", "image/png", b"png-content"),),
+        )
+    )
+
+    assert json.loads(requests[0].data)["attachments"] == [
+        {
+            "content": "cG5nLWNvbnRlbnQ=",
+            "filename": "chart.png",
+            "contentId": "chart",
+        }
+    ]
 
 
 def test_resend_transport_translates_http_error_without_exposing_key() -> None:

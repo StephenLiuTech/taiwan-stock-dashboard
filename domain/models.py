@@ -178,6 +178,24 @@ class PositionSnapshot(PositionValuation):
     snapshot_date: date
 
 
+class DailyPositionPerformance(DomainModel):
+    """One position's contribution to the portfolio's daily movement."""
+
+    holding_id: str
+    profit_loss: Decimal
+    return_percentage: Decimal
+    portfolio_profit_loss_share: Decimal | None
+
+
+class DailyPortfolioPerformance(DomainModel):
+    """Aggregate one-day movement derived from persisted position valuations."""
+
+    profit_loss: Decimal
+    return_percentage: Decimal
+    previous_market_value: Decimal
+    positions: tuple[DailyPositionPerformance, ...]
+
+
 class DailySnapshot(DomainModel):
     """Persisted daily portfolio totals."""
 

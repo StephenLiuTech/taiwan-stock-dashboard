@@ -8,9 +8,14 @@ import pytest
 from domain import Market
 from market_calendar import (
     MarketCalendar,
+    OfficialHistoricalMarketDateProvider,
     OfficialMarketDateProvider,
 )
-from market_data import ProviderDataError, SourceDateError
+from market_data import (
+    MarketDateUnavailableError,
+    ProviderDataError,
+    SourceDateError,
+)
 from market_data.transport import JSONRecord
 
 
@@ -92,3 +97,69 @@ def test_calendar_requires_both_official_markets() -> None:
     calendar = MarketCalendar((date_provider(Market.TWSE, "1150722"),))
     with pytest.raises(ProviderDataError, match="TPEx"):
         calendar.latest_available_trading_date()
+
+
+def test_official_latest_provider_does_not_cache_source_date() -> None:
+    source = StaticProvider(Market.TWSE, [{"Date": "1150724", "Code": "test"}])
+    provider = OfficialMarketDateProvider(source)
+
+    assert provider.latest_available_date() == date(2026, 7, 24)
+    source.records = [{"Date": "1150727", "Code": "test"}]
+    assert provider.latest_available_date() == date(2026, 7, 27)
+
+
+def test_historical_live_date_resolution_discovers_latest_official_date() -> None:
+    calls: list[date] = []
+
+    class DateQueryProvider:
+        market = Market.TWSE
+        source = "historical-calendar-test"
+
+        def __init__(self, requested_date: date) -> None:
+            self.requested_date = requested_date
+
+        def fetch(self) -> Sequence[JSONRecord]:
+            calls.append(self.requested_date)
+            if self.requested_date != date(2026, 7, 27):
+                raise MarketDateUnavailableError("no data")
+            return [{"Date": "1150727", "Code": "test"}]
+
+    provider = OfficialHistoricalMarketDateProvider(
+        Market.TWSE,
+        DateQueryProvider,
+        today=lambda: date(2026, 7, 27),
+    )
+
+    assert provider.latest_available_date() == date(2026, 7, 27)
+    assert calls == [date(2026, 7, 27)]
+
+
+def test_weekend_or_holiday_resolves_from_official_availability() -> None:
+    calls: list[date] = []
+
+    class DateQueryProvider:
+        market = Market.TWSE
+        source = "historical-calendar-test"
+
+        def __init__(self, requested_date: date) -> None:
+            self.requested_date = requested_date
+
+        def fetch(self) -> Sequence[JSONRecord]:
+            calls.append(self.requested_date)
+            if self.requested_date != date(2026, 7, 24):
+                raise MarketDateUnavailableError("no official data")
+            return [{"Date": "1150724", "Code": "test"}]
+
+    provider = OfficialHistoricalMarketDateProvider(
+        Market.TWSE,
+        DateQueryProvider,
+        today=lambda: date(2026, 7, 27),
+    )
+
+    assert provider.latest_available_date() == date(2026, 7, 24)
+    assert calls == [
+        date(2026, 7, 27),
+        date(2026, 7, 26),
+        date(2026, 7, 25),
+        date(2026, 7, 24),
+    ]

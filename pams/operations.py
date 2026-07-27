@@ -1,6 +1,6 @@
 """Read-only operational status and verification services."""
 
-import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -9,13 +9,7 @@ from pathlib import Path
 from database.schema import SCHEMA_VERSION
 from market_calendar import MarketAvailability, MarketCalendar, MarketDateProvider
 from market_data.engine import MarketDataEngine
-from repositories import (
-    SQLiteHoldingRepository,
-    SQLiteLiabilityRepository,
-    SQLitePositionSnapshotRepository,
-    SQLitePriceQuoteRepository,
-    SQLiteSnapshotRepository,
-)
+from repositories.provider import RepositoryBundle, create_repositories
 
 
 @dataclass(frozen=True)
@@ -66,33 +60,35 @@ class VerificationReport:
 class OperationalStatusService:
     """Read local storage health without changing application data."""
 
-    def __init__(self, connection: sqlite3.Connection, database_path: Path) -> None:
+    def __init__(
+        self,
+        connection: object,
+        database_path: Path,
+        repositories: RepositoryBundle | None = None,
+        database_size: Callable[[], int] | None = None,
+    ) -> None:
         self.connection = connection
         self.database_path = database_path
+        self.repositories = repositories or create_repositories("sqlite", connection)
+        self.database_size = database_size or (
+            lambda: database_path.stat().st_size if database_path.exists() else 0
+        )
 
     def read(self, availability: MarketAvailability | None) -> OperationalStatus:
         """Collect current database status."""
-        daily = SQLiteSnapshotRepository(self.connection).get_latest()
+        daily = self.repositories.daily_snapshots.get_latest()
         schema = self.connection.execute(
             "SELECT MAX(version) FROM schema_version"
         ).fetchone()
         return OperationalStatus(
             database_path=self.database_path,
-            latest_quote_date=SQLitePriceQuoteRepository(
-                self.connection
-            ).get_latest_date(),
+            latest_quote_date=self.repositories.price_quotes.get_latest_date(),
             latest_daily_snapshot=daily.snapshot_date if daily else None,
-            latest_position_snapshot=SQLitePositionSnapshotRepository(
-                self.connection
-            ).get_latest_date(),
-            holdings_count=len(SQLiteHoldingRepository(self.connection).list_all()),
-            liabilities_count=len(
-                SQLiteLiabilityRepository(self.connection).list_all()
-            ),
+            latest_position_snapshot=self.repositories.position_snapshots.get_latest_date(),
+            holdings_count=len(self.repositories.holdings.list_all()),
+            liabilities_count=len(self.repositories.liabilities.list_all()),
             schema_version=schema[0] if schema and schema[0] is not None else None,
-            database_size_bytes=(
-                self.database_path.stat().st_size if self.database_path.exists() else 0
-            ),
+            database_size_bytes=self.database_size(),
             twse_latest_source_date=availability.twse_date if availability else None,
             tpex_latest_source_date=availability.tpex_date if availability else None,
             commonly_ingestible_date=(
@@ -106,7 +102,7 @@ class VerificationService:
 
     def __init__(
         self,
-        connection: sqlite3.Connection,
+        connection: object,
         database_path: Path,
         date_providers: tuple[MarketDateProvider, ...],
         calendar: MarketCalendar,
@@ -150,7 +146,7 @@ class VerificationService:
     def _database_check(self) -> VerificationCheck:
         try:
             self.connection.execute("SELECT 1").fetchone()
-        except sqlite3.Error as error:
+        except Exception as error:
             return VerificationCheck("Database", CheckLevel.FAIL, str(error))
         return VerificationCheck("Database", CheckLevel.PASS, str(self.database_path))
 
@@ -160,7 +156,7 @@ class VerificationService:
                 "SELECT MAX(version) FROM schema_version"
             ).fetchone()
             version = row[0] if row else None
-        except sqlite3.Error as error:
+        except Exception as error:
             return VerificationCheck("Schema", CheckLevel.FAIL, str(error))
         level = CheckLevel.PASS if version == SCHEMA_VERSION else CheckLevel.FAIL
         return VerificationCheck(
@@ -174,7 +170,7 @@ class VerificationService:
             count = self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[
                 0
             ]
-        except sqlite3.Error as error:
+        except Exception as error:
             return VerificationCheck(name, CheckLevel.FAIL, str(error))
         level = (
             CheckLevel.PASS

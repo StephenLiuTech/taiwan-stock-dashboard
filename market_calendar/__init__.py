@@ -1,6 +1,10 @@
 """Official-data market calendar API."""
 
-from market_calendar.providers import MarketDateProvider, OfficialMarketDateProvider
+from market_calendar.providers import (
+    MarketDateProvider,
+    OfficialHistoricalMarketDateProvider,
+    OfficialMarketDateProvider,
+)
 from market_calendar.service import (
     MarketAvailability,
     MarketCalendar,
@@ -12,5 +16,6 @@ __all__ = [
     "MarketCalendar",
     "MarketDataNotSynchronizedError",
     "MarketDateProvider",
+    "OfficialHistoricalMarketDateProvider",
     "OfficialMarketDateProvider",
 ]

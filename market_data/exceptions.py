@@ -13,6 +13,10 @@ class ProviderDataError(MarketDataError):
     """The provider failed or returned structurally invalid data."""
 
 
+class MarketDateUnavailableError(ProviderDataError):
+    """The official date-query endpoint has no dataset for one requested date."""
+
+
 class SourceDateError(ProviderDataError):
     """The authoritative source date is absent, mixed, or stale."""
 

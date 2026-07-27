@@ -1,9 +1,7 @@
 """Application bootstrap and initial local portfolio seeding."""
 
-import sqlite3
 from decimal import Decimal
 
-from database import initialize_schema
 from domain import Currency, Holding, HoldingType, Liability, LiabilityType, Market
 from repositories.interfaces import HoldingRepository, LiabilityRepository
 
@@ -77,7 +75,7 @@ class BootstrapService:
 
     def __init__(
         self,
-        connection: sqlite3.Connection,
+        connection: object,
         holdings: HoldingRepository,
         liabilities: LiabilityRepository,
     ) -> None:
@@ -87,7 +85,6 @@ class BootstrapService:
 
     def initialize(self) -> bool:
         """Initialize schema and return whether seed records were inserted."""
-        initialize_schema(self.connection)
         if self.holdings.list_all() or self.liabilities.list_all():
             return False
         for holding in SEED_HOLDINGS:

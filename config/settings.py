@@ -24,6 +24,7 @@ class Settings(BaseSettings):
         default="INFO"
     )
     database_url: str = Field(default="sqlite:///data/pams.db")
+    migration_source_url: str | None = None
     app_title: str = Field(default="PAMS")
     email_transport: Literal["microsoft_graph", "resend", "smtp"] = "resend"
     resend_api_key: SecretStr | None = None

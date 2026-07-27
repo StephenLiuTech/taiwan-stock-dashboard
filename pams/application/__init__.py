@@ -47,6 +47,11 @@ from pams.application.exceptions import (
     ValuationDataUnavailableError,
     ValuationRepositoryError,
 )
+from pams.application.migrate_database import (
+    DatabaseMigrationError,
+    DatabaseMigrationResult,
+    MigrateDatabaseUseCase,
+)
 from pams.application.portfolio_history import PortfolioHistoryUseCase
 from pams.application.portfolio_status import PortfolioStatusUseCase
 from pams.application.rebuild_holdings import RebuildHoldingsUseCase
@@ -78,6 +83,8 @@ __all__ = [
     "DailyReportError",
     "DailyReportSendResult",
     "DailyReportSnapshotMissingError",
+    "DatabaseMigrationError",
+    "DatabaseMigrationResult",
     "DuplicateTransactionError",
     "EmptyTransactionHistoryError",
     "HoldingChangeAction",
@@ -91,6 +98,7 @@ __all__ = [
     "ListTransactionsUseCase",
     "MarketAvailabilitySummary",
     "MissingQuoteError",
+    "MigrateDatabaseUseCase",
     "PortfolioHistory",
     "PortfolioAnalytics",
     "PortfolioAnalyticsError",

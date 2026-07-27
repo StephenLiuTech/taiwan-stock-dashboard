@@ -11,6 +11,8 @@ from domain.enums import (
 )
 from domain.ledger import PortfolioLedger, TransactionPosition
 from domain.models import (
+    DailyPortfolioPerformance,
+    DailyPositionPerformance,
     DailySnapshot,
     Dividend,
     Holding,
@@ -25,7 +27,9 @@ from domain.valuation import HoldingValuation, PortfolioValuation
 
 __all__ = [
     "Currency",
+    "DailyPortfolioPerformance",
     "DailyPortfolioReturn",
+    "DailyPositionPerformance",
     "DailySnapshot",
     "Dividend",
     "DividendStatus",

@@ -413,9 +413,12 @@ def test_status_command_output(
     output = capsys.readouterr().out
     assert "PAMS Operational Status" in output
     assert "Holdings count: 5" in output
-    assert "TWSE latest source date: 2026-07-22" in output
-    assert "TPEx latest source date: 2026-07-22" in output
-    assert "Commonly ingestible dataset: 2026-07-22" in output
+    assert "Latest persisted quote date:" in output
+    assert "Latest persisted daily snapshot:" in output
+    assert "Latest persisted position snapshot:" in output
+    assert "Latest live TWSE source date: 2026-07-22" in output
+    assert "Latest live TPEx source date: 2026-07-22" in output
+    assert "Latest live commonly ingestible date: 2026-07-22" in output
 
 
 def test_status_exposes_unsynchronized_source_dates(
@@ -428,9 +431,9 @@ def test_status_exposes_unsynchronized_source_dates(
     )
     assert main(["status"]) == 0
     output = capsys.readouterr().out
-    assert "TWSE latest source date: 2026-07-21" in output
-    assert "TPEx latest source date: 2026-07-22" in output
-    assert "Commonly ingestible dataset: 2026-07-21" in output
+    assert "Latest live TWSE source date: 2026-07-21" in output
+    assert "Latest live TPEx source date: 2026-07-22" in output
+    assert "Latest live commonly ingestible date: 2026-07-21" in output
 
 
 def test_verify_failed_returns_exit_eight(

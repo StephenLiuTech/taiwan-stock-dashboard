@@ -4,7 +4,6 @@ import base64
 import importlib
 import os
 from collections.abc import Callable
-from email.message import EmailMessage
 from email.policy import SMTP
 from pathlib import Path
 from types import ModuleType
@@ -12,6 +11,7 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 from pams.application.send_daily_report import EmailEnvelope
+from pams.delivery.mime import build_email_message
 
 GRAPH_SEND_MAIL_URL = "https://graph.microsoft.com/v1.0/me/sendMail"
 GRAPH_SCOPES = ("Mail.Send",)
@@ -126,12 +126,7 @@ class MicrosoftGraphEmailTransport:
     def send(self, envelope: EmailEnvelope) -> None:
         """Acquire a token silently and send a MIME multipart/alternative body."""
         access_token = self._authenticator.acquire_token_silent()
-        message = EmailMessage()
-        message["Subject"] = envelope.subject
-        message["From"] = envelope.sender
-        message["To"] = envelope.recipient
-        message.set_content(envelope.plain_text)
-        message.add_alternative(envelope.html, subtype="html")
+        message = build_email_message(envelope)
         encoded_mime = base64.b64encode(message.as_bytes(policy=SMTP))
         request = Request(
             self._endpoint,

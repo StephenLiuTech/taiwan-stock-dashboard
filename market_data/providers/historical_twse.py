@@ -6,7 +6,7 @@ from datetime import date
 from urllib.parse import urlencode
 
 from domain import Market
-from market_data.exceptions import ProviderDataError
+from market_data.exceptions import MarketDateUnavailableError, ProviderDataError
 from market_data.transport import (
     JSONDocumentTransport,
     JSONRecord,
@@ -71,7 +71,7 @@ class HistoricalTWSEProvider:
         try:
             document = self.transport.get_document(self.url)
             if document.get("stat") != "OK":
-                raise ProviderDataError(
+                raise MarketDateUnavailableError(
                     "TWSE has no historical data for requested date"
                 )
             source_date = str(document.get("date", "")).strip()

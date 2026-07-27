@@ -4,10 +4,13 @@ from datetime import date
 from decimal import Decimal
 
 from domain import (
+    DailyPortfolioPerformance,
+    DailyPositionPerformance,
     Holding,
     HoldingValuation,
     Liability,
     PortfolioSummary,
+    PositionSnapshot,
     PositionValuation,
     PriceQuote,
 )
@@ -80,6 +83,48 @@ class PortfolioService:
             total_liabilities=total_liabilities,
             net_asset_value=net_asset_value,
             leverage_ratio=leverage_ratio,
+        )
+
+    @staticmethod
+    def calculate_daily_performance(
+        positions: list[PositionSnapshot],
+    ) -> DailyPortfolioPerformance:
+        """Aggregate persisted position movements without revaluing holdings."""
+        profit_loss = sum(
+            (position.daily_value_change for position in positions), Decimal("0")
+        )
+        previous_market_value = sum(
+            (
+                position.market_value - position.daily_value_change
+                for position in positions
+            ),
+            Decimal("0"),
+        )
+        position_performance = tuple(
+            DailyPositionPerformance(
+                holding_id=position.holding_id,
+                profit_loss=position.daily_value_change,
+                return_percentage=(
+                    position.daily_value_change
+                    / (position.market_value - position.daily_value_change)
+                    if position.market_value - position.daily_value_change
+                    else Decimal("0")
+                ),
+                portfolio_profit_loss_share=(
+                    position.daily_value_change / profit_loss if profit_loss else None
+                ),
+            )
+            for position in positions
+        )
+        return DailyPortfolioPerformance(
+            profit_loss=profit_loss,
+            return_percentage=(
+                profit_loss / previous_market_value
+                if previous_market_value
+                else Decimal("0")
+            ),
+            previous_market_value=previous_market_value,
+            positions=position_performance,
         )
 
     @staticmethod

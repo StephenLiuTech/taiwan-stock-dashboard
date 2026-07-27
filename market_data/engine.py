@@ -20,8 +20,11 @@ from market_data.exceptions import (
 )
 from market_data.normalizer import QuoteNormalizer
 from market_data.providers import MarketDataProvider
-from repositories.interfaces import HoldingRepository, LiabilityRepository
-from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
+from repositories.interfaces import (
+    HoldingRepository,
+    LiabilityRepository,
+    MarketDataUnitOfWork,
+)
 from services.portfolio import PortfolioService
 from services.snapshot import DuplicateSnapshotError, SnapshotService
 
@@ -45,7 +48,7 @@ class MarketDataEngine:
         providers: tuple[MarketDataProvider, ...],
         holdings: HoldingRepository,
         liabilities: LiabilityRepository,
-        unit_of_work: SQLiteMarketDataUnitOfWork,
+        unit_of_work: MarketDataUnitOfWork,
         normalizer: QuoteNormalizer | None = None,
         portfolio: PortfolioService | None = None,
     ) -> None:

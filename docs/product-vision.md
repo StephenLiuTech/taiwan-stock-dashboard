@@ -205,6 +205,13 @@ Email delivery is replaceable infrastructure behind an application transport
 protocol. Personal installations can use Resend, while enterprise Microsoft
 accounts can use delegated Graph OAuth2 rather than password-based SMTP.
 Provider authentication and credential storage do not enter the Domain.
+The V1.0 daily report consumes the same persisted position and aggregate
+snapshot facts as the other presentation interfaces, including signed daily
+movement, position contribution impact, and a locally embedded recent
+asset-history chart.
+Automatic delivery resolves official market availability before selecting a
+persisted report snapshot, preserving the principle that snapshots are
+derived facts rather than a source of market-date truth.
 
 ## Roadmap
 
@@ -229,7 +236,8 @@ Available:
 - Stable Domain
 - Stable Application Layer
 - Multiple Presentation Layers
-- Local SQLite persistence
+- SQLite and PostgreSQL persistence
+- Automated cloud report delivery
 - Taiwan equity ledger, valuation, analytics, Dashboard, and reports
 
 ### v2.0

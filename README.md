@@ -17,7 +17,8 @@ Current release: **v1.0.0**
 - Official TWSE and TPEx latest and historical market-data providers
 - Strict source-date verification with no stale-price relabeling
 - Transaction ledger with moving weighted-average holding projection
-- Atomic SQLite persistence for quotes and portfolio snapshots
+- SQLite and PostgreSQL repository providers selected by database URL
+- Atomic persistence for quotes and portfolio snapshots
 - Dashboard 2.0 with summary, allocation, winners, losers, and sortable holdings
 - Deterministic Markdown and standalone semantic HTML daily reports
 - Pure snapshot-based basic performance analytics foundation
@@ -55,7 +56,7 @@ application-provided values.
 ## Requirements
 
 - Python 3.11 or 3.12
-- SQLite, included with supported Python installations
+- SQLite, included with supported Python installations, or PostgreSQL
 - Network access only when fetching official TWSE or TPEx data
 
 ## Installation
@@ -113,6 +114,40 @@ PAMS_APP_TITLE=PAMS
 
 Environment variables override `.env`. The default database path is
 `data/pams.db`; local databases are ignored by Git.
+
+The database backend is selected automatically:
+
+```text
+PAMS_DATABASE_URL=sqlite:///data/pams.db
+PAMS_DATABASE_URL=postgresql://user:password@localhost:5432/pams
+```
+
+No command flag is needed. PostgreSQL tables and schema-version rows are
+created idempotently by write composition. Credentials in PostgreSQL URLs are
+redacted from operational output.
+
+### SQLite to PostgreSQL migration
+
+Set the existing SQLite database as the migration source and PostgreSQL as the
+configured destination:
+
+```text
+PAMS_MIGRATION_SOURCE_URL=sqlite:///data/pams.db
+PAMS_DATABASE_URL=postgresql://user:password@localhost:5432/pams
+```
+
+Then run:
+
+```bash
+python -m pams migrate
+python -m pams verify
+```
+
+Migration copies holdings, liabilities, transactions, dividends, quotes,
+aggregate and position snapshots, report-delivery history, and schema-version
+metadata. The PostgreSQL destination must contain no application rows. Copying
+and row-count validation use one destination transaction; failure rolls it
+back, and the SQLite source is never deleted or modified.
 
 ## First run
 
@@ -332,16 +367,16 @@ transactions, valuation, and report generation.
 ```text
 app.py             Streamlit composition root
 .agents/           Agent-specific repository development rules
-.github/           CI workflow and collaboration templates
+.github/           CI, scheduled delivery, and collaboration templates
 config/            Environment and validated YAML configuration
-database/          SQLite connection and versioned schema
+database/          SQLite/PostgreSQL providers and versioned schemas
 domain/            Framework-independent models, ledger, and valuation DTOs
 market_calendar/   Official cross-market availability resolution
 market_data/       Providers, normalization, integrity checks, and ingestion
 pams/application/  Presentation-neutral workflows
 pams/dashboard/    Streamlit-only presentation
 pams/reporting/    Daily report builder and renderers
-repositories/      Protocols and SQLite adapters
+repositories/      Protocols plus SQLite/PostgreSQL adapters
 services/          Pure domain/application services
 tests/             Offline unit and integration tests
 ```
@@ -361,8 +396,90 @@ tests/             Offline unit and integration tests
 
 v1.0 supports Taiwan-listed equity portfolios in one currency context. It does
 not include allocation analytics, benchmarks, TWR, MWR, IRR, XIRR, broker
-imports, multi-asset valuation, FX conversion, scheduling, non-email notifications,
-authentication, cloud persistence, or automated backup management.
+imports, multi-asset valuation, FX conversion, non-email notifications,
+authentication, or automated backup management.
+
+## Automated cloud delivery
+
+Production report delivery can run without a local computer:
+
+```text
+GitHub Actions
+    â†“
+Supabase PostgreSQL
+    â†“
+PAMS daily-report workflow
+    â†“
+Resend
+    â†“
+Email recipient
+```
+
+The workflow is
+[`.github/workflows/daily-report.yml`](.github/workflows/daily-report.yml).
+It runs on weekdays at `06:35 UTC`, which is `14:35 Asia/Taipei`, using:
+
+```text
+35 6 * * 1-5
+```
+
+Configure these repository-level GitHub Actions secrets:
+
+| Secret | Purpose |
+|---|---|
+| `PAMS_DATABASE_URL` | Supabase PostgreSQL connection URL |
+| `PAMS_RESEND_API_KEY` | Resend sending API key |
+| `PAMS_EMAIL_FROM` | Sender on a Resend-verified domain |
+| `PAMS_EMAIL_TO` | Daily-report recipient |
+
+The job sets `PAMS_EMAIL_TRANSPORT=resend`,
+`PAMS_ENVIRONMENT=production`, and `PAMS_LOG_LEVEL=INFO`; these values are not
+secrets. Secret values are scoped only to the verification and delivery steps
+that require them and are never echoed by workflow steps.
+
+Every run installs PAMS from `pyproject.toml`, including PostgreSQL and chart
+dependencies, then executes:
+
+```bash
+python -m pams verify
+python -m pams daily-report send --debug
+```
+
+The scheduled path never uses `--force`. Normal snapshot and report-delivery
+idempotency therefore prevents repeated workflow runs from resending the same
+report. The workflow has read-only GitHub token permissions, a 15-minute
+timeout, pip dependency caching, and a non-cancelling `pams-daily-report`
+concurrency group.
+
+### Manual cloud execution
+
+Open **Actions → Daily Portfolio Report → Run workflow**. Leave
+`force_rebuild` disabled for the normal idempotent path. Enable it only for an
+intentional emergency rebuild; that dispatch executes:
+
+```bash
+python -m pams daily-report send --force --debug
+```
+
+Scheduled runs remain non-forced regardless of manual input history.
+
+### Cloud troubleshooting
+
+- If verification fails, confirm the four repository secrets exist and that
+  the Supabase URL accepts connections from GitHub-hosted runners.
+- If schema or holdings verification fails, migrate the SQLite ledger to the
+  configured PostgreSQL database before enabling the schedule.
+- If market-date resolution fails, inspect the TWSE/TPEx verification rows;
+  PAMS will not send a report with an unverified date.
+- If Resend fails, verify the API key and ensure `PAMS_EMAIL_FROM` uses a
+  verified sending domain.
+- Check the final daily-report lines for the resolved report date, recipient,
+  and delivery result. GitHub masks configured secrets; never add diagnostic
+  steps that echo environment variables or the database URL.
+
+Any failed verification, database operation, market validation, rendering, or
+delivery command terminates the job with a non-zero status.
+
 ## Daily report email delivery
 
 PAMS can update the portfolio, build a report from persisted aggregate and
@@ -372,6 +489,25 @@ sender. Microsoft Graph remains available for enterprise Microsoft 365
 environments. PAMS does not use basic SMTP authentication for Hotmail or
 Outlook.com.
 
+The V1.0 email report places the portfolio's signed daily profit/loss and
+percentage immediately below its dates. That value aggregates the persisted
+position movements produced by the normal holdings/quote snapshot workflow.
+Its contributor ranking and holdings table expose each position's signed
+daily P/L impact and percentage, ranked by absolute monetary contribution
+rather than price-change percentage. Email-safe summary cards and explicit
+green, red, or neutral styling preserve both color and signed values.
+It also includes the most recent 30 available aggregate snapshots as total
+stock market value and net stock equity: HTML email embeds a generated PNG
+through a CID attachment (never a public image URL), while plain text includes
+the same dated values as a readable table. Histories shorter than 30 are valid;
+a single snapshot produces an explicit no-trend-yet message.
+
+The PNG is generated at high resolution and referenced only as an inline CID
+resource. SMTP and Microsoft Graph mark the related MIME part
+`Content-Disposition: inline` without a downloadable filename; Resend uses its
+equivalent `contentId` representation. The displayed image scales to the
+email width for Outlook, Gmail, Apple Mail, and mobile clients.
+
 ```bash
 python -m pams daily-report send
 python -m pams daily-report send --date 2026-07-22
@@ -380,8 +516,17 @@ python -m pams daily-report send --force
 ```
 
 Automatic mode runs the existing idempotent market update and then uses the
-latest successfully persisted aggregate snapshot. Explicit mode requires the
-exact requested snapshot and never falls back to another date.
+latest live commonly ingestible TWSE/TPEx date. Production date resolution
+queries the official date-bound endpoints newest-first, so it does not fall
+back to the latest persisted snapshot when a newer official dataset exists.
+Only an explicit official "no data for this date" response advances the probe
+backward; provider or source-date failures stop delivery. The update workflow
+then reuses or creates the snapshot for that exact resolved date. Explicit
+mode requires the exact requested snapshot and never falls back to another
+date.
+
+`pams status` labels persisted quote/snapshot dates separately from the latest
+live TWSE date, live TPEx date, and live commonly ingestible date.
 
 ### Choosing an Email Transport
 

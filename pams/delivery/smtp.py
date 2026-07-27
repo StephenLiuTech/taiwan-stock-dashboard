@@ -2,9 +2,9 @@
 
 import smtplib
 import ssl
-from email.message import EmailMessage
 
 from pams.application.send_daily_report import EmailEnvelope
+from pams.delivery.mime import build_email_message
 
 
 class SMTPEmailTransport:
@@ -27,12 +27,7 @@ class SMTPEmailTransport:
 
     def send(self, envelope: EmailEnvelope) -> None:
         """Send one plain-text plus HTML message over STARTTLS."""
-        message = EmailMessage()
-        message["Subject"] = envelope.subject
-        message["From"] = envelope.sender
-        message["To"] = envelope.recipient
-        message.set_content(envelope.plain_text)
-        message.add_alternative(envelope.html, subtype="html")
+        message = build_email_message(envelope)
         with smtplib.SMTP(
             self._host, self._port, timeout=self._timeout_seconds
         ) as client:
