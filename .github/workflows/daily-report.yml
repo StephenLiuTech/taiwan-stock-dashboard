@@ -2,7 +2,9 @@ name: Daily Portfolio Report
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "35 13 * * 1-5"
+      timezone: "Asia/Taipei"
+
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -55,7 +57,7 @@ jobs:
 
       - name: Send scheduled daily report
         if: ${{ github.event_name == 'schedule' }}
-        run: python -m pams daily-report send --force --debug
+        run: python -m pams daily-report send --debug
 
       - name: Send manual daily report
         if: ${{ github.event_name == 'workflow_dispatch' && !inputs.force_rebuild }}
