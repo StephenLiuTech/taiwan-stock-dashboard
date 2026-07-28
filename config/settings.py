@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///data/pams.db")
     migration_source_url: str | None = None
     app_title: str = Field(default="PAMS")
+    market_http_timeout_seconds: float = Field(default=15.0, gt=0)
+    market_http_attempts: int = Field(default=4, ge=1, le=4)
     email_transport: Literal["microsoft_graph", "resend", "smtp"] = "resend"
     resend_api_key: SecretStr | None = None
     supabase_url: str | None = None

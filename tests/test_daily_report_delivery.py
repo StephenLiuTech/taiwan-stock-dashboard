@@ -1,8 +1,10 @@
 """Offline tests for daily portfolio report delivery."""
 
+import json
 import smtplib
 from datetime import date
 from decimal import Decimal
+from http.client import IncompleteRead
 from io import BytesIO
 
 import pytest
@@ -10,6 +12,7 @@ from PIL import Image
 
 from domain import Currency, DailySnapshot, Holding, Market, PositionSnapshot
 from market_data import ProviderDataError
+from market_data.transport import UrllibJSONDocumentTransport
 from pams.application import (
     DailyReportDeliveryError,
     DailyReportSendResult,
@@ -358,6 +361,66 @@ def test_failed_live_date_resolution_prevents_report_delivery() -> None:
     with pytest.raises(ProviderDataError, match="live date resolution failed"):
         case.execute()
     assert transport.messages == []
+
+
+def test_scheduled_report_succeeds_after_transient_tpex_read_failure() -> None:
+    payload = json.dumps({"date": "20260722"}).encode()
+    calls = 0
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return payload
+
+    def open_request(_request: object, *, timeout: float) -> Response:
+        nonlocal calls
+        assert timeout == 15
+        calls += 1
+        if calls == 1:
+            raise IncompleteRead(payload[:5])
+        return Response()
+
+    market_transport = UrllibJSONDocumentTransport(
+        provider_name="TPEx",
+        opener=open_request,
+        sleeper=lambda _delay: None,
+        jitter=lambda: 0,
+    )
+
+    class RetryingUpdate(UpdateStub):
+        def execute(
+            self,
+            requested_date: date | None = None,
+            *,
+            dry_run: bool = False,
+            force: bool = False,
+        ) -> object:
+            market_transport.get_document("https://www.tpex.org.tw/official")
+            return super().execute(requested_date, dry_run=dry_run, force=force)
+
+    email_transport = TransportStub()
+    case = SendDailyReportUseCase(
+        RetryingUpdate(),  # type: ignore[arg-type]
+        SnapshotStub(snapshot()),  # type: ignore[arg-type]
+        PositionStub(),  # type: ignore[arg-type]
+        HoldingStub(),  # type: ignore[arg-type]
+        DeliveryStub(),
+        DailyEmailReportRenderer(),
+        email_transport,
+        "sender@example.com",
+        "recipient@example.com",
+    )
+
+    result = case.execute()
+
+    assert result.status == "sent"
+    assert calls == 2
+    assert len(email_transport.messages) == 1
 
 
 def test_html_and_plain_text_contain_correct_persisted_figures() -> None:

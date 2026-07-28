@@ -15,18 +15,24 @@ def test_settings_have_safe_local_defaults() -> None:
     assert settings.email_transport == "resend"
     assert settings.microsoft_tenant == "consumers"
     assert settings.microsoft_token_cache.as_posix() == "data/msal_token_cache.json"
+    assert settings.market_http_timeout_seconds == 15
+    assert settings.market_http_attempts == 4
 
 
 def test_settings_load_prefixed_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Settings load supported PAMS-prefixed environment variables."""
     monkeypatch.setenv("PAMS_ENVIRONMENT", "test")
     monkeypatch.setenv("PAMS_APP_TITLE", "PAMS smoke test")
+    monkeypatch.setenv("PAMS_MARKET_HTTP_TIMEOUT_SECONDS", "20")
+    monkeypatch.setenv("PAMS_MARKET_HTTP_ATTEMPTS", "3")
     get_settings.cache_clear()
 
     settings = get_settings()
 
     assert settings.environment == "test"
     assert settings.app_title == "PAMS smoke test"
+    assert settings.market_http_timeout_seconds == 20
+    assert settings.market_http_attempts == 3
     get_settings.cache_clear()
 
 

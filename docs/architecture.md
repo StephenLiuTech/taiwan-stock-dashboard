@@ -338,6 +338,14 @@ holdings, liabilities, and Market Data Engine composition remain fatal. The
 underlying verification service retains its original probe results, and actual
 market ingestion continues to enforce source-date integrity independently.
 
+Latest and historical official providers share one HTTP transport boundary.
+It fully buffers response bytes before JSON decoding and applies at most four
+attempts to incomplete reads, transient socket failures, and HTTP
+429/500/502/503/504. Parsing, dataset semantics, and source-date validation
+occur after that boundary and are never retried as transport failures. All
+retries therefore finish before the Market Data Engine opens its atomic
+persistence transaction.
+
 Demo-data generation is isolated from production configuration. It creates a
 complete deterministic SQLite database transactionally and never calls live
 providers. Demo quotes are marked `demo_fixture`.

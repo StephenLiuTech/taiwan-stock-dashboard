@@ -280,6 +280,14 @@ The Market Data Engine still requires both fetched source dates to exactly
 match the selected trade date. PAMS never guesses weekends or holidays and
 never relabels prices.
 
+Official HTTP reads use one bounded retry policy shared by latest and
+historical providers. PAMS completely reads the response bytes before decoding
+JSON and retries only incomplete reads, transient connection failures, and
+HTTP 429/500/502/503/504. The default is four total attempts with exponential
+backoff and jitter. Configure `PAMS_MARKET_HTTP_TIMEOUT_SECONDS` and
+`PAMS_MARKET_HTTP_ATTEMPTS` (maximum 4) when needed. Complete malformed or
+semantically invalid datasets and source-date mismatches are not retried.
+
 Manual mode uses official historical date-query providers:
 
 ```bash

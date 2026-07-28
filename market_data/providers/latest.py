@@ -14,7 +14,9 @@ class TWSEProvider:
     endpoint = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
 
     def __init__(self, transport: JSONTransport | None = None) -> None:
-        self.transport = transport or UrllibJSONTransport()
+        self.transport = transport or UrllibJSONTransport(
+            provider_name=self.market.value
+        )
 
     def fetch(self) -> Sequence[JSONRecord]:
         return self.transport.get_records(self.endpoint)
@@ -28,7 +30,9 @@ class TPExProvider:
     endpoint = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
 
     def __init__(self, transport: JSONTransport | None = None) -> None:
-        self.transport = transport or UrllibJSONTransport()
+        self.transport = transport or UrllibJSONTransport(
+            provider_name=self.market.value
+        )
 
     def fetch(self) -> Sequence[JSONRecord]:
         return self.transport.get_records(self.endpoint)

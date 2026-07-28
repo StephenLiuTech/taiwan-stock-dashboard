@@ -61,7 +61,9 @@ class HistoricalTWSEProvider:
         transport: JSONDocumentTransport | None = None,
     ) -> None:
         self.trade_date = trade_date
-        self.transport = transport or UrllibJSONDocumentTransport()
+        self.transport = transport or UrllibJSONDocumentTransport(
+            provider_name=self.market.value
+        )
 
     @property
     def url(self) -> str:

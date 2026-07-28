@@ -1,7 +1,9 @@
 """Offline tests for official explicit-date provider adapters."""
 
+import json
 import sqlite3
 from datetime import date
+from http.client import IncompleteRead
 from pathlib import Path
 
 import pytest
@@ -18,7 +20,7 @@ from market_data.providers import (
     HistoricalTWSEProvider,
     MarketDataProvider,
 )
-from market_data.transport import JSONRecord
+from market_data.transport import JSONRecord, UrllibJSONDocumentTransport
 from pams.application import UpdateMode, UpdatePortfolioUseCase
 from repositories import (
     SQLiteHoldingRepository,
@@ -38,6 +40,33 @@ class DocumentTransport:
         if isinstance(self.document, Exception):
             raise self.document
         return self.document
+
+
+class BytesResponse:
+    def __init__(self, content: bytes) -> None:
+        self.content = content
+
+    def __enter__(self) -> "BytesResponse":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.content
+
+
+class IncompleteThenCompleteOpener:
+    def __init__(self, document: JSONRecord) -> None:
+        self.content = json.dumps(document).encode()
+        self.calls = 0
+
+    def __call__(self, _request: object, *, timeout: float) -> BytesResponse:
+        assert timeout == 15
+        self.calls += 1
+        if self.calls == 1:
+            raise IncompleteRead(self.content[:100])
+        return BytesResponse(self.content)
 
 
 def twse_document(source_date: str = "20260721") -> JSONRecord:
@@ -200,3 +229,39 @@ def test_historical_missing_symbol_remains_strict(
         historical_engine(connection, include_requested_symbol=False).preview(
             date(2026, 7, 21)
         )
+
+
+def test_transport_retry_precedes_one_atomic_database_write(
+    connection: sqlite3.Connection,
+) -> None:
+    holdings = SQLiteHoldingRepository(connection)
+    for holding in SEED_HOLDINGS:
+        holdings.upsert(holding)
+    opener = IncompleteThenCompleteOpener(tpex_document())
+    tpex_transport = UrllibJSONDocumentTransport(
+        provider_name="TPEx",
+        opener=opener,
+        sleeper=lambda _delay: None,
+        jitter=lambda: 0,
+    )
+    engine = MarketDataEngine(
+        (
+            HistoricalTWSEProvider(
+                date(2026, 7, 21), DocumentTransport(twse_document())
+            ),
+            HistoricalTPExProvider(date(2026, 7, 21), tpex_transport),
+        ),
+        holdings,
+        SQLiteLiabilityRepository(connection),
+        SQLiteMarketDataUnitOfWork(connection),
+    )
+
+    result = engine.refresh(date(2026, 7, 21))
+
+    assert opener.calls == 2
+    assert len(result.summary.positions) == 5
+    assert connection.execute("SELECT COUNT(*) FROM price_quotes").fetchone()[0] == 5
+    assert connection.execute("SELECT COUNT(*) FROM daily_snapshots").fetchone()[0] == 1
+    assert (
+        connection.execute("SELECT COUNT(*) FROM position_snapshots").fetchone()[0] == 5
+    )

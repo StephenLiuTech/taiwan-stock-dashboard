@@ -30,6 +30,7 @@ from market_data.providers import (
     TPExProvider,
     TWSEProvider,
 )
+from market_data.transport import UrllibJSONDocumentTransport, UrllibJSONTransport
 from pams.application import (
     AddTransactionUseCase,
     AnalyzePortfolioUseCase,
@@ -376,7 +377,38 @@ def _compose(
             else False
         )
         using_default_providers = providers is None
-        market_providers = providers or (TWSEProvider(), TPExProvider())
+
+        def latest_transport(market: Market) -> UrllibJSONTransport:
+            return UrllibJSONTransport(
+                timeout_seconds=settings.market_http_timeout_seconds,
+                attempts=settings.market_http_attempts,
+                provider_name=market.value,
+            )
+
+        def historical_twse(trade_date: date) -> HistoricalTWSEProvider:
+            return HistoricalTWSEProvider(
+                trade_date,
+                UrllibJSONDocumentTransport(
+                    timeout_seconds=settings.market_http_timeout_seconds,
+                    attempts=settings.market_http_attempts,
+                    provider_name=Market.TWSE.value,
+                ),
+            )
+
+        def historical_tpex(trade_date: date) -> HistoricalTPExProvider:
+            return HistoricalTPExProvider(
+                trade_date,
+                UrllibJSONDocumentTransport(
+                    timeout_seconds=settings.market_http_timeout_seconds,
+                    attempts=settings.market_http_attempts,
+                    provider_name=Market.TPEX.value,
+                ),
+            )
+
+        market_providers = providers or (
+            TWSEProvider(latest_transport(Market.TWSE)),
+            TPExProvider(latest_transport(Market.TPEX)),
+        )
         engine = MarketDataEngine(
             market_providers,
             holdings,
@@ -385,12 +417,8 @@ def _compose(
         )
         if using_default_providers:
             date_providers = (
-                OfficialHistoricalMarketDateProvider(
-                    Market.TWSE, HistoricalTWSEProvider
-                ),
-                OfficialHistoricalMarketDateProvider(
-                    Market.TPEX, HistoricalTPExProvider
-                ),
+                OfficialHistoricalMarketDateProvider(Market.TWSE, historical_twse),
+                OfficialHistoricalMarketDateProvider(Market.TPEX, historical_tpex),
             )
         else:
             date_providers = tuple(
@@ -424,8 +452,8 @@ def _compose(
         def historical_engine(trade_date: date) -> MarketDataEngine:
             return MarketDataEngine(
                 (
-                    HistoricalTWSEProvider(trade_date),
-                    HistoricalTPExProvider(trade_date),
+                    historical_twse(trade_date),
+                    historical_tpex(trade_date),
                 ),
                 holdings,
                 liabilities,
