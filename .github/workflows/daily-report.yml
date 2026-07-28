@@ -26,6 +26,17 @@ jobs:
       PAMS_ENVIRONMENT: production
       PAMS_LOG_LEVEL: INFO
       PAMS_EMAIL_TRANSPORT: resend
+
+      PAMS_DATABASE_URL: ${{ secrets.PAMS_DATABASE_URL }}
+      PAMS_RESEND_API_KEY: ${{ secrets.PAMS_RESEND_API_KEY }}
+      PAMS_EMAIL_FROM: ${{ secrets.PAMS_EMAIL_FROM }}
+      PAMS_EMAIL_TO: ${{ secrets.PAMS_EMAIL_TO }}
+
+      PAMS_SUPABASE_URL: ${{ secrets.PAMS_SUPABASE_URL }}
+      PAMS_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PAMS_SUPABASE_SERVICE_ROLE_KEY }}
+      PAMS_REPORT_ASSET_BUCKET: ${{ secrets.PAMS_REPORT_ASSET_BUCKET }}
+      PAMS_REPORT_ASSET_PREFIX: ${{ secrets.PAMS_REPORT_ASSET_PREFIX }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -46,26 +57,8 @@ jobs:
 
       - name: Send idempotent daily report
         if: ${{ github.event_name != 'workflow_dispatch' || !inputs.force_rebuild }}
-        env:
-          PAMS_DATABASE_URL: ${{ secrets.PAMS_DATABASE_URL }}
-          PAMS_RESEND_API_KEY: ${{ secrets.PAMS_RESEND_API_KEY }}
-          PAMS_EMAIL_FROM: ${{ secrets.PAMS_EMAIL_FROM }}
-          PAMS_EMAIL_TO: ${{ secrets.PAMS_EMAIL_TO }}
-          PAMS_SUPABASE_URL: ${{ secrets.PAMS_SUPABASE_URL }}
-          PAMS_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PAMS_SUPABASE_SERVICE_ROLE_KEY }}
-          PAMS_REPORT_ASSET_BUCKET: ${{ secrets.PAMS_REPORT_ASSET_BUCKET }}
-          PAMS_REPORT_ASSET_PREFIX: ${{ secrets.PAMS_REPORT_ASSET_PREFIX }}
         run: python -m pams daily-report send --debug
 
       - name: Force rebuild and send daily report
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild }}
-        env:
-          PAMS_DATABASE_URL: ${{ secrets.PAMS_DATABASE_URL }}
-          PAMS_RESEND_API_KEY: ${{ secrets.PAMS_RESEND_API_KEY }}
-          PAMS_EMAIL_FROM: ${{ secrets.PAMS_EMAIL_FROM }}
-          PAMS_EMAIL_TO: ${{ secrets.PAMS_EMAIL_TO }}
-          PAMS_SUPABASE_URL: ${{ secrets.PAMS_SUPABASE_URL }}
-          PAMS_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PAMS_SUPABASE_SERVICE_ROLE_KEY }}
-          PAMS_REPORT_ASSET_BUCKET: ${{ secrets.PAMS_REPORT_ASSET_BUCKET }}
-          PAMS_REPORT_ASSET_PREFIX: ${{ secrets.PAMS_REPORT_ASSET_PREFIX }}
         run: python -m pams daily-report send --force --debug
