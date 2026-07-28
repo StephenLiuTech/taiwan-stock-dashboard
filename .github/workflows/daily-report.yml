@@ -2,7 +2,7 @@ name: Daily Portfolio Report
 
 on:
   schedule:
-    - cron: "35 13 * * 1-5"
+    - cron: "*/5 * * * *"
       timezone: "Asia/Taipei"
   workflow_dispatch:
     inputs:
@@ -54,10 +54,14 @@ jobs:
       - name: Verify production configuration and dependencies
         run: python -m pams verify --allow-market-source-warning
 
-      - name: Send idempotent daily report
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.force_rebuild }}
+      - name: Send scheduled daily report
+        if: ${{ github.event_name == 'schedule' }}
+        run: python -m pams daily-report send --force --debug
+
+      - name: Send manual daily report
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.force_rebuild }}
         run: python -m pams daily-report send --debug
 
-      - name: Force rebuild and send daily report
+      - name: Force rebuild and send manual daily report
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild }}
         run: python -m pams daily-report send --force --debug
