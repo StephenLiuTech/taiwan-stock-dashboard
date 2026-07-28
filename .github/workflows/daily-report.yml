@@ -2,7 +2,8 @@ name: Daily Portfolio Report
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "10 11 * * *"
+      timezone: "Asia/Taipei"
   workflow_dispatch:
     inputs:
       force_rebuild:
