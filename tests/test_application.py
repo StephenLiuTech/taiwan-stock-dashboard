@@ -243,6 +243,62 @@ def test_verify_system_use_case_returns_items() -> None:
     assert report.failed is False
 
 
+@pytest.mark.parametrize(
+    "check_name",
+    ["TWSE endpoint", "TPEx endpoint", "Market Calendar"],
+)
+def test_verify_system_can_downgrade_only_market_source_failures(
+    check_name: str,
+) -> None:
+    class FailedCheckStub:
+        def run(self) -> VerificationReport:
+            return VerificationReport(
+                (
+                    VerificationCheck(
+                        check_name, CheckLevel.FAIL, "temporarily unavailable"
+                    ),
+                )
+            )
+
+    use_case = VerifySystemUseCase(FailedCheckStub())  # type: ignore[arg-type]
+
+    strict_report = use_case.execute()
+    relaxed_report = use_case.execute(allow_market_source_warning=True)
+
+    assert strict_report.items[0].level is VerificationLevel.FAIL
+    assert strict_report.failed is True
+    assert relaxed_report.items[0].level is VerificationLevel.WARN
+    assert relaxed_report.failed is False
+
+
+@pytest.mark.parametrize(
+    "check_name",
+    [
+        "Configuration",
+        "Database",
+        "Schema",
+        "Holdings",
+        "Liabilities",
+        "Market Data Engine",
+    ],
+)
+def test_verify_system_relaxed_policy_keeps_local_failures_fatal(
+    check_name: str,
+) -> None:
+    class FailedCheckStub:
+        def run(self) -> VerificationReport:
+            return VerificationReport(
+                (VerificationCheck(check_name, CheckLevel.FAIL, "not ready"),)
+            )
+
+    report = VerifySystemUseCase(FailedCheckStub()).execute(  # type: ignore[arg-type]
+        allow_market_source_warning=True
+    )
+
+    assert report.items[0].level is VerificationLevel.FAIL
+    assert report.failed is True
+
+
 def test_application_dtos_are_immutable() -> None:
     availability = MarketAvailabilitySummary(
         date(2026, 7, 22), date(2026, 7, 22), date(2026, 7, 22)

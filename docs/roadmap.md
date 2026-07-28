@@ -147,3 +147,5 @@ notifications are not part of v1.0.0.
 - Manual idempotent or explicit forced report execution with concurrency control
 - Resend chart publication through deterministic Supabase Storage HTTPS assets
 - SMTP and Microsoft Graph retain PAMS-controlled multipart/related CID charts
+- Scheduled verification can tolerate temporary official-market probe warnings
+  while preserving fatal local-readiness and composition checks

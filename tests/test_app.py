@@ -1,14 +1,18 @@
 """Smoke tests for the Streamlit application."""
 
 import importlib
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
 import app
+from config import get_settings
+from pams.application import DemoDataUseCase
 
 
 def test_application_imports() -> None:
@@ -18,12 +22,26 @@ def test_application_imports() -> None:
     assert callable(application.main)
 
 
-def test_streamlit_application_starts() -> None:
-    """Streamlit can execute the application entry point."""
-    app = AppTest.from_file("app.py").run()
+def test_streamlit_application_starts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Streamlit starts against isolated local data without external access."""
+    for name in tuple(os.environ):
+        if name.startswith("PAMS_"):
+            monkeypatch.delenv(name)
+    database_path = tmp_path / "dashboard.db"
+    DemoDataUseCase(tmp_path / "production.db").execute(database_path)
+    monkeypatch.setenv("PAMS_ENVIRONMENT", "test")
+    monkeypatch.setenv("PAMS_DATABASE_URL", f"sqlite:///{database_path.as_posix()}")
+    get_settings.cache_clear()
 
-    assert not app.exception
-    assert app.title[0].value == "PAMS"
+    try:
+        application = AppTest.from_file("app.py").run()
+
+        assert not application.exception
+        assert application.title[0].value == "PAMS"
+    finally:
+        get_settings.cache_clear()
 
 
 def test_entry_point_passes_current_application_dependencies(

@@ -2,7 +2,7 @@ name: Daily Portfolio Report
 
 on:
   schedule:
-    - cron: "10 11 * * *"
+    - cron: "35 13 * * 1-5"
       timezone: "Asia/Taipei"
   workflow_dispatch:
     inputs:
@@ -52,9 +52,7 @@ jobs:
         run: python -m pip install .
 
       - name: Verify production configuration and dependencies
-        env:
-          PAMS_DATABASE_URL: ${{ secrets.PAMS_DATABASE_URL }}
-        run: python -m pams verify
+        run: python -m pams verify --allow-market-source-warning
 
       - name: Send idempotent daily report
         if: ${{ github.event_name != 'workflow_dispatch' || !inputs.force_rebuild }}

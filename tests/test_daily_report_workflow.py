@@ -15,7 +15,9 @@ def test_daily_report_workflow_exists_with_expected_schedule() -> None:
     workflow = _workflow()
     triggers = workflow["on"]
     assert isinstance(triggers, dict)
-    assert triggers["schedule"] == [{"cron": "35 6 * * 1-5"}]
+    assert triggers["schedule"] == [
+        {"cron": "35 13 * * 1-5", "timezone": "Asia/Taipei"}
+    ]
 
 
 def test_manual_dispatch_exposes_non_forced_boolean_default() -> None:
@@ -32,7 +34,7 @@ def test_manual_dispatch_exposes_non_forced_boolean_default() -> None:
     assert force_rebuild["default"] == "false"
 
 
-def test_workflow_scopes_required_secrets_to_runtime_steps() -> None:
+def test_workflow_defines_exact_production_environment_at_job_level() -> None:
     workflow = _workflow()
     jobs = workflow["jobs"]
     assert isinstance(jobs, dict)
@@ -42,18 +44,6 @@ def test_workflow_scopes_required_secrets_to_runtime_steps() -> None:
         "PAMS_ENVIRONMENT": "production",
         "PAMS_LOG_LEVEL": "INFO",
         "PAMS_EMAIL_TRANSPORT": "resend",
-    }
-    steps = job["steps"]
-    assert isinstance(steps, list)
-    by_name = {
-        step["name"]: step
-        for step in steps
-        if isinstance(step, dict) and "name" in step
-    }
-    assert by_name["Verify production configuration and dependencies"]["env"] == {
-        "PAMS_DATABASE_URL": "${{ secrets.PAMS_DATABASE_URL }}",
-    }
-    delivery_environment = {
         "PAMS_DATABASE_URL": "${{ secrets.PAMS_DATABASE_URL }}",
         "PAMS_RESEND_API_KEY": "${{ secrets.PAMS_RESEND_API_KEY }}",
         "PAMS_EMAIL_FROM": "${{ secrets.PAMS_EMAIL_FROM }}",
@@ -65,9 +55,9 @@ def test_workflow_scopes_required_secrets_to_runtime_steps() -> None:
         "PAMS_REPORT_ASSET_BUCKET": "${{ secrets.PAMS_REPORT_ASSET_BUCKET }}",
         "PAMS_REPORT_ASSET_PREFIX": "${{ secrets.PAMS_REPORT_ASSET_PREFIX }}",
     }
-    assert by_name["Send idempotent daily report"]["env"] == delivery_environment
-    assert by_name["Force rebuild and send daily report"]["env"] == delivery_environment
-    assert "env" not in by_name["Install PAMS runtime dependencies"]
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    assert all("env" not in step for step in steps if isinstance(step, dict))
 
 
 def test_scheduled_command_is_non_forced_and_manual_force_is_explicit() -> None:
@@ -85,7 +75,7 @@ def test_scheduled_command_is_non_forced_and_manual_force_is_explicit() -> None:
     }
     assert commands["Verify production configuration and dependencies"] == (
         None,
-        "python -m pams verify",
+        "python -m pams verify --allow-market-source-warning",
     )
     assert commands["Send idempotent daily report"] == (
         "${{ github.event_name != 'workflow_dispatch' || !inputs.force_rebuild }}",

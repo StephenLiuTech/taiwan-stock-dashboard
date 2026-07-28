@@ -143,6 +143,17 @@ python -m pams migrate
 python -m pams verify
 ```
 
+`verify` is strict by default. Scheduled delivery may instead use:
+
+```bash
+python -m pams verify --allow-market-source-warning
+```
+
+This mode reports temporary TWSE endpoint, TPEx endpoint, and Market Calendar
+probe failures as `WARN` and exits successfully when those are the only
+problems. Configuration, database, schema, holdings, liabilities, and Market
+Data Engine composition failures remain fatal.
+
 Migration copies holdings, liabilities, transactions, dividends, quotes,
 aggregate and position snapshots, report-delivery history, and schema-version
 metadata. The PostgreSQL destination must contain no application rows. Copying
@@ -417,10 +428,11 @@ Email recipient
 
 The workflow is
 [`.github/workflows/daily-report.yml`](.github/workflows/daily-report.yml).
-It runs on weekdays at `06:35 UTC`, which is `14:35 Asia/Taipei`, using:
+It runs on weekdays at `13:35 Asia/Taipei`, using:
 
 ```text
-35 6 * * 1-5
+35 13 * * 1-5
+timezone: Asia/Taipei
 ```
 
 Configure these repository-level GitHub Actions secrets:
@@ -445,9 +457,14 @@ Every run installs PAMS from `pyproject.toml`, including PostgreSQL and chart
 dependencies, then executes:
 
 ```bash
-python -m pams verify
+python -m pams verify --allow-market-source-warning
 python -m pams daily-report send --debug
 ```
+
+The relaxed verification mode prevents a transient preliminary market probe
+from blocking the delivery step. It does not bypass date integrity or update
+checks: the daily-report workflow still fails if it cannot resolve and validate
+the report date when it performs the actual update.
 
 The scheduled path never uses `--force`. Normal snapshot and report-delivery
 idempotency therefore prevents repeated workflow runs from resending the same

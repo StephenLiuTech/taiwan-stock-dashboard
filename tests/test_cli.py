@@ -178,14 +178,15 @@ class FakeStatusService:
 
 
 class FakeVerificationService:
-    def __init__(self, *, failed: bool = False) -> None:
+    def __init__(self, *, failed: bool = False, check_name: str = "test") -> None:
         self.failed = failed
+        self.check_name = check_name
 
     def run(self) -> VerificationReport:
         return VerificationReport(
             (
                 VerificationCheck(
-                    "test",
+                    self.check_name,
                     CheckLevel.FAIL if self.failed else CheckLevel.PASS,
                     "offline",
                 ),
@@ -199,6 +200,7 @@ def install_fake_composition(
     captured: dict[str, object] | None = None,
     calendar: FakeCalendar | None = None,
     existing_snapshot_date: date | None = None,
+    verification_service: FakeVerificationService | None = None,
 ) -> None:
     @contextmanager
     def fake_compose(
@@ -220,7 +222,9 @@ def install_fake_composition(
                 seeded=False,
                 calendar=calendar or FakeCalendar(),  # type: ignore[arg-type]
                 status=FakeStatusService(),  # type: ignore[arg-type]
-                verification=FakeVerificationService(),  # type: ignore[arg-type]
+                verification=(  # type: ignore[arg-type]
+                    verification_service or FakeVerificationService()
+                ),
                 update_portfolio=UpdatePortfolioUseCase(
                     calendar or FakeCalendar(),  # type: ignore[arg-type]
                     engine,  # type: ignore[arg-type]
@@ -233,7 +237,7 @@ def install_fake_composition(
                     FakeStatusService(),  # type: ignore[arg-type]
                 ),
                 verify_system=VerifySystemUseCase(
-                    FakeVerificationService()  # type: ignore[arg-type]
+                    verification_service or FakeVerificationService()  # type: ignore[arg-type]
                 ),
             )
         finally:
@@ -473,6 +477,26 @@ def test_verify_failed_returns_exit_eight(
     monkeypatch.setattr(pams.cli, "compose_operations", failed_compose)
     assert main(["verify"]) == ExitCode.VERIFICATION_FAILED
     assert "FAIL" in capsys.readouterr().out
+
+
+def test_verify_market_source_warning_mode_exits_successfully(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fake_composition(
+        monkeypatch,
+        FakeEngine(),
+        verification_service=FakeVerificationService(
+            failed=True, check_name="TWSE endpoint"
+        ),
+    )
+
+    assert main(["verify"]) == ExitCode.VERIFICATION_FAILED
+    assert "FAIL" in capsys.readouterr().out
+
+    assert main(["verify", "--allow-market-source-warning"]) == ExitCode.SUCCESS
+    output = capsys.readouterr().out
+    assert "WARN" in output
+    assert "TWSE endpoint" in output
 
 
 @pytest.mark.parametrize(

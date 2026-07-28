@@ -330,6 +330,14 @@ database/schema health, portfolio inputs, official endpoint reachability,
 market availability, and dependency composition. Source publication
 disagreement is a warning rather than data corruption.
 
+Strict verification retains every failed check as fatal. The explicit
+`--allow-market-source-warning` production policy is applied by
+`VerifySystemUseCase`: only failed TWSE endpoint, TPEx endpoint, and Market
+Calendar checks are converted to warnings. Configuration, database, schema,
+holdings, liabilities, and Market Data Engine composition remain fatal. The
+underlying verification service retains its original probe results, and actual
+market ingestion continues to enforce source-date integrity independently.
+
 Demo-data generation is isolated from production configuration. It creates a
 complete deterministic SQLite database transactionally and never calls live
 providers. Demo quotes are marked `demo_fixture`.

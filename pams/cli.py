@@ -219,6 +219,12 @@ def build_parser() -> argparse.ArgumentParser:
         command = commands.add_parser(command_name)
         command.add_argument("--database", type=Path)
         command.add_argument("--verbose", action="store_true")
+        if command_name == "verify":
+            command.add_argument(
+                "--allow-market-source-warning",
+                action="store_true",
+                help="treat TWSE, TPEx, and market-calendar probe failures as warnings",
+            )
     return parser
 
 
@@ -386,7 +392,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(format_status_report(application.portfolio_status.execute()))
                 return int(ExitCode.SUCCESS)
             if arguments.command == "verify":
-                verification = application.verify_system.execute()
+                verification = application.verify_system.execute(
+                    allow_market_source_warning=arguments.allow_market_source_warning
+                )
                 print(format_verification_report(verification))
                 return int(
                     ExitCode.VERIFICATION_FAILED
