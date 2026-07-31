@@ -77,11 +77,15 @@ def test_scheduled_command_is_non_forced_and_manual_force_is_explicit() -> None:
         None,
         "python -m pams verify --allow-market-source-warning",
     )
-    assert commands["Send idempotent daily report"] == (
-        "${{ github.event_name != 'workflow_dispatch' || !inputs.force_rebuild }}",
+    assert commands["Send scheduled daily report"] == (
+        "${{ github.event_name == 'schedule' }}",
         "python -m pams daily-report send --debug",
     )
-    assert commands["Force rebuild and send daily report"] == (
+    assert commands["Send manual daily report"] == (
+        "${{ github.event_name == 'workflow_dispatch' && !inputs.force_rebuild }}",
+        "python -m pams daily-report send --debug",
+    )
+    assert commands["Force rebuild and send manual daily report"] == (
         "${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild }}",
         "python -m pams daily-report send --force --debug",
     )
