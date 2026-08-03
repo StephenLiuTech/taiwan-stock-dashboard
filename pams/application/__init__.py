@@ -11,6 +11,8 @@ from pams.application.dto import (
     HoldingChangeItem,
     HoldingChangePlan,
     HoldingOverview,
+    HoldingQueryItem,
+    HoldingsQueryResult,
     HoldingValuation,
     LedgerPositionResult,
     MarketAvailabilitySummary,
@@ -32,14 +34,18 @@ from pams.application.dto import (
     VerificationReport,
 )
 from pams.application.exceptions import (
+    AmbiguousHoldingSymbolError,
     AnalyticsDataUnavailableError,
     AnalyticsProcessingError,
     AnalyticsRepositoryError,
     ApplicationError,
     DuplicateTransactionError,
     EmptyTransactionHistoryError,
+    HoldingNotFoundError,
+    HoldingQueryError,
     HoldingRebuildError,
     InvalidAnalyticsPeriodError,
+    InvalidHoldingHistoryError,
     MissingQuoteError,
     PortfolioAnalyticsError,
     ProductionDatabaseProtectedError,
@@ -54,6 +60,7 @@ from pams.application.migrate_database import (
 )
 from pams.application.portfolio_history import PortfolioHistoryUseCase
 from pams.application.portfolio_status import PortfolioStatusUseCase
+from pams.application.query_holdings import QueryHoldingsUseCase
 from pams.application.rebuild_holdings import RebuildHoldingsUseCase
 from pams.application.send_daily_report import (
     ChartSource,
@@ -72,6 +79,7 @@ __all__ = [
     "AddTransactionCommand",
     "AddTransactionUseCase",
     "ApplicationError",
+    "AmbiguousHoldingSymbolError",
     "AnalyticsDataUnavailableError",
     "AnalyticsProcessingError",
     "AnalyticsRepositoryError",
@@ -93,6 +101,11 @@ __all__ = [
     "HoldingChangeItem",
     "HoldingChangePlan",
     "HoldingOverview",
+    "HoldingNotFoundError",
+    "InvalidHoldingHistoryError",
+    "HoldingQueryError",
+    "HoldingQueryItem",
+    "HoldingsQueryResult",
     "HoldingValuation",
     "HoldingRebuildError",
     "InvalidAnalyticsPeriodError",
@@ -110,6 +123,7 @@ __all__ = [
     "PortfolioValuation",
     "PortfolioStatusUseCase",
     "PortfolioTotals",
+    "QueryHoldingsUseCase",
     "PositionSummary",
     "ProductionDatabaseProtectedError",
     "ProjectedHoldingResult",

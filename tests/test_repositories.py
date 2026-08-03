@@ -25,6 +25,7 @@ from repositories import (
     SQLiteSnapshotRepository,
     SQLiteTransactionRepository,
 )
+from services import TransactionEngine
 
 
 def make_holding(holding_id: str = "h1", symbol: str = "2330") -> Holding:
@@ -90,6 +91,36 @@ def test_transaction_list_by_symbol_preserves_dates(
     loaded = repository.list_by_symbol(" 2330 ")[0]
     assert loaded.trade_date == date(2026, 1, 2)
     assert loaded.price == Decimal("100.01")
+
+
+def test_transaction_repository_uses_same_day_buy_before_sell_order(
+    connection: sqlite3.Connection,
+) -> None:
+    repository = SQLiteTransactionRepository(connection)
+    common = {
+        "symbol": "2330",
+        "market": Market.TWSE,
+        "trade_date": date(2026, 1, 2),
+        "settlement_date": date(2026, 1, 2),
+        "quantity": Decimal("1"),
+        "price": Decimal("100"),
+        "currency": Currency.TWD,
+    }
+    repository.upsert(
+        Transaction(id="a-sell", transaction_type=TransactionType.SELL, **common)
+    )
+    repository.upsert(
+        Transaction(id="z-buy", transaction_type=TransactionType.BUY, **common)
+    )
+
+    expected = ["z-buy", "a-sell"]
+    assert [item.id for item in repository.list_all()] == expected
+    assert [item.id for item in repository.list_by_symbol("2330")] == expected
+    assert [item.id for item in repository.list_filtered()] == expected
+    persisted = repository.list_all()
+    assert TransactionEngine().build_ledger(
+        persisted
+    ) == TransactionEngine().build_ledger(list(reversed(persisted)))
 
 
 def test_transaction_delete(connection: sqlite3.Connection) -> None:

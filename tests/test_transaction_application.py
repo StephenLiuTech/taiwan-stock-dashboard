@@ -76,6 +76,31 @@ def test_add_transaction_uses_domain_validation_and_exact_decimals() -> None:
     assert repository.records["tx-1"].notes == "manual entry"
 
 
+def test_omitted_settlement_date_defaults_to_trade_date() -> None:
+    repository = FakeTransactionRepository()
+    omitted = command()
+    omitted = AddTransactionCommand(
+        **{
+            **vars(omitted),
+            "settlement_date": None,
+        }
+    )
+
+    result = AddTransactionUseCase(repository).execute(omitted)  # type: ignore[arg-type]
+
+    assert result.settlement_date == result.trade_date
+    assert repository.records["tx-1"].settlement_date == date(2026, 7, 1)
+
+
+def test_explicit_settlement_date_remains_compatible() -> None:
+    repository = FakeTransactionRepository()
+
+    result = AddTransactionUseCase(repository).execute(command())  # type: ignore[arg-type]
+
+    assert result.trade_date == date(2026, 7, 1)
+    assert result.settlement_date == date(2026, 7, 3)
+
+
 def test_duplicate_transaction_id_is_rejected_without_overwrite() -> None:
     repository = FakeTransactionRepository()
     use_case = AddTransactionUseCase(repository)  # type: ignore[arg-type]

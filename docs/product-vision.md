@@ -215,6 +215,9 @@ asset-history chart.
 Automatic delivery resolves official market availability before selecting a
 persisted report snapshot, preserving the principle that snapshots are
 derived facts rather than a source of market-date truth.
+Transaction and holdings CLI queries follow the same principle: holdings are
+projected from trade-date-effective ledger events and current financial values
+come from the shared valuation engine.
 
 ## Roadmap
 

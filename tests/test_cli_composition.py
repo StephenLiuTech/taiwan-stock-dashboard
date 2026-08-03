@@ -201,6 +201,15 @@ def test_update_projects_all_same_day_transactions_into_shared_position(
         assert valued.average_cost == Decimal("497080") / Decimal("5900")
         assert valued.cost_basis == Decimal("497080")
 
+        assert application.query_holdings is not None
+        queried = application.query_holdings.execute("0050").holdings[0]
+        assert queried.quantity == Decimal("5900")
+        assert queried.average_cost == Decimal("497080") / Decimal("5900")
+        assert queried.total_cost == Decimal("497080")
+        assert queried.transaction_count == 2
+        assert queried.first_trade_date == trade_date
+        assert queried.latest_trade_date == trade_date
+
 
 def test_dashboard_use_cases_are_composed_for_populated_database(
     tmp_path: Path,

@@ -94,7 +94,10 @@ class SQLiteTransactionRepository:
 
     def list_all(self) -> list[Transaction]:
         rows = self.connection.execute(
-            "SELECT * FROM transactions ORDER BY trade_date, id"
+            """SELECT * FROM transactions
+            ORDER BY trade_date,
+                CASE transaction_type WHEN 'buy' THEN 0 ELSE 1 END,
+                id"""
         ).fetchall()
         return [self._from_row(row) for row in rows]
 
@@ -106,7 +109,10 @@ class SQLiteTransactionRepository:
 
     def list_by_symbol(self, symbol: str) -> list[Transaction]:
         rows = self.connection.execute(
-            "SELECT * FROM transactions WHERE symbol = ? ORDER BY trade_date, id",
+            """SELECT * FROM transactions WHERE symbol = ?
+            ORDER BY trade_date,
+                CASE transaction_type WHEN 'buy' THEN 0 ELSE 1 END,
+                id""",
             (symbol.strip().upper(),),
         ).fetchall()
         return [self._from_row(row) for row in rows]
@@ -138,7 +144,8 @@ class SQLiteTransactionRepository:
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.connection.execute(
             "SELECT * FROM transactions"
-            f"{where} ORDER BY trade_date, settlement_date, id",
+            f"{where} ORDER BY trade_date, "
+            "CASE transaction_type WHEN 'buy' THEN 0 ELSE 1 END, id",
             parameters,
         ).fetchall()
         return [self._from_row(row) for row in rows]

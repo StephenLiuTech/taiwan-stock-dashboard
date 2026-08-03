@@ -59,7 +59,11 @@ class TransactionEngine:
         total_realized_pnl = Decimal("0")
         ordered = sorted(
             transactions,
-            key=lambda item: (item.trade_date, item.settlement_date, item.id),
+            key=lambda item: (
+                item.trade_date,
+                0 if item.transaction_type is TransactionType.BUY else 1,
+                item.id,
+            ),
         )
         for transaction in ordered:
             self._validate_transaction(transaction)
@@ -180,22 +184,11 @@ class TransactionEngine:
         """Overlay transaction-derived positions on holdings without ledger history."""
         if not transactions:
             return tuple(existing_holdings)
+        projected = self.project_transaction_holdings(transactions, existing_holdings)
         existing_by_key = {
             (holding.symbol, holding.market, holding.currency): holding
             for holding in existing_holdings
         }
-        metadata = {
-            key: HoldingProjectionMetadata(holding.name, holding.holding_type)
-            for key, holding in existing_by_key.items()
-        }
-        for transaction in transactions:
-            key = (transaction.symbol, transaction.market, transaction.currency)
-            metadata.setdefault(
-                key,
-                HoldingProjectionMetadata(transaction.symbol, HoldingType.STOCK),
-            )
-        ledger = self.build_ledger(transactions)
-        projected = self.project_holdings(ledger, metadata, existing_holdings)
         transaction_keys = {
             (transaction.symbol, transaction.market, transaction.currency)
             for transaction in transactions
@@ -215,6 +208,31 @@ class TransactionEngine:
                 ),
             )
         )
+
+    def project_transaction_holdings(
+        self,
+        transactions: list[Transaction],
+        existing_holdings: list[Holding],
+    ) -> tuple[Holding, ...]:
+        """Project only active positions represented by transaction history."""
+        if not transactions:
+            return ()
+        existing_by_key = {
+            (holding.symbol, holding.market, holding.currency): holding
+            for holding in existing_holdings
+        }
+        metadata = {
+            key: HoldingProjectionMetadata(holding.name, holding.holding_type)
+            for key, holding in existing_by_key.items()
+        }
+        for transaction in transactions:
+            key = (transaction.symbol, transaction.market, transaction.currency)
+            metadata.setdefault(
+                key,
+                HoldingProjectionMetadata(transaction.symbol, HoldingType.STOCK),
+            )
+        ledger = self.build_ledger(transactions)
+        return self.project_holdings(ledger, metadata, existing_holdings)
 
     @staticmethod
     def _validate_transaction(transaction: Transaction) -> None:

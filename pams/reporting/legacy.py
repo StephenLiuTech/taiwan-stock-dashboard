@@ -7,6 +7,7 @@ from decimal import Decimal
 from pams.application import (
     DemoDataResult,
     HoldingChangePlan,
+    HoldingsQueryResult,
     PortfolioOverview,
     PortfolioValuation,
     TransactionList,
@@ -262,6 +263,53 @@ def format_holding_change_plan_json(plan: HoldingChangePlan) -> str:
         default=_json_default,
         ensure_ascii=False,
         sort_keys=True,
+    )
+
+
+def format_holdings_list(result: HoldingsQueryResult) -> str:
+    """Render active transaction-derived holdings with shared valuation facts."""
+    lines = [
+        "PAMS Holdings",
+        f"Valuation date: {result.valuation_date or 'none'}",
+        "",
+        "Symbol | Market | Quantity | Average Cost | Total Cost | Latest Price | "
+        "Market Value | Unrealized P/L | Return",
+    ]
+    lines.extend(
+        f"{item.symbol} | {item.market} | {format_decimal(item.quantity)} | "
+        f"{format_decimal(item.average_cost)} | {format_decimal(item.total_cost)} | "
+        f"{format_decimal(item.latest_price) if item.latest_price is not None else 'N/A'} | "
+        f"{format_decimal(item.market_value) if item.market_value is not None else 'N/A'} | "
+        f"{format_decimal(item.unrealized_pl) if item.unrealized_pl is not None else 'N/A'} | "
+        f"{format_percentage(item.unrealized_return)}"
+        for item in result.holdings
+    )
+    lines.append(f"Count: {len(result.holdings)}")
+    return "\n".join(lines)
+
+
+def format_holding_detail(result: HoldingsQueryResult) -> str:
+    """Render one active holding with its transaction date range."""
+    item = result.holdings[0]
+    return "\n".join(
+        [
+            "PAMS Holding",
+            f"Symbol: {item.symbol}",
+            f"Market: {item.market}",
+            f"Quantity: {format_decimal(item.quantity)}",
+            f"Average cost: {format_decimal(item.average_cost)}",
+            f"Total cost: {format_decimal(item.total_cost)}",
+            "Latest available market price: "
+            f"{format_decimal(item.latest_price) if item.latest_price is not None else 'N/A'}",
+            "Market value: "
+            f"{format_decimal(item.market_value) if item.market_value is not None else 'N/A'}",
+            "Unrealized P/L: "
+            f"{format_decimal(item.unrealized_pl) if item.unrealized_pl is not None else 'N/A'}",
+            f"Unrealized return: {format_percentage(item.unrealized_return)}",
+            f"Transaction count: {item.transaction_count}",
+            f"First trade date: {item.first_trade_date}",
+            f"Latest trade date: {item.latest_trade_date}",
+        ]
     )
 
 

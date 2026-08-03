@@ -32,6 +32,7 @@ from pams.application import (
     DailyReportDeliveryError,
     DailyReportSnapshotMissingError,
     DatabaseMigrationError,
+    HoldingQueryError,
     InvalidAnalyticsPeriodError,
     PortfolioAnalyticsError,
     ValuationDataUnavailableError,
@@ -54,6 +55,8 @@ from pams.reporting import (
     format_demo_data_report,
     format_holding_change_plan,
     format_holding_change_plan_json,
+    format_holding_detail,
+    format_holdings_list,
     format_human_report,
     format_json_report,
     format_portfolio_valuation,
@@ -133,6 +136,17 @@ def build_parser() -> argparse.ArgumentParser:
     rebuild.add_argument("--json", action="store_true", dest="json_output")
     rebuild.add_argument("--database", type=Path)
     rebuild.add_argument("--verbose", action="store_true")
+    holdings_list = holding_commands.add_parser(
+        "list", help="list active transaction-derived holdings"
+    )
+    holdings_list.add_argument("--database", type=Path)
+    holdings_list.add_argument("--verbose", action="store_true")
+    holdings_show = holding_commands.add_parser(
+        "show", help="show one active transaction-derived holding"
+    )
+    holdings_show.add_argument("symbol")
+    holdings_show.add_argument("--database", type=Path)
+    holdings_show.add_argument("--verbose", action="store_true")
 
     transaction = commands.add_parser(
         "transaction", help="record and list transactions"
@@ -146,7 +160,11 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--market", required=True, choices=("TWSE", "TPEX"))
     add.add_argument("--type", required=True, choices=("buy", "sell"))
     add.add_argument("--trade-date", required=True, type=parse_iso_date)
-    add.add_argument("--settlement-date", required=True, type=parse_iso_date)
+    add.add_argument(
+        "--settlement-date",
+        type=parse_iso_date,
+        help="settlement date (defaults to trade date)",
+    )
     add.add_argument("--quantity", required=True, type=parse_decimal)
     add.add_argument("--price", required=True, type=parse_decimal)
     add.add_argument("--fees", type=parse_decimal, default=Decimal("0"))
@@ -243,6 +261,8 @@ def _error_exit_code(error: Exception) -> ExitCode:
         return ExitCode.CONFIG_OR_DATABASE_ERROR
     if isinstance(error, ValuationDataUnavailableError):
         return ExitCode.SECURITY_ERROR
+    if isinstance(error, HoldingQueryError):
+        return ExitCode.SECURITY_ERROR
     if isinstance(error, SourceDateError):
         return ExitCode.SOURCE_DATE_ERROR
     if isinstance(error, ProviderDataError):
@@ -280,7 +300,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif arguments.command == "update":
             composer = compose_application
-        elif (arguments.command == "holdings" and arguments.apply) or (
+        elif (
+            arguments.command == "holdings"
+            and arguments.holdings_command == "rebuild"
+            and arguments.apply
+        ) or (
             arguments.command == "transaction"
             and arguments.transaction_command == "add"
         ):
@@ -346,6 +370,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return int(ExitCode.SUCCESS)
             if arguments.command == "holdings":
+                if arguments.holdings_command in {"list", "show"}:
+                    assert application.query_holdings is not None
+                    result = application.query_holdings.execute(
+                        arguments.symbol
+                        if arguments.holdings_command == "show"
+                        else None
+                    )
+                    print(
+                        format_holding_detail(result)
+                        if arguments.holdings_command == "show"
+                        else format_holdings_list(result)
+                    )
+                    return int(ExitCode.SUCCESS)
                 assert application.apply_rebuilt_holdings is not None
                 plan = application.apply_rebuilt_holdings.execute(
                     apply=arguments.apply,
@@ -366,7 +403,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                             market=("TPEx" if arguments.market == "TPEX" else "TWSE"),
                             transaction_type=arguments.type,
                             trade_date=arguments.trade_date,
-                            settlement_date=arguments.settlement_date,
+                            settlement_date=(
+                                arguments.settlement_date or arguments.trade_date
+                            ),
                             quantity=arguments.quantity,
                             price=arguments.price,
                             fees=arguments.fees,

@@ -278,12 +278,12 @@ class AddTransactionCommand:
     market: str
     transaction_type: str
     trade_date: date
-    settlement_date: date
     quantity: Decimal
     price: Decimal
     fees: Decimal
     taxes: Decimal
     currency: str
+    settlement_date: date | None = None
     transaction_id: str | None = None
     notes: str | None = None
 
@@ -311,3 +311,29 @@ class TransactionList:
     """Immutable filtered transaction query result."""
 
     transactions: tuple[TransactionRecord, ...]
+
+
+@dataclass(frozen=True)
+class HoldingQueryItem:
+    """Transaction-derived holding enriched by shared current valuation."""
+
+    symbol: str
+    market: str
+    quantity: Decimal
+    average_cost: Decimal
+    total_cost: Decimal
+    latest_price: Decimal | None
+    market_value: Decimal | None
+    unrealized_pl: Decimal | None
+    unrealized_return: Decimal | None
+    transaction_count: int
+    first_trade_date: date
+    latest_trade_date: date
+
+
+@dataclass(frozen=True)
+class HoldingsQueryResult:
+    """Ordered active transaction-derived holdings query result."""
+
+    valuation_date: date | None
+    holdings: tuple[HoldingQueryItem, ...]

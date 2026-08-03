@@ -256,9 +256,9 @@ def test_multiple_symbols_and_group_dimensions_remain_independent() -> None:
     }
 
 
-def test_ordering_uses_trade_settlement_then_id_and_does_not_mutate_input() -> None:
-    buy = transaction("a-buy", TransactionType.BUY, "10", "10")
-    sell = transaction("b-sell", TransactionType.SELL, "5", "12")
+def test_same_day_buy_precedes_lexically_earlier_sell() -> None:
+    buy = transaction("z-buy", TransactionType.BUY, "10", "10")
+    sell = transaction("a-sell", TransactionType.SELL, "5", "12")
     supplied = [sell, buy]
     original_ids = [item.id for item in supplied]
     ledger = TransactionEngine().build_ledger(supplied)
@@ -266,7 +266,7 @@ def test_ordering_uses_trade_settlement_then_id_and_does_not_mutate_input() -> N
     assert [item.id for item in supplied] == original_ids
 
 
-def test_settlement_date_precedes_id_in_deterministic_order() -> None:
+def test_same_day_order_ignores_settlement_date_and_uses_id() -> None:
     later_settlement_buy = transaction(
         "a-buy",
         TransactionType.BUY,
@@ -281,10 +281,68 @@ def test_settlement_date_precedes_id_in_deterministic_order() -> None:
         "10",
         settlement_date=date(2026, 1, 3),
     )
-    with pytest.raises(InvalidTransactionHistoryError, match="z-sell"):
-        TransactionEngine().build_ledger(
-            [later_settlement_buy, earlier_settlement_sell]
+    ledger = TransactionEngine().build_ledger(
+        [earlier_settlement_sell, later_settlement_buy]
+    )
+    assert ledger.positions[0].quantity == Decimal("4")
+
+
+def test_same_day_sell_input_then_buy_still_applies_buy_first() -> None:
+    transactions = [
+        transaction("a-sell", TransactionType.SELL, "1", "11"),
+        transaction("b-buy", TransactionType.BUY, "5", "10"),
+    ]
+    ledger = TransactionEngine().build_ledger(transactions)
+    assert ledger.positions[0].quantity == Decimal("4")
+
+
+def test_arbitrary_repository_order_reconstructs_identically() -> None:
+    transactions = [
+        transaction("a-buy", TransactionType.BUY, "5", "10"),
+        transaction("b-buy", TransactionType.BUY, "3", "20"),
+        transaction("c-sell", TransactionType.SELL, "2", "30"),
+        transaction("d-sell", TransactionType.SELL, "1", "25"),
+    ]
+    engine = TransactionEngine()
+    expected = engine.build_ledger(transactions)
+    assert engine.build_ledger(list(reversed(transactions))) == expected
+    assert (
+        engine.build_ledger(
+            [transactions[1], transactions[3], transactions[2], transactions[0]]
         )
+        == expected
+    )
+
+
+def test_same_day_oversell_uses_total_available_buys() -> None:
+    transactions = [
+        transaction("z-buy", TransactionType.BUY, "1", "10"),
+        transaction("a-sell", TransactionType.SELL, "4", "12"),
+        transaction("a-buy", TransactionType.BUY, "2", "11"),
+    ]
+    with pytest.raises(OversellError, match="a-sell"):
+        TransactionEngine().build_ledger(transactions)
+
+
+def test_cross_date_sell_before_later_buy_remains_invalid() -> None:
+    transactions = [
+        transaction(
+            "z-sell",
+            TransactionType.SELL,
+            "1",
+            "12",
+            trade_date=date(2026, 1, 2),
+        ),
+        transaction(
+            "a-buy",
+            TransactionType.BUY,
+            "1",
+            "10",
+            trade_date=date(2026, 1, 3),
+        ),
+    ]
+    with pytest.raises(InvalidTransactionHistoryError, match="z-sell"):
+        TransactionEngine().build_ledger(transactions)
 
 
 def test_oversell_and_sell_before_buy_have_symbol_and_id() -> None:
@@ -299,6 +357,16 @@ def test_oversell_and_sell_before_buy_have_symbol_and_id() -> None:
                 transaction("oversell", TransactionType.SELL, "2", "10"),
             ]
         )
+
+
+def test_selling_exactly_available_quantity_closes_position() -> None:
+    ledger = TransactionEngine().build_ledger(
+        [
+            transaction("a-buy", TransactionType.BUY, "2", "10"),
+            transaction("b-sell", TransactionType.SELL, "2", "12"),
+        ]
+    )
+    assert ledger.positions == ()
 
 
 def test_zero_quantity_and_unsupported_type_are_rejected() -> None:

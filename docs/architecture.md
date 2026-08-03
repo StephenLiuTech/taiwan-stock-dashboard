@@ -98,8 +98,14 @@ PortfolioValuation
 
 ### Transactions
 
-`TransactionEngine` is a pure service. It deterministically orders BUY and SELL
-records, maintains moving weighted-average cost per
+`TransactionEngine` is a pure service. Holdings are effective by `trade_date`.
+Because the current model does not preserve true intraday chronology, ledger
+reconstruction orders records by `(trade_date, BUY-before-SELL priority,
+transaction id)`. The ID is only a deterministic tie-breaker among transactions
+on the same date and side; it does not represent chronology. Settlement date
+does not alter portfolio-effective ordering. A future true intraday model would
+require an explicit sequence or timestamp field. The engine maintains moving
+weighted-average cost per
 `(symbol, market, currency)`, rejects oversells, and returns immutable active
 positions and realized profit or loss.
 
@@ -118,6 +124,21 @@ groups by `(symbol, market, currency)`, includes every same-day transaction,
 and uses the engine's moving weighted-average cost method. The resulting
 holdings are passed unchanged into market update, position snapshots, current
 portfolio valuation, Dashboard, and daily-report snapshot rendering.
+
+`trade_date` is the portfolio-effective transaction date. `settlement_date`
+remains persisted for compatibility and deterministic record ordering, but an
+omitted value defaults to `trade_date` and never delays holdings, valuation,
+history, or reporting.
+
+`QueryHoldingsUseCase` is the read boundary for `holdings list` and `holdings
+show`. It loads the complete transaction ledger, asks `TransactionEngine` for
+active transaction-derived holdings, loads their latest quotes, and delegates
+all financial values to `ValuationEngine`. It returns immutable query DTOs;
+the CLI only formats them. Persisted bootstrap-only holdings are intentionally
+excluded from these ledger query commands. Invalid histories, including a sell
+before a buy or an oversell, are rejected; short positions are unsupported. A
+holding without a latest quote remains queryable with quantity and canonical
+cost basis, while price and market-dependent fields render as unavailable.
 
 ### Valuation
 
