@@ -1,6 +1,7 @@
 """Offline tests for daily portfolio report delivery."""
 
 import json
+import re
 import smtplib
 from datetime import date
 from decimal import Decimal
@@ -433,7 +434,7 @@ def test_html_and_plain_text_contain_correct_persisted_figures() -> None:
     assert "TSMC" in message.plain_text
     assert "<html>" in message.html
     assert "Today's Contributors" in message.html
-    assert "Share of net daily P/L" in message.html
+    assert "Share of Net P/L" in message.html
 
 
 def test_positive_daily_profit_loss_uses_persisted_position_movements() -> None:
@@ -525,8 +526,118 @@ def test_holdings_include_daily_pnl_columns_and_conditional_formatting() -> None
     assert "Today's P/L | Today's P/L %" in message.plain_text
     assert ">Today&#x27;s P/L</th>" in message.html
     assert ">Today&#x27;s P/L %</th>" in message.html
-    assert 'color:#15803d;font-weight:600">+NT$20.00</td>' in message.html
-    assert 'color:#b91c1c;font-weight:600">-NT$10.00</td>' in message.html
+    assert 'color:#15803d;font-weight:600">+NT$20</td>' in message.html
+    assert 'color:#b91c1c;font-weight:600">-NT$10</td>' in message.html
+
+
+def test_html_holdings_uses_compact_non_scrolling_column_set() -> None:
+    case, _, _, transport = use_case(value=snapshot())
+
+    case.execute(date(2026, 7, 22))
+
+    html = transport.messages[0].html
+    holdings = html.split(">Holdings</h2>", maxsplit=1)[1].split(
+        "</table>", maxsplit=1
+    )[0]
+    expected = (
+        "Symbol",
+        "Name",
+        "Quantity",
+        "Average Cost",
+        "Close",
+        "Today&#x27;s P/L",
+        "Today&#x27;s P/L %",
+        "Unrealized P/L",
+        "Return %",
+        "Market Value",
+    )
+    assert all(f">{label}</th>" in holdings for label in expected)
+    assert "Daily Change" not in holdings
+    assert ">Return</th>" not in holdings
+    assert ">Weight</th>" not in holdings
+    assert "overflow-x:auto" not in holdings
+    assert "word-break:keep-all" in holdings
+    assert ">2</td>" in holdings
+    assert ">400</td>" in holdings
+    assert ">500</td>" in holdings
+    assert "+NT$20</td>" in holdings
+    assert "+NT$20.00</td>" not in holdings
+    assert "NT$1,000</td>" in holdings
+    assert "NT$1,000.00</td>" not in holdings
+    assert "table-layout:auto" in holdings
+    for label in (
+        "Quantity",
+        "Average Cost",
+        "Close",
+        "Today&#x27;s P/L",
+        "Today&#x27;s P/L %",
+        "Unrealized P/L",
+        "Return %",
+        "Market Value",
+    ):
+        assert re.search(
+            rf'<th style="[^"]*text-align:right[^"]*">{label}</th>', holdings
+        )
+
+
+def test_html_contributor_columns_and_readable_alignment_are_preserved() -> None:
+    case, _, _, transport = use_case(value=snapshot())
+
+    case.execute(date(2026, 7, 22))
+
+    html = transport.messages[0].html
+    contributors = html.split(">Today's Contributors</h2>", maxsplit=1)[1].split(
+        "</table>", maxsplit=1
+    )[0]
+    for label in (
+        "Rank",
+        "Symbol",
+        "Name",
+        "Today&#x27;s P/L",
+        "Today&#x27;s P/L %",
+        "Share of Net P/L",
+    ):
+        assert f">{label}</th>" in contributors
+    assert "Share of net daily P/L" not in contributors
+    assert "font-size:14px" in contributors
+    assert "text-align:right" in contributors
+    assert "word-break:keep-all" in contributors
+    assert "+NT$20</td>" in contributors
+    assert "+NT$20.00</td>" not in contributors
+    assert "Ranked by absolute daily P/L" in html
+    assert re.search(r'<th style="[^"]*text-align:right[^"]*">Rank</th>', contributors)
+
+
+def test_html_table_numbers_follow_display_precision_rules() -> None:
+    formatted = positions()[0].model_copy(
+        update={
+            "quantity": Decimal("6100"),
+            "average_cost": Decimal("97.60"),
+            "close_price": Decimal("44.45"),
+            "daily_value_change": Decimal("37500.40"),
+            "market_value": Decimal("622200.40"),
+            "unrealized_pnl": Decimal("105970.40"),
+        }
+    )
+    case, _, _, transport = use_case(value=snapshot(), position_values=[formatted])
+
+    case.execute(date(2026, 7, 22))
+
+    html = transport.messages[0].html
+    holdings = html.split(">Holdings</h2>", maxsplit=1)[1].split(
+        "</table>", maxsplit=1
+    )[0]
+    contributors = html.split(">Today's Contributors</h2>", maxsplit=1)[1].split(
+        "</table>", maxsplit=1
+    )[0]
+    assert ">6,100</td>" in holdings
+    assert ">97.6</td>" in holdings
+    assert ">44.45</td>" in holdings
+    assert "+NT$37,500</td>" in holdings
+    assert "+NT$105,970</td>" in holdings
+    assert "NT$622,200</td>" in holdings
+    assert "+NT$37,500</td>" in contributors
+    assert ".40</td>" not in holdings
 
 
 def test_html_summary_emphasizes_daily_profit_loss() -> None:

@@ -34,6 +34,20 @@ def _money(value: Decimal, *, signed: bool = False) -> str:
     return f"NT${value:,.2f}"
 
 
+def _whole_money(value: Decimal, *, signed: bool = False) -> str:
+    """Format an HTML table monetary value as a whole dollar."""
+    if signed and value > 0:
+        return f"+NT${value:,.0f}"
+    if signed and value < 0:
+        return f"-NT${abs(value):,.0f}"
+    return f"NT${value:,.0f}"
+
+
+def _compact_number(value: Decimal) -> str:
+    """Format a table price with at most two decimal places."""
+    return f"{value:,.2f}".rstrip("0").rstrip(".")
+
+
 def _percent(value: Decimal | None, *, signed: bool = False) -> str:
     if value is None:
         return "N/A"
@@ -213,8 +227,25 @@ def _chart_font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def _cell(value: str, *, color: str | None = None) -> str:
-    style = "padding:7px;border:1px solid #d1d5db;white-space:nowrap"
+def _cell(
+    value: str,
+    *,
+    color: str | None = None,
+    align: str = "left",
+    width: str | None = None,
+    name: bool = False,
+    font_size: str = "13px",
+    padding: str = "9px 6px",
+) -> str:
+    style = (
+        f"padding:{padding};border:1px solid #d1d5db;"
+        f"font-size:{font_size};line-height:1.4;vertical-align:middle;"
+        f"text-align:{align};white-space:nowrap"
+    )
+    if name:
+        style += ";word-break:keep-all"
+    if width:
+        style += f";width:{width}"
     if color:
         style += f";color:{color};font-weight:600"
     return f'<td style="{style}">{escape(value)}</td>'
@@ -296,64 +327,117 @@ class DailyEmailReportRenderer:
 
         contributor_rows = "".join(
             "<tr>"
-            + _cell(str(rank))
-            + _cell(item.symbol)
-            + _cell(item.name)
             + _cell(
-                _money(item.daily_profit_loss, signed=True),
+                str(rank),
+                align="right",
+                width="7%",
+                font_size="14px",
+                padding="11px 6px",
+            )
+            + _cell(item.symbol, width="13%", font_size="14px")
+            + _cell(item.name, name=True, font_size="14px")
+            + _cell(
+                _whole_money(item.daily_profit_loss, signed=True),
                 color=_tone(item.daily_profit_loss),
+                align="right",
+                width="19%",
+                font_size="14px",
+                padding="11px 6px",
             )
             + _cell(
                 _percent(item.daily_profit_loss_percentage, signed=True),
                 color=_tone(item.daily_profit_loss),
+                align="right",
+                width="17%",
+                font_size="14px",
+                padding="11px 6px",
             )
             + _cell(
                 _percent(item.daily_profit_loss_share, signed=True),
                 color=_tone(item.daily_profit_loss),
+                align="right",
+                width="20%",
+                font_size="14px",
+                padding="11px 6px",
             )
             + "</tr>"
             for rank, item in enumerate(contributors, start=1)
         )
         rows = "".join(
             "<tr>"
-            + _cell(item.symbol)
-            + _cell(item.name)
-            + _cell(f"{item.quantity:,.2f}")
-            + _cell(_money(item.average_cost))
-            + _cell(_money(item.close_price))
+            + _cell(item.symbol, width="8%", padding="10px 6px")
+            + _cell(item.name, name=True, padding="10px 6px")
             + _cell(
-                _percent(item.daily_return, signed=True),
-                color=_tone(item.daily_profit_loss),
+                f"{item.quantity:,.0f}",
+                align="right",
+                width="9%",
+                padding="10px 6px",
             )
             + _cell(
-                _money(item.daily_profit_loss, signed=True),
+                _compact_number(item.average_cost),
+                align="right",
+                width="10%",
+                padding="10px 6px",
+            )
+            + _cell(
+                _compact_number(item.close_price),
+                align="right",
+                width="8%",
+                padding="10px 6px",
+            )
+            + _cell(
+                _whole_money(item.daily_profit_loss, signed=True),
                 color=_tone(item.daily_profit_loss),
+                align="right",
+                width="11%",
+                padding="10px 6px",
             )
             + _cell(
                 _percent(item.daily_profit_loss_percentage, signed=True),
                 color=_tone(item.daily_profit_loss),
+                align="right",
+                width="9%",
+                padding="10px 6px",
             )
-            + _cell(_money(item.market_value))
             + _cell(
-                _money(item.unrealized_pnl, signed=True),
+                _whole_money(item.unrealized_pnl, signed=True),
                 color=_tone(item.unrealized_pnl),
+                align="right",
+                width="11%",
+                padding="10px 6px",
             )
             + _cell(
                 _percent(item.unrealized_return, signed=True),
                 color=_tone(item.unrealized_return),
+                align="right",
+                width="8%",
+                padding="10px 6px",
             )
-            + _cell(_percent(item.portfolio_weight))
+            + _cell(
+                _whole_money(item.market_value),
+                align="right",
+                width="10%",
+                padding="10px 6px",
+            )
             + "</tr>"
             for item in report.positions
         )
 
-        def headers(values: tuple[str, ...]) -> str:
-            return "".join(
-                '<th style="padding:7px;border:1px solid #d1d5db;'
-                'background:#f3f4f6;text-align:left;white-space:nowrap">'
-                f"{escape(header)}</th>"
-                for header in values
-            )
+        def headers(
+            values: tuple[tuple[str, str | None, str], ...], *, font_size: str
+        ) -> str:
+            cells = []
+            for label, width, align in values:
+                style = (
+                    "padding:10px 6px;border:1px solid #d1d5db;"
+                    f"background:#f3f4f6;text-align:{align};"
+                    f"font-size:{font_size};line-height:1.3;vertical-align:middle;"
+                    "white-space:nowrap;word-break:normal"
+                )
+                if width:
+                    style += f";width:{width}"
+                cells.append(f'<th style="{style}">{escape(label)}</th>')
+            return "".join(cells)
 
         if len(report.history) > 1:
             source = chart_source or ChartSource(
@@ -435,17 +519,15 @@ class DailyEmailReportRenderer:
 <h2 style="font-size:18px">30-Day Asset Change</h2>
 {chart_html}
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
-<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-<table style="border-collapse:collapse;width:100%;font-size:13px">
-<thead><tr>{headers(("Rank", "Symbol", "Name", "Today's P/L", "Today's P/L %", "Share of net daily P/L"))}</tr></thead>
-<tbody>{contributor_rows}</tbody></table></div>
+<table style="border-collapse:collapse;width:100%;table-layout:auto">
+<thead><tr>{headers((("Rank", "7%", "right"), ("Symbol", "13%", "left"), ("Name", None, "left"), ("Today's P/L", "19%", "right"), ("Today's P/L %", "17%", "right"), ("Share of Net P/L", "20%", "right")), font_size="14px")}</tr></thead>
+<tbody>{contributor_rows}</tbody></table>
 <p style="font-size:12px;color:{NEUTRAL_COLOR}">Ranked by absolute daily P/L
 impact. Share is unavailable when total portfolio daily P/L is zero.</p>
 <h2 style="font-size:18px;margin-top:24px">Holdings</h2>
-<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-<table style="border-collapse:collapse;width:100%;font-size:12px">
-<thead><tr>{headers(("Symbol", "Name", "Quantity", "Average Cost", "Close", "Daily Change", "Today's P/L", "Today's P/L %", "Market Value", "Unrealized P/L", "Return", "Weight"))}</tr></thead>
-<tbody>{rows}</tbody></table></div>
+<table style="border-collapse:collapse;width:100%;table-layout:auto">
+<thead><tr>{headers((("Symbol", "8%", "left"), ("Name", None, "left"), ("Quantity", "9%", "right"), ("Average Cost", "10%", "right"), ("Close", "8%", "right"), ("Today's P/L", "11%", "right"), ("Today's P/L %", "9%", "right"), ("Unrealized P/L", "11%", "right"), ("Return %", "8%", "right"), ("Market Value", "10%", "right")), font_size="13px")}</tr></thead>
+<tbody>{rows}</tbody></table>
 </div></body></html>"""
         return RenderedEmail(
             subject,
