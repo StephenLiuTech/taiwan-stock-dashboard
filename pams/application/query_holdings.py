@@ -1,6 +1,7 @@
 """Transaction-derived current holdings query workflow."""
 
 from collections import defaultdict
+from datetime import date
 
 from pams.application.dto import HoldingQueryItem, HoldingsQueryResult
 from pams.application.exceptions import (
@@ -34,10 +35,16 @@ class QueryHoldingsUseCase:
         self.transaction_engine = transaction_engine or TransactionEngine()
         self.valuation_engine = valuation_engine or ValuationEngine()
 
-    def execute(self, symbol: str | None = None) -> HoldingsQueryResult:
-        """Return all or one active transaction-derived holding."""
+    def execute(
+        self, symbol: str | None = None, as_of_date: date | None = None
+    ) -> HoldingsQueryResult:
+        """Return all or one holding projected through an inclusive trade date."""
         try:
-            transactions = self.transactions.list_all()
+            transactions = (
+                self.transactions.list_filtered(end_date=as_of_date)
+                if as_of_date is not None
+                else self.transactions.list_all()
+            )
             persisted_holdings = self.holdings.list_all()
         except Exception as error:
             raise ValuationRepositoryError(
@@ -63,12 +70,18 @@ class QueryHoldingsUseCase:
                     f"Holding symbol {requested} is active in multiple markets: {markets}"
                 )
         if not projected:
-            return HoldingsQueryResult(None, ())
+            return HoldingsQueryResult(None, (), as_of_date)
 
         quotes = []
         for holding in projected:
             try:
-                quote = self.quotes.get_latest(holding.symbol, holding.market.value)
+                quote = (
+                    self.quotes.get_latest_on_or_before(
+                        holding.symbol, holding.market.value, as_of_date
+                    )
+                    if as_of_date is not None
+                    else self.quotes.get_latest(holding.symbol, holding.market.value)
+                )
             except Exception as error:
                 raise ValuationRepositoryError(
                     "Unable to load portfolio price quotes"
@@ -79,6 +92,9 @@ class QueryHoldingsUseCase:
                 quotes.append(quote)
 
         quoted_keys = {(quote.symbol, quote.market) for quote in quotes}
+        quote_dates = {
+            (quote.symbol, quote.market): quote.trade_date for quote in quotes
+        }
         quoted_holdings = [
             holding
             for holding in projected
@@ -109,6 +125,7 @@ class QueryHoldingsUseCase:
                     transaction_count=len(history),
                     first_trade_date=min(item.trade_date for item in history),
                     latest_trade_date=max(item.trade_date for item in history),
+                    quote_date=quote_dates.get((holding.symbol, holding.market)),
                 )
             )
-        return HoldingsQueryResult(valuation.valuation_date, tuple(items))
+        return HoldingsQueryResult(valuation.valuation_date, tuple(items), as_of_date)

@@ -329,6 +329,7 @@ class HoldingQueryItem:
     transaction_count: int
     first_trade_date: date
     latest_trade_date: date
+    quote_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -337,3 +338,4 @@ class HoldingsQueryResult:
 
     valuation_date: date | None
     holdings: tuple[HoldingQueryItem, ...]
+    as_of_date: date | None = None

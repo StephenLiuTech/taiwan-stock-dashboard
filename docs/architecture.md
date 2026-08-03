@@ -139,6 +139,13 @@ excluded from these ledger query commands. Invalid histories, including a sell
 before a buy or an oversell, are rejected; short positions are unsupported. A
 holding without a latest quote remains queryable with quantity and canonical
 cost basis, while price and market-dependent fields render as unavailable.
+An optional inclusive `as_of` cutoff filters ledger events by `trade_date <=
+as_of`; settlement date remains irrelevant. Historical valuation selects each
+instrument's latest persisted quote whose trade date is not later than the
+cutoff and exposes that quote date in the immutable result. Later quotes are
+never substituted, and a missing eligible quote leaves only market-dependent
+fields unavailable. The same deterministic day-level ordering and oversell
+rules apply to the filtered ledger.
 
 ### Valuation
 

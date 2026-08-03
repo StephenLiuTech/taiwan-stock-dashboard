@@ -107,10 +107,12 @@ class FakeListUseCase:
 
 class FakeHoldingsQueryUseCase:
     def __init__(self) -> None:
-        self.symbols: list[str | None] = []
+        self.calls: list[tuple[str | None, date | None]] = []
 
-    def execute(self, symbol: str | None = None) -> HoldingsQueryResult:
-        self.symbols.append(symbol)
+    def execute(
+        self, symbol: str | None = None, as_of_date: date | None = None
+    ) -> HoldingsQueryResult:
+        self.calls.append((symbol, as_of_date))
         return HoldingsQueryResult(
             valuation_date=date(2026, 7, 22),
             holdings=(
@@ -129,6 +131,7 @@ class FakeHoldingsQueryUseCase:
                     latest_trade_date=date(2026, 7, 10),
                 ),
             ),
+            as_of_date=as_of_date,
         )
 
 
@@ -276,7 +279,31 @@ def test_cli_holdings_list_and_show_route_to_query_use_case(
     detail = capsys.readouterr().out
     assert "Transaction count: 2" in detail
     assert "First trade date: 2026-07-01" in detail
-    assert query.symbols == [None, "2330"]
+    assert query.calls == [(None, None), ("2330", None)]
+
+
+def test_cli_holdings_as_of_is_parsed_and_rendered(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, _, query = install_composition(monkeypatch)
+    cutoff = date(2026, 7, 31)
+
+    assert main(["holdings", "list", "--as-of", cutoff.isoformat()]) == 0
+    assert "Requested as-of date: 2026-07-31" in capsys.readouterr().out
+    assert main(["holdings", "show", "2330", "--as-of", cutoff.isoformat()]) == 0
+    assert "Requested as-of date: 2026-07-31" in capsys.readouterr().out
+    assert query.calls == [(None, cutoff), ("2330", cutoff)]
+
+
+def test_cli_holdings_invalid_as_of_is_concise(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        main(["holdings", "list", "--as-of", "2026-02-30"])
+    assert raised.value.code == ExitCode.CLI_ERROR
+    captured = capsys.readouterr()
+    assert "date must use YYYY-MM-DD" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_cli_holding_without_quote_renders_unavailable_values(
@@ -284,7 +311,7 @@ def test_cli_holding_without_quote_renders_unavailable_values(
 ) -> None:
     _, _, query = install_composition(monkeypatch)
     item = query.execute().holdings[0]
-    query.execute = lambda symbol=None: HoldingsQueryResult(  # type: ignore[method-assign]
+    query.execute = lambda symbol=None, as_of_date=None: HoldingsQueryResult(  # type: ignore[method-assign]
         None,
         (
             replace(
@@ -308,8 +335,10 @@ def test_cli_oversell_error_is_clean_without_traceback(
 ) -> None:
     _, _, query = install_composition(monkeypatch)
 
-    def reject(symbol: str | None = None) -> HoldingsQueryResult:
-        del symbol
+    def reject(
+        symbol: str | None = None, as_of_date: date | None = None
+    ) -> HoldingsQueryResult:
+        del symbol, as_of_date
         raise InvalidHoldingHistoryError(
             "SELL exceeds held quantity for 2330 in transaction oversell"
         )

@@ -508,6 +508,18 @@ class SQLitePriceQuoteRepository:
         ).fetchone()
         return self._from_row(row) if row else None
 
+    def get_latest_on_or_before(
+        self, symbol: str, market: str, trade_date: date
+    ) -> PriceQuote | None:
+        """Return the newest persisted quote not later than the cutoff date."""
+        row = self.connection.execute(
+            """SELECT * FROM price_quotes
+            WHERE symbol = ? AND market = ? AND trade_date <= ?
+            ORDER BY trade_date DESC LIMIT 1""",
+            (symbol.strip().upper(), market, trade_date.isoformat()),
+        ).fetchone()
+        return self._from_row(row) if row else None
+
     def get_latest_date(self) -> date | None:
         """Return the newest persisted quote date across all markets."""
         row = self.connection.execute(

@@ -314,6 +314,8 @@ python -m pams transaction add --id tx-001 --symbol 2330 --market TWSE \
 python -m pams transaction list --symbol 2330 --json
 python -m pams holdings list
 python -m pams holdings show 2330
+python -m pams holdings list --as-of 2026-07-31
+python -m pams holdings show 2330 --as-of 2026-07-31
 python -m pams holdings rebuild
 python -m pams holdings rebuild --apply --allow-unmatched
 ```
@@ -340,6 +342,14 @@ input. True intraday ordering would require a future explicit sequence or
 timestamp field. Oversells are rejected because short positions are
 unsupported. If an active holding has no latest quote, quantity and cost remain
 visible while market-dependent fields are displayed as `N/A`.
+
+`--as-of` is an inclusive historical cutoff based only on `trade_date`.
+Transactions after the requested date are excluded, and historical valuation
+uses the latest persisted quote on or before that date. A later quote is never
+substituted. When no eligible quote exists, quantity and cost remain available
+while market fields and quote date render as `N/A`. The same day-level
+BUY-before-SELL policy applies at the cutoff; true intraday chronology remains
+unsupported.
 
 Holding rebuild is preview-only by default. Applying requires an explicit flag
 and preserves historical snapshots.

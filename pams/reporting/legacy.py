@@ -270,15 +270,17 @@ def format_holdings_list(result: HoldingsQueryResult) -> str:
     """Render active transaction-derived holdings with shared valuation facts."""
     lines = [
         "PAMS Holdings",
+        f"Requested as-of date: {result.as_of_date or 'current'}",
         f"Valuation date: {result.valuation_date or 'none'}",
         "",
         "Symbol | Market | Quantity | Average Cost | Total Cost | Latest Price | "
-        "Market Value | Unrealized P/L | Return",
+        "Quote Date | Market Value | Unrealized P/L | Return",
     ]
     lines.extend(
         f"{item.symbol} | {item.market} | {format_decimal(item.quantity)} | "
         f"{format_decimal(item.average_cost)} | {format_decimal(item.total_cost)} | "
         f"{format_decimal(item.latest_price) if item.latest_price is not None else 'N/A'} | "
+        f"{item.quote_date or 'N/A'} | "
         f"{format_decimal(item.market_value) if item.market_value is not None else 'N/A'} | "
         f"{format_decimal(item.unrealized_pl) if item.unrealized_pl is not None else 'N/A'} | "
         f"{format_percentage(item.unrealized_return)}"
@@ -294,6 +296,7 @@ def format_holding_detail(result: HoldingsQueryResult) -> str:
     return "\n".join(
         [
             "PAMS Holding",
+            f"Requested as-of date: {result.as_of_date or 'current'}",
             f"Symbol: {item.symbol}",
             f"Market: {item.market}",
             f"Quantity: {format_decimal(item.quantity)}",
@@ -301,6 +304,7 @@ def format_holding_detail(result: HoldingsQueryResult) -> str:
             f"Total cost: {format_decimal(item.total_cost)}",
             "Latest available market price: "
             f"{format_decimal(item.latest_price) if item.latest_price is not None else 'N/A'}",
+            f"Quote date: {item.quote_date or 'N/A'}",
             "Market value: "
             f"{format_decimal(item.market_value) if item.market_value is not None else 'N/A'}",
             "Unrealized P/L: "

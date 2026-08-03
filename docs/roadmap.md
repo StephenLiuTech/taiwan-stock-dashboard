@@ -152,3 +152,4 @@ notifications are not part of v1.0.0.
 - Transaction entry defaults settlement date to trade date while preserving
   explicit settlement metadata
 - Transaction-derived holdings list/detail CLI queries reuse shared valuation
+- Inclusive historical holdings queries with cutoff-safe persisted quotes

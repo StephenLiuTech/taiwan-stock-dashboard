@@ -218,6 +218,8 @@ derived facts rather than a source of market-date truth.
 Transaction and holdings CLI queries follow the same principle: holdings are
 projected from trade-date-effective ledger events and current financial values
 come from the shared valuation engine.
+Historical holdings queries apply an inclusive trade-date cutoff and never use
+market prices later than the requested portfolio state.
 
 ## Roadmap
 

@@ -140,11 +140,13 @@ def build_parser() -> argparse.ArgumentParser:
         "list", help="list active transaction-derived holdings"
     )
     holdings_list.add_argument("--database", type=Path)
+    holdings_list.add_argument("--as-of", type=parse_iso_date)
     holdings_list.add_argument("--verbose", action="store_true")
     holdings_show = holding_commands.add_parser(
         "show", help="show one active transaction-derived holding"
     )
     holdings_show.add_argument("symbol")
+    holdings_show.add_argument("--as-of", type=parse_iso_date)
     holdings_show.add_argument("--database", type=Path)
     holdings_show.add_argument("--verbose", action="store_true")
 
@@ -373,9 +375,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if arguments.holdings_command in {"list", "show"}:
                     assert application.query_holdings is not None
                     result = application.query_holdings.execute(
-                        arguments.symbol
-                        if arguments.holdings_command == "show"
-                        else None
+                        (
+                            arguments.symbol
+                            if arguments.holdings_command == "show"
+                            else None
+                        ),
+                        as_of_date=arguments.as_of,
                     )
                     print(
                         format_holding_detail(result)
