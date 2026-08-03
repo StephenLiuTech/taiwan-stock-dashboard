@@ -9,6 +9,11 @@ from domain import Holding, HoldingValuation, PortfolioValuation, PriceQuote
 class ValuationEngine:
     """Calculate current holding and portfolio values without data access."""
 
+    @staticmethod
+    def cost_basis(holding: Holding) -> Decimal:
+        """Return the holding cost basis using the canonical valuation formula."""
+        return holding.quantity * holding.average_cost
+
     def valuate(
         self, holdings: list[Holding], quotes: list[PriceQuote]
     ) -> PortfolioValuation:
@@ -17,7 +22,7 @@ class ValuationEngine:
         values = []
         for holding in holdings:
             quote = quote_by_key[(holding.symbol, holding.market)]
-            cost_basis = holding.quantity * holding.average_cost
+            cost_basis = self.cost_basis(holding)
             market_value = holding.quantity * quote.close_price
             unrealized = market_value - cost_basis
             values.append(

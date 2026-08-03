@@ -25,6 +25,22 @@ class DuplicateTransactionError(ApplicationError, ValueError):
     """Raised when a transaction ID already exists."""
 
 
+class HoldingQueryError(ApplicationError, ValueError):
+    """Base class for transaction-derived holding query failures."""
+
+
+class HoldingNotFoundError(HoldingQueryError):
+    """Raised when a requested active holding symbol does not exist."""
+
+
+class AmbiguousHoldingSymbolError(HoldingQueryError):
+    """Raised when one symbol identifies active holdings in multiple markets."""
+
+
+class InvalidHoldingHistoryError(HoldingQueryError):
+    """Raised when the transaction ledger cannot produce valid holdings."""
+
+
 class MissingQuoteError(ApplicationError, ValueError):
     """Raised when a holding cannot be valued with a latest quote."""
 

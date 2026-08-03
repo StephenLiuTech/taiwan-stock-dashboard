@@ -308,13 +308,38 @@ snapshots. The regular Market Data Engine duplicate guard remains active.
 
 ```bash
 python -m pams transaction add --id tx-001 --symbol 2330 --market TWSE \
-  --type buy --trade-date 2026-07-01 --settlement-date 2026-07-03 \
+  --type buy --trade-date 2026-07-01 \
   --quantity 100 --price 1800 --fees 20 --taxes 0 --currency TWD
 
 python -m pams transaction list --symbol 2330 --json
+python -m pams holdings list
+python -m pams holdings show 2330
 python -m pams holdings rebuild
 python -m pams holdings rebuild --apply --allow-unmatched
 ```
+
+`--settlement-date` is optional and defaults to `--trade-date`. Explicit
+settlement dates remain compatible when the record needs one:
+
+```bash
+python -m pams transaction add --symbol 2330 --market TWSE --type buy \
+  --trade-date 2026-07-01 --settlement-date 2026-07-03 \
+  --quantity 100 --price 1800
+```
+
+Portfolio state is effective on `trade_date`; settlement date remains stored
+as transaction metadata and does not delay holdings, valuation, history, or
+daily-report inclusion. `holdings list` and `holdings show` project active
+positions directly from transactions and reuse the shared valuation engine
+with latest persisted quotes. Detail output also includes transaction count
+and the first and latest trade dates. Holdings are effective by trade date. The
+current model has no true intraday chronology, so same-day buys are applied
+before same-day sells; transaction ID is only a deterministic tie-breaker among
+transactions on the same date and side. Settlement date is not an ordering
+input. True intraday ordering would require a future explicit sequence or
+timestamp field. Oversells are rejected because short positions are
+unsupported. If an active holding has no latest quote, quantity and cost remain
+visible while market-dependent fields are displayed as `N/A`.
 
 Holding rebuild is preview-only by default. Applying requires an explicit flag
 and preserves historical snapshots.

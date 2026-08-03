@@ -41,7 +41,7 @@ class AddTransactionUseCase:
             "market": Market(command.market),
             "transaction_type": TransactionType(command.transaction_type),
             "trade_date": command.trade_date,
-            "settlement_date": command.settlement_date,
+            "settlement_date": command.settlement_date or command.trade_date,
             "quantity": command.quantity,
             "price": command.price,
             "fees": command.fees,

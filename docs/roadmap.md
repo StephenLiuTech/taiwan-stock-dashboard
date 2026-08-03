@@ -149,3 +149,6 @@ notifications are not part of v1.0.0.
 - SMTP and Microsoft Graph retain PAMS-controlled multipart/related CID charts
 - Scheduled verification can tolerate temporary official-market probe warnings
   while preserving fatal local-readiness and composition checks
+- Transaction entry defaults settlement date to trade date while preserving
+  explicit settlement metadata
+- Transaction-derived holdings list/detail CLI queries reuse shared valuation

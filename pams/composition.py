@@ -41,6 +41,7 @@ from pams.application import (
     MigrateDatabaseUseCase,
     PortfolioHistoryUseCase,
     PortfolioStatusUseCase,
+    QueryHoldingsUseCase,
     SendDailyReportUseCase,
     UpdatePortfolioUseCase,
     ValuatePortfolioUseCase,
@@ -79,6 +80,7 @@ class ApplicationContext:
     apply_rebuilt_holdings: ApplyRebuiltHoldingsUseCase | None = None
     add_transaction: AddTransactionUseCase | None = None
     list_transactions: ListTransactionsUseCase | None = None
+    query_holdings: QueryHoldingsUseCase | None = None
     valuate_portfolio: ValuatePortfolioUseCase | None = None
     analyze_portfolio: AnalyzePortfolioUseCase | None = None
     send_daily_report: SendDailyReportUseCase | None = None
@@ -495,6 +497,12 @@ def _compose(
             ),
             add_transaction=AddTransactionUseCase(transaction_repository),
             list_transactions=ListTransactionsUseCase(transaction_repository),
+            query_holdings=QueryHoldingsUseCase(
+                transaction_repository,
+                holdings,
+                quotes,
+                transaction_engine,
+            ),
             valuate_portfolio=valuate_portfolio,
             analyze_portfolio=AnalyzePortfolioUseCase(snapshots),
         )
