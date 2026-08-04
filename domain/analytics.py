@@ -31,3 +31,9 @@ class PortfolioAnalytics:
     trough_value: Decimal
     max_drawdown: Decimal
     snapshot_count: int
+    total_buy_fees: Decimal = Decimal("0")
+    total_sell_fees: Decimal = Decimal("0")
+    total_taxes: Decimal = Decimal("0")
+    total_trading_expenses: Decimal = Decimal("0")
+    net_investment_return_before_expenses: Decimal = Decimal("0")
+    net_investment_return_after_expenses: Decimal = Decimal("0")

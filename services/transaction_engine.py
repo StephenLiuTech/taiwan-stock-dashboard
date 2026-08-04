@@ -11,6 +11,7 @@ from domain import (
     Market,
     PortfolioLedger,
     Transaction,
+    TransactionExpenseSummary,
     TransactionPosition,
     TransactionType,
 )
@@ -53,10 +54,38 @@ class _PositionState:
 class TransactionEngine:
     """Build moving-weighted-average positions from immutable transaction input."""
 
+    @staticmethod
+    def summarize_expenses(
+        transactions: list[Transaction],
+    ) -> TransactionExpenseSummary:
+        """Classify recorded fees and taxes without reconstructing positions."""
+        return TransactionExpenseSummary(
+            total_buy_fees=sum(
+                (
+                    item.fees
+                    for item in transactions
+                    if item.transaction_type is TransactionType.BUY
+                ),
+                Decimal("0"),
+            ),
+            total_sell_fees=sum(
+                (
+                    item.fees
+                    for item in transactions
+                    if item.transaction_type is TransactionType.SELL
+                ),
+                Decimal("0"),
+            ),
+            total_taxes=sum((item.taxes for item in transactions), Decimal("0")),
+        )
+
     def build_ledger(self, transactions: list[Transaction]) -> PortfolioLedger:
         """Process transactions deterministically without mutating the input list."""
         states: dict[PositionKey, _PositionState] = {}
         total_realized_pnl = Decimal("0")
+        total_buy_fees = Decimal("0")
+        total_sell_fees = Decimal("0")
+        total_taxes = Decimal("0")
         ordered = sorted(
             transactions,
             key=lambda item: (
@@ -70,14 +99,12 @@ class TransactionEngine:
             key = (transaction.symbol, transaction.market, transaction.currency)
             state = states.setdefault(key, _PositionState())
             if transaction.transaction_type is TransactionType.BUY:
-                purchase_cost = (
-                    transaction.quantity * transaction.price
-                    + transaction.fees
-                    + transaction.taxes
-                )
+                purchase_cost = transaction.quantity * transaction.price
                 state.quantity += transaction.quantity
                 state.cost_basis += purchase_cost
                 state.average_cost = state.cost_basis / state.quantity
+                total_buy_fees += transaction.fees
+                total_taxes += transaction.taxes
                 continue
             if state.quantity == 0:
                 raise InvalidTransactionHistoryError(
@@ -95,6 +122,8 @@ class TransactionEngine:
                 - transaction.fees
                 - transaction.taxes
             )
+            total_sell_fees += transaction.fees
+            total_taxes += transaction.taxes
             realized = net_proceeds - allocated_cost
             state.realized_pnl += realized
             total_realized_pnl += realized
@@ -124,7 +153,13 @@ class TransactionEngine:
             )
             if state.quantity != 0
         )
-        return PortfolioLedger(positions, total_realized_pnl)
+        return PortfolioLedger(
+            positions,
+            total_realized_pnl,
+            total_buy_fees,
+            total_sell_fees,
+            total_taxes,
+        )
 
     def project_holdings(
         self,

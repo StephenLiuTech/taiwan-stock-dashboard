@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from domain import DailySnapshot
+from domain import DailySnapshot, TransactionExpenseSummary
 from services import (
     AnalyticsEngine,
     DuplicateSnapshotDateError,
@@ -41,6 +41,24 @@ def test_basic_period_performance() -> None:
     assert result.start_date == date(2026, 7, 1)
     assert result.end_date == date(2026, 7, 3)
     assert result.snapshot_count == 2
+
+
+def test_expenses_are_reported_separately_from_before_expense_return() -> None:
+    result = AnalyticsEngine().analyze(
+        [snapshot(0, "100"), snapshot(1, "125")],
+        TransactionExpenseSummary(
+            total_buy_fees=Decimal("1"),
+            total_sell_fees=Decimal("2"),
+            total_taxes=Decimal("3"),
+        ),
+    )
+
+    assert result.total_buy_fees == Decimal("1")
+    assert result.total_sell_fees == Decimal("2")
+    assert result.total_taxes == Decimal("3")
+    assert result.total_trading_expenses == Decimal("6")
+    assert result.net_investment_return_before_expenses == Decimal("0.25")
+    assert result.net_investment_return_after_expenses == Decimal("0.19")
 
 
 def test_daily_returns_use_consecutive_chronological_snapshots() -> None:
