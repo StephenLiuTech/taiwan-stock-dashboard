@@ -277,10 +277,42 @@ def test_dividend_estimate_decimal_and_renderer() -> None:
     assert "Actual Cash Received" in html
     assert "Estimated Annual Dividend" in html
     assert "Upcoming Ex-Date" in html
+    assert "width:100%;max-width:100%;table-layout:fixed;font-size:11px" in html
+    assert "white-space:normal;overflow-wrap:anywhere;word-break:break-word" in html
+    assert 'word-break:break-word">Upcoming Ex-Date</td>' in html
+    assert '<col style="width:11%">' in html
+    assert "table-layout:auto" in html  # The separate estimate summary is unchanged.
+    calendar_table = html.split("</table>", maxsplit=1)[0]
+    assert ">Source</th>" not in calendar_table
+    assert section.items[0].source_status not in calendar_table
+    assert calendar_table.count("<col ") == 9
     assert "Dividend Calendar" in text
     assert "Dividend Estimate Summary" in text
     assert "Actual Cash Received means" in text
     assert "Estimated Annual Dividend | NT$52" in text
+
+
+@pytest.mark.parametrize(
+    ("payment", "expected_status"),
+    [
+        (date(2026, 8, 10), "Waiting for Payment"),
+        (None, "Unknown Payment Date"),
+    ],
+)
+def test_dividend_calendar_long_status_cells_allow_wrapping(
+    payment: date | None, expected_status: str
+) -> None:
+    section = ReportSectionService.dividends(
+        date(2026, 7, 28),
+        [event(payment)],
+        {("2330", date(2026, 7, 27)): Decimal("10.5")},
+    )
+
+    html = DailyReportSectionRenderer.dividend_calendar_html(
+        DailyReportSections(dividend_calendar=section)
+    )
+
+    assert f'word-break:break-word">{expected_status}</td>' in html
 
 
 def test_mops_payment_provider_parses_official_two_row_header() -> None:
@@ -522,6 +554,8 @@ def test_cli_dividend_decimal_format_has_no_exponent_or_trailing_zeroes() -> Non
     )
     assert "| 36 | 0 |" in rendered
     assert "0E-8" not in rendered
+    assert "Payment | Source" in rendered
+    assert rendered.endswith("| official\nCount: 1")
 
 
 def test_empty_dividend_section_is_hidden() -> None:
