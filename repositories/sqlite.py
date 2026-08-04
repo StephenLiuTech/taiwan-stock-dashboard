@@ -8,11 +8,13 @@ from uuid import uuid4
 from domain import (
     DailySnapshot,
     Dividend,
+    DividendEvent,
     Holding,
     Liability,
     PositionSnapshot,
     PriceQuote,
     Transaction,
+    WatchlistItem,
 )
 
 
@@ -290,6 +292,105 @@ class SQLiteDividendRepository:
         return Dividend.model_validate(values)
 
 
+class SQLiteDividendEventRepository:
+    """Persist normalized official dividend events without partial replacement."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def upsert_many(self, events: list[DividendEvent]) -> int:
+        self.connection.executemany(
+            """INSERT INTO dividend_events VALUES
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_event_id) DO UPDATE SET
+                symbol=excluded.symbol, market=excluded.market, name=excluded.name,
+                dividend_year=excluded.dividend_year,
+                ex_dividend_date=excluded.ex_dividend_date,
+                record_date=excluded.record_date,
+                payment_date=COALESCE(
+                    excluded.payment_date, dividend_events.payment_date
+                ),
+                cash_dividend_per_share=excluded.cash_dividend_per_share,
+                stock_dividend_per_share=excluded.stock_dividend_per_share,
+                source=excluded.source,
+                source_updated_at=excluded.source_updated_at,
+                fetched_at=excluded.fetched_at""",
+            [
+                (
+                    item.source_event_id,
+                    item.symbol,
+                    item.market.value,
+                    item.name,
+                    item.dividend_year,
+                    item.ex_dividend_date.isoformat(),
+                    item.record_date.isoformat() if item.record_date else None,
+                    item.payment_date.isoformat() if item.payment_date else None,
+                    (
+                        str(item.cash_dividend_per_share)
+                        if item.cash_dividend_per_share is not None
+                        else None
+                    ),
+                    (
+                        str(item.stock_dividend_per_share)
+                        if item.stock_dividend_per_share is not None
+                        else None
+                    ),
+                    item.source,
+                    (
+                        item.source_updated_at.isoformat()
+                        if item.source_updated_at
+                        else None
+                    ),
+                    item.fetched_at.isoformat(),
+                )
+                for item in events
+            ],
+        )
+        if self.auto_commit:
+            self.connection.commit()
+        return len(events)
+
+    def list_filtered(
+        self,
+        *,
+        symbol: str | None = None,
+        market: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        year: int | None = None,
+    ) -> list[DividendEvent]:
+        clauses: list[str] = []
+        values: list[object] = []
+        for column, value in (("symbol", symbol), ("market", market)):
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                values.append(value.strip().upper())
+        if start_date is not None:
+            clauses.append("ex_dividend_date >= ?")
+            values.append(start_date.isoformat())
+        if end_date is not None:
+            clauses.append("ex_dividend_date <= ?")
+            values.append(end_date.isoformat())
+        if year is not None:
+            clauses.append("dividend_year = ?")
+            values.append(year)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = self.connection.execute(
+            "SELECT * FROM dividend_events"
+            + where
+            + " ORDER BY ex_dividend_date, symbol, source_event_id",
+            tuple(values),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> DividendEvent:
+        return DividendEvent.model_validate(dict(row))
+
+
 class SQLiteLiabilityRepository:
     """Persist liabilities in SQLite."""
 
@@ -508,6 +609,18 @@ class SQLitePriceQuoteRepository:
         ).fetchone()
         return self._from_row(row) if row else None
 
+    def get_latest_on_or_before(
+        self, symbol: str, market: str, trade_date: date
+    ) -> PriceQuote | None:
+        """Return the newest persisted quote not later than the cutoff date."""
+        row = self.connection.execute(
+            """SELECT * FROM price_quotes
+            WHERE symbol = ? AND market = ? AND trade_date <= ?
+            ORDER BY trade_date DESC LIMIT 1""",
+            (symbol.strip().upper(), market, trade_date.isoformat()),
+        ).fetchone()
+        return self._from_row(row) if row else None
+
     def get_latest_date(self) -> date | None:
         """Return the newest persisted quote date across all markets."""
         row = self.connection.execute(
@@ -605,6 +718,70 @@ class SQLitePositionSnapshotRepository:
         if values["daily_return"] is not None:
             values["daily_return"] = _decimal(values["daily_return"])
         return PositionSnapshot.model_validate(values)
+
+
+class SQLiteWatchlistRepository:
+    """Persist manually selected watchlist instruments."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def list_all(self) -> list[WatchlistItem]:
+        rows = self.connection.execute(
+            "SELECT * FROM watchlist ORDER BY symbol, market"
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def get(self, symbol: str, market: str | None = None) -> WatchlistItem | None:
+        query = "SELECT * FROM watchlist WHERE symbol = ?"
+        parameters: tuple[str, ...] = (symbol.strip().upper(),)
+        if market is not None:
+            query += " AND market = ?"
+            parameters += (market,)
+        query += " ORDER BY market LIMIT 1"
+        row = self.connection.execute(query, parameters).fetchone()
+        return self._from_row(row) if row else None
+
+    def add(self, item: WatchlistItem) -> None:
+        self.connection.execute(
+            "INSERT INTO watchlist VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                item.symbol,
+                item.market.value,
+                item.display_name,
+                str(item.target_price) if item.target_price is not None else None,
+                (
+                    str(item.buy_below_price)
+                    if item.buy_below_price is not None
+                    else None
+                ),
+                item.notes,
+            ),
+        )
+        if self.auto_commit:
+            self.connection.commit()
+
+    def remove(self, symbol: str, market: str | None = None) -> bool:
+        query = "DELETE FROM watchlist WHERE symbol = ?"
+        parameters: tuple[str, ...] = (symbol.strip().upper(),)
+        if market is not None:
+            query += " AND market = ?"
+            parameters += (market,)
+        cursor = self.connection.execute(query, parameters)
+        if self.auto_commit:
+            self.connection.commit()
+        return cursor.rowcount > 0
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> WatchlistItem:
+        values = dict(row)
+        for key in ("target_price", "buy_below_price"):
+            if values[key] is not None:
+                values[key] = _decimal(values[key])
+        return WatchlistItem.model_validate(values)
 
 
 class SQLiteReportDeliveryRepository:

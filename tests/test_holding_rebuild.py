@@ -153,9 +153,9 @@ def test_preview_builds_change_plan_without_writes() -> None:
         HoldingChangeAction.UNCHANGED,
         HoldingChangeAction.CLOSE,
     ]
-    assert plan.created_holdings[0].new_cost_basis == Decimal("101")
+    assert plan.created_holdings[0].new_cost_basis == Decimal("100")
     assert plan.updated_holdings[0].old_cost_basis == Decimal("500")
-    assert plan.projected_total_cost_basis == Decimal("1821")
+    assert plan.projected_total_cost_basis == Decimal("1820")
     assert plan.transaction_count == 3
     assert plan.applied is False
     assert "0050" in plan.warnings[0]

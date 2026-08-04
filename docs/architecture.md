@@ -139,6 +139,27 @@ excluded from these ledger query commands. Invalid histories, including a sell
 before a buy or an oversell, are rejected; short positions are unsupported. A
 holding without a latest quote remains queryable with quantity and canonical
 cost basis, while price and market-dependent fields render as unavailable.
+An optional inclusive `as_of` cutoff filters ledger events by `trade_date <=
+as_of`; settlement date remains irrelevant. Historical valuation selects each
+instrument's latest persisted quote whose trade date is not later than the
+cutoff and exposes that quote date in the immutable result. Later quotes are
+never substituted, and a missing eligible quote leaves only market-dependent
+fields unavailable. The same deterministic day-level ordering and oversell
+rules apply to the filtered ledger.
+
+PAMS follows the broker portfolio cost convention. BUY quantity multiplied by
+execution price enters moving-average holding cost; BUY fees and taxes do not.
+SELL transactions reduce quantity at the unchanged moving average. SELL fees
+and taxes reduce realized profit. BUY fees, SELL fees, and taxes remain
+immutable ledger expenses and are reported separately; they never enter
+holding cost, unrealized profit or loss, or holding return.
+
+The one-time bootstrap importer has a read-only preview and an explicit apply
+boundary. Apply replaces only the reconciled 2026 ledger, writes deterministic
+statement and synthetic transaction IDs, rebuilds holdings, and performs a
+persisted post-write reconciliation inside one database transaction. A failed
+write or quantity/cost mismatch rolls back everything. An equivalent imported
+ledger and matching holdings produce an idempotent no-op.
 
 ### Valuation
 
@@ -479,3 +500,72 @@ DTOs or logs, and this flow uses no client secret.
 Authenticated STARTTLS SMTP remains an optional infrastructure adapter for
 non-Microsoft providers and is selected explicitly through environment-backed
 configuration.
+
+## Modular daily-report sections
+
+```text
+Repositories / optional providers
+              |
+              v
+ BuildReportSectionsUseCase
+              |
+              +--> pure ReportSectionService / NewsService
+              |
+              v
+ immutable DailyReportSections
+              |
+              v
+ DailyReportSectionRenderer (HTML + text)
+```
+
+Core portfolio construction remains in the existing valuation/report path.
+Section orchestration loads data through repository protocols; calculations
+are deterministic services; renderers only format immutable DTOs. Optional
+market, event, and news providers are explicit protocols. Their failures are
+logged by section and exception type, converted to unavailable states, and do
+not fail core delivery. No provider payload or credential is logged.
+
+`watchlist` is the only new persisted grain: one row per `(symbol, market)`.
+Schema version 5 adds the same table to SQLite and PostgreSQL and includes it in
+transactional migration. Dividend eligibility is reconstructed from ledger
+transactions effective on the ex-dividend date. Transaction summaries use
+`trade_date`, never `settlement_date`.
+
+## Official dividend calendar
+
+```text
+TWSE / TPEx event adapters + MOPS payment-date adapter
+          ↓
+NormalizeDividendEventsUseCase
+          ↓
+DividendEventRepository (SQLite/PostgreSQL)
+          ↓
+BuildReportSectionsUseCase
+          ↓
+HTML and plain-text Dividend Calendar
+```
+
+Schema version 6 adds `dividend_events`, one row per deterministic official
+distribution key. It remains separate from the legacy `dividends` financial
+event table because issuers may publish multiple distributions per year and
+official payment dates can arrive later. TWSE `TWT48U_ALL`/`TWT49U` and TPEx
+`tpex_exright_prepost`/`exDailyQ` adapters include ETF rows. The official MOPS
+`ajax_t108sb27` company dividend report is an isolated payment-date adapter. It
+enriches only one unique event matching market, normalized symbol, and
+ex-dividend date; it never joins solely on symbol/year. Provider failure is
+logged and isolated, so valid event updates and known payment dates remain.
+
+Normalization validates ROC dates and Decimal amounts before persistence.
+Eligibility delegates to the Transaction Engine using
+`trade_date < ex_dividend_date`, the explicit day-level final-eligible-position
+assumption. Status is derived from report date, ex-date, and official payment
+date and is not persisted. `Paid` means only that the official payment date has
+passed. The report defaults to the full current calendar year and also supports
+`next_90_days` and `all`; unavailable payment dates are never inferred.
+
+`Actual Cash Received` is another non-persisted deterministic report fact. For
+an available estimate it equals estimated eligible quantity times official
+cash dividend per share only when `payment_date <= report_date`; otherwise it
+is zero. An unavailable estimate produces `N/A`. Actual Cash Received means the
+dividend is expected to have been paid according to the official payment date.
+It does not verify actual broker settlement.

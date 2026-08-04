@@ -7,11 +7,13 @@ from typing import Protocol
 from domain import (
     DailySnapshot,
     Dividend,
+    DividendEvent,
     Holding,
     Liability,
     PositionSnapshot,
     PriceQuote,
     Transaction,
+    WatchlistItem,
 )
 
 
@@ -53,6 +55,21 @@ class DividendRepository(Protocol):
     def delete(self, dividend_id: str) -> None: ...
 
 
+class DividendEventRepository(Protocol):
+    """Normalized official dividend-event persistence."""
+
+    def upsert_many(self, events: list[DividendEvent]) -> int: ...
+    def list_filtered(
+        self,
+        *,
+        symbol: str | None = None,
+        market: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        year: int | None = None,
+    ) -> list[DividendEvent]: ...
+
+
 class LiabilityRepository(Protocol):
     """Persistence operations required for liabilities."""
 
@@ -79,6 +96,9 @@ class PriceQuoteRepository(Protocol):
     def upsert_many(self, quotes: list[PriceQuote]) -> None: ...
     def list_by_date(self, trade_date: date) -> list[PriceQuote]: ...
     def get_latest(self, symbol: str, market: str) -> PriceQuote | None: ...
+    def get_latest_on_or_before(
+        self, symbol: str, market: str, trade_date: date
+    ) -> PriceQuote | None: ...
     def get_latest_date(self) -> date | None: ...
     def replace_many_for_date(
         self, trade_date: date, quotes: list[PriceQuote]
@@ -106,6 +126,15 @@ class ReportDeliveryRepository(Protocol):
     def mark_failed(
         self, report_type: str, report_date: date, recipient: str, error: str
     ) -> None: ...
+
+
+class WatchlistRepository(Protocol):
+    """Persistence operations for manually selected watchlist instruments."""
+
+    def list_all(self) -> list[WatchlistItem]: ...
+    def get(self, symbol: str, market: str | None = None) -> WatchlistItem | None: ...
+    def add(self, item: WatchlistItem) -> None: ...
+    def remove(self, symbol: str, market: str | None = None) -> bool: ...
 
 
 class MarketDataUnitOfWork(Protocol):
@@ -136,5 +165,14 @@ class HoldingRebuildUnitOfWork(Protocol):
 
     holdings: HoldingRebuildRepository
     transactions: TransactionLedgerRepository
+
+    def transaction(self) -> AbstractContextManager[None]: ...
+
+
+class BootstrapImportUnitOfWork(Protocol):
+    """Atomic full-ledger replacement and holding rebuild boundary."""
+
+    holdings: HoldingRepository
+    transactions: TransactionRepository
 
     def transaction(self) -> AbstractContextManager[None]: ...

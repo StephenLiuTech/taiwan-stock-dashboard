@@ -1,5 +1,7 @@
 """Smoke tests for application configuration."""
 
+from decimal import Decimal
+
 import pytest
 
 from config.loader import get_settings
@@ -50,3 +52,14 @@ def test_resend_api_key_is_secret_and_not_exposed_in_settings_repr() -> None:
     assert settings.resend_api_key is not None
     assert settings.resend_api_key.get_secret_value() == "re_super-secret"
     assert "re_super-secret" not in repr(settings)
+
+
+def test_modular_report_settings_have_safe_defaults() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.report_show_allocation is True
+    assert settings.report_show_transactions is True
+    assert settings.report_event_horizon_days == 30
+    assert settings.report_dividend_scope == "current_year"
+    assert settings.report_hide_empty_optional_sections is True
+    assert settings.report_news_limit == 5
+    assert settings.risk_single_holding_warning_pct == Decimal("30")

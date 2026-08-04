@@ -1,6 +1,7 @@
 """PostgreSQL implementations of every persisted repository contract."""
 
 from repositories.sqlite import (
+    SQLiteDividendEventRepository,
     SQLiteDividendRepository,
     SQLiteHoldingRepository,
     SQLiteLiabilityRepository,
@@ -9,6 +10,7 @@ from repositories.sqlite import (
     SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
     SQLiteTransactionRepository,
+    SQLiteWatchlistRepository,
 )
 
 
@@ -22,6 +24,10 @@ class PostgreSQLTransactionRepository(SQLiteTransactionRepository):
 
 class PostgreSQLDividendRepository(SQLiteDividendRepository):
     """Persist dividends in PostgreSQL."""
+
+
+class PostgreSQLDividendEventRepository(SQLiteDividendEventRepository):
+    """Persist normalized official dividend events in PostgreSQL."""
 
 
 class PostgreSQLLiabilityRepository(SQLiteLiabilityRepository):
@@ -42,3 +48,7 @@ class PostgreSQLPositionSnapshotRepository(SQLitePositionSnapshotRepository):
 
 class PostgreSQLReportDeliveryRepository(SQLiteReportDeliveryRepository):
     """Persist report-delivery claims and outcomes in PostgreSQL."""
+
+
+class PostgreSQLWatchlistRepository(SQLiteWatchlistRepository):
+    """Persist watchlist instruments in PostgreSQL."""

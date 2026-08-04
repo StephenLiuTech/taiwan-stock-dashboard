@@ -5,7 +5,8 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Protocol
 
-from domain import DailySnapshot, PositionSnapshot
+from domain import DailyReportSections, DailySnapshot, PositionSnapshot
+from pams.application.report_sections import BuildReportSectionsUseCase
 from pams.application.update_portfolio import UpdatePortfolioUseCase
 from repositories import (
     HoldingRepository,
@@ -76,6 +77,7 @@ class DailyEmailReport:
     daily_profit_loss_percentage: Decimal
     history: tuple[DailyEmailHistoryPoint, ...]
     positions: tuple[DailyEmailPosition, ...]
+    sections: DailyReportSections = DailyReportSections()
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,7 @@ class SendDailyReportUseCase:
         sender: str,
         recipient: str,
         asset_store: ReportAssetStore | None = None,
+        section_builder: BuildReportSectionsUseCase | None = None,
     ) -> None:
         self._update_portfolio = update_portfolio
         self._snapshots = snapshots
@@ -171,6 +174,7 @@ class SendDailyReportUseCase:
         self._sender = sender
         self._recipient = recipient
         self._asset_store = asset_store
+        self._section_builder = section_builder
 
     def execute(
         self,
@@ -291,6 +295,15 @@ class SendDailyReportUseCase:
             )
             for item in sorted(persisted, key=lambda value: value.symbol)
         )
+        sections = (
+            self._section_builder.execute(
+                snapshot.snapshot_date,
+                persisted,
+                daily_performance.profit_loss,
+            )
+            if self._section_builder is not None
+            else DailyReportSections()
+        )
         return DailyEmailReport(
             snapshot.snapshot_date,
             verified_source_date,
@@ -305,6 +318,7 @@ class SendDailyReportUseCase:
             daily_performance.return_percentage,
             history,
             positions,
+            sections,
         )
 
     @staticmethod

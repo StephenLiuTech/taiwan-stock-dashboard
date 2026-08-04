@@ -92,6 +92,16 @@ class Transaction(SymbolModel):
         return self
 
 
+class WatchlistItem(SymbolModel):
+    """A manually maintained security of interest without advice semantics."""
+
+    market: Market
+    display_name: str | None = None
+    target_price: NonNegativeDecimal | None = None
+    buy_below_price: NonNegativeDecimal | None = None
+    notes: str | None = None
+
+
 class Dividend(SymbolModel):
     """A declared or received dividend."""
 
@@ -116,6 +126,29 @@ class Dividend(SymbolModel):
             raise ValueError("withholding_tax cannot exceed gross_amount")
         if self.net_amount != self.gross_amount - self.withholding_tax:
             raise ValueError("net_amount must equal gross_amount minus withholding_tax")
+        return self
+
+
+class DividendEvent(SymbolModel):
+    """One normalized official dividend distribution announcement."""
+
+    source_event_id: str = Field(min_length=1)
+    market: Market
+    name: str
+    dividend_year: int
+    ex_dividend_date: date
+    record_date: date | None = None
+    payment_date: date | None = None
+    cash_dividend_per_share: NonNegativeDecimal | None = None
+    stock_dividend_per_share: NonNegativeDecimal | None = None
+    source: str = Field(min_length=1)
+    source_updated_at: datetime | None = None
+    fetched_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_dates(self) -> Self:
+        if self.payment_date and self.payment_date < self.ex_dividend_date:
+            raise ValueError("payment_date cannot precede ex_dividend_date")
         return self
 
 

@@ -2,7 +2,12 @@
 
 from decimal import Decimal
 
-from domain import DailyPortfolioReturn, DailySnapshot, PortfolioAnalytics
+from domain import (
+    DailyPortfolioReturn,
+    DailySnapshot,
+    PortfolioAnalytics,
+    TransactionExpenseSummary,
+)
 
 
 class AnalyticsError(ValueError):
@@ -20,7 +25,11 @@ class DuplicateSnapshotDateError(AnalyticsError):
 class AnalyticsEngine:
     """Calculate deterministic portfolio performance from aggregate snapshots."""
 
-    def analyze(self, snapshots: list[DailySnapshot]) -> PortfolioAnalytics:
+    def analyze(
+        self,
+        snapshots: list[DailySnapshot],
+        expenses: TransactionExpenseSummary | None = None,
+    ) -> PortfolioAnalytics:
         """Return basic performance statistics in chronological order."""
         if not snapshots:
             raise EmptySnapshotHistoryError(
@@ -39,6 +48,7 @@ class AnalyticsEngine:
         ending_value = values[-1]
         absolute_profit_loss = ending_value - starting_value
         total_return = self._return(absolute_profit_loss, starting_value)
+        total_expenses = expenses.total_trading_expenses if expenses else Decimal("0")
 
         daily_returns = tuple(
             DailyPortfolioReturn(
@@ -77,6 +87,14 @@ class AnalyticsEngine:
             trough_value=min(values),
             max_drawdown=max_drawdown,
             snapshot_count=len(ordered),
+            total_buy_fees=expenses.total_buy_fees if expenses else Decimal("0"),
+            total_sell_fees=expenses.total_sell_fees if expenses else Decimal("0"),
+            total_taxes=expenses.total_taxes if expenses else Decimal("0"),
+            total_trading_expenses=total_expenses,
+            net_investment_return_before_expenses=total_return,
+            net_investment_return_after_expenses=self._return(
+                absolute_profit_loss - total_expenses, starting_value
+            ),
         )
 
     @staticmethod

@@ -61,5 +61,9 @@ class RebuildHoldingsUseCase:
                 for item in projected
             ),
             total_realized_pnl=ledger.total_realized_pnl,
+            total_buy_fees=ledger.total_buy_fees,
+            total_sell_fees=ledger.total_sell_fees,
+            total_taxes=ledger.total_taxes,
+            total_trading_expenses=ledger.total_trading_expenses,
             transaction_count=len(transactions),
         )

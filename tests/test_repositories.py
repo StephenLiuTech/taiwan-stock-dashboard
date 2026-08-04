@@ -14,6 +14,7 @@ from domain import (
     Liability,
     LiabilityType,
     Market,
+    PriceQuote,
     Transaction,
     TransactionType,
 )
@@ -21,6 +22,7 @@ from repositories import (
     SQLiteDividendRepository,
     SQLiteHoldingRepository,
     SQLiteLiabilityRepository,
+    SQLitePriceQuoteRepository,
     SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
     SQLiteTransactionRepository,
@@ -121,6 +123,34 @@ def test_transaction_repository_uses_same_day_buy_before_sell_order(
     assert TransactionEngine().build_ledger(
         persisted
     ) == TransactionEngine().build_ledger(list(reversed(persisted)))
+
+
+def test_quote_repository_gets_latest_on_or_before_cutoff(
+    connection: sqlite3.Connection,
+) -> None:
+    repository = SQLitePriceQuoteRepository(connection)
+    repository.upsert_many(
+        [
+            PriceQuote(
+                symbol="2330",
+                market=Market.TWSE,
+                trade_date=trade_date,
+                close_price=price,
+                currency=Currency.TWD,
+                source="test",
+            )
+            for trade_date, price in (
+                (date(2026, 7, 1), Decimal("90")),
+                (date(2026, 7, 10), Decimal("120")),
+            )
+        ]
+    )
+
+    quote = repository.get_latest_on_or_before("2330", "TWSE", date(2026, 7, 5))
+    assert quote is not None
+    assert quote.trade_date == date(2026, 7, 1)
+    assert quote.close_price == Decimal("90")
+    assert repository.get_latest_on_or_before("2330", "TWSE", date(2026, 6, 30)) is None
 
 
 def test_transaction_delete(connection: sqlite3.Connection) -> None:

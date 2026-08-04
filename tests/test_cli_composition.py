@@ -424,7 +424,7 @@ def test_operational_status_reports_database_state(tmp_path: Path) -> None:
         assert status.latest_position_snapshot == date(2026, 7, 22)
         assert status.holdings_count == 5
         assert status.liabilities_count == 2
-        assert status.schema_version == 4
+        assert status.schema_version == 6
         assert status.database_size_bytes > 0
 
 

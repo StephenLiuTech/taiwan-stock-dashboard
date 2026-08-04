@@ -38,7 +38,9 @@ def test_schema_initialization_creates_market_data_version(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-    assert version[0] == 4
+    assert version[0] == 6
+    assert "watchlist" in tables
+    assert "dividend_events" in tables
     assert {
         "price_quotes",
         "daily_snapshots",

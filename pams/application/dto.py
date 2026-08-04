@@ -229,6 +229,10 @@ class RebuildHoldingsResult:
     positions: tuple[LedgerPositionResult, ...]
     projected_holdings: tuple[ProjectedHoldingResult, ...]
     total_realized_pnl: Decimal
+    total_buy_fees: Decimal
+    total_sell_fees: Decimal
+    total_taxes: Decimal
+    total_trading_expenses: Decimal
     transaction_count: int
     persisted: bool = False
 
@@ -329,6 +333,7 @@ class HoldingQueryItem:
     transaction_count: int
     first_trade_date: date
     latest_trade_date: date
+    quote_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -337,3 +342,4 @@ class HoldingsQueryResult:
 
     valuation_date: date | None
     holdings: tuple[HoldingQueryItem, ...]
+    as_of_date: date | None = None

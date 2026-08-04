@@ -1,5 +1,28 @@
 # PAMS
 
+PAMS follows the broker portfolio cost convention. Trading fees and taxes are
+tracked separately as investment expenses. Holding average cost and total cost
+use executed quantity and price only; sell fees and taxes reduce realized
+profit but never alter the remaining holding average cost.
+
+The one-time broker-statement reconciliation is read-only unless a separately
+reviewed apply workflow is introduced:
+
+```bash
+python -m pams transaction bootstrap-import --dry-run
+```
+
+After reviewing a passing reconciliation, apply it interactively with:
+
+```bash
+python -m pams transaction bootstrap-import --apply
+```
+
+Automation may use `--apply --yes`. Apply replaces the reconciled 2026 ledger,
+rebuilds holdings, and verifies the persisted result in one transaction. Any
+failure rolls back the entire operation; rerunning an identical import is a
+successful no-op.
+
 **Personal Asset Management System for Taiwan-listed portfolios.**
 
 PAMS is a local-first Python application for recording transactions, projecting
@@ -26,6 +49,8 @@ Current release: **v1.0.0**
 - Operational `status`, `verify`, dry-run, and JSON CLI modes
 - Resend delivery for personal installations; Microsoft Graph for enterprises
 - Isolated synthetic demo-data workflow
+- Modular daily-report sections for allocation, events, dividends, news,
+  deterministic insights, risk facts, watchlist, and transactions
 
 ## Product flow
 
@@ -114,6 +139,70 @@ PAMS_APP_TITLE=PAMS
 
 Environment variables override `.env`. The default database path is
 `data/pams.db`; local databases are ignored by Git.
+
+### Modular daily-report sections
+
+The email report keeps Summary, Trend, Contributors, and Holdings as its core.
+After Holdings it renders, in a stable order, Allocation, Market Snapshot,
+Upcoming Events, Dividend Calendar, AI News, Semiconductor News, Insights,
+Risk Monitor, Watchlist, and the report-date Transaction Summary. Each section
+can be switched independently with `PAMS_REPORT_SHOW_*`; the event horizon and
+news limit default to 30 days and five items. The Dividend Calendar defaults to
+the report's full calendar year with
+`PAMS_REPORT_DIVIDEND_SCOPE=current_year`; `next_90_days` and `all` are also
+supported. The deprecated `PAMS_REPORT_DIVIDEND_HORIZON_DAYS` is ignored; when
+the new setting is absent, `current_year` remains the default. Risk warnings default to 30% for
+one holding, 70% for the top three, and 80% for one market.
+
+Allocation, insights, risk, persisted/manual dividends, watchlist, and
+transactions use existing PAMS repositories and calculations. Market indices,
+earnings/economic events, and news require a configured provider. PAMS never
+substitutes invented values: an unavailable optional provider yields a compact
+unavailable state and does not prevent the core report from being delivered.
+Sector allocation is intentionally unavailable until a classification provider
+is configured.
+
+Watchlist entries are informational and are not recommendations:
+
+```bash
+python -m pams watchlist add 2330 --market TWSE --display-name TSMC
+python -m pams watchlist list
+python -m pams watchlist show 2330
+python -m pams watchlist remove 2330
+```
+
+Official dividend announcements for active holdings can be refreshed and
+inspected independently:
+
+```bash
+python -m pams dividend update
+python -m pams dividend update --market TWSE --from 2026-07-01 --to 2026-12-31
+python -m pams dividend list                         # current calendar year
+python -m pams dividend list --scope next_90_days
+python -m pams dividend list --scope all
+python -m pams dividend list --from 2026-07-01 --to 2026-12-31
+python -m pams dividend show 0050 --year 2026
+```
+
+PAMS reads official TWSE `exchangeReport/TWT48U_ALL` and `TWT49U` datasets and
+TPEx `tpex_exright_prepost` and `bulletin/exDailyQ` datasets. Cash payment dates
+are enriched only from the official MOPS company dividend announcement report
+`https://mopsov.twse.com.tw/mops/web/ajax_t108sb27`. Matching requires one
+unique event with the same market, normalized symbol, and ex-dividend date;
+symbol/year-only matching is never used.
+
+Refreshes use the shared bounded retry transport and upsert one row per
+deterministic event key. Existing events and known payment dates survive refresh
+failures. If MOPS has no safely joinable payment date, including many ETF
+distributions, the value remains `N/A` and is never inferred.
+Report eligibility uses transactions whose `trade_date` is before the
+ex-dividend date; `settlement_date` is not used. Calendar amounts are estimates,
+not confirmed deposits. `Paid` means only that the official payment date has
+passed, not that a bank receipt was verified. `Actual Cash Received` is derived
+as the estimated dividend once its official payment date has passed; otherwise
+it is zero (or `N/A` when the estimate is unavailable). Actual Cash Received
+means the dividend is expected to have been paid according to the official
+payment date. It does not verify actual broker settlement.
 
 The database backend is selected automatically:
 
@@ -314,6 +403,8 @@ python -m pams transaction add --id tx-001 --symbol 2330 --market TWSE \
 python -m pams transaction list --symbol 2330 --json
 python -m pams holdings list
 python -m pams holdings show 2330
+python -m pams holdings list --as-of 2026-07-31
+python -m pams holdings show 2330 --as-of 2026-07-31
 python -m pams holdings rebuild
 python -m pams holdings rebuild --apply --allow-unmatched
 ```
@@ -340,6 +431,14 @@ input. True intraday ordering would require a future explicit sequence or
 timestamp field. Oversells are rejected because short positions are
 unsupported. If an active holding has no latest quote, quantity and cost remain
 visible while market-dependent fields are displayed as `N/A`.
+
+`--as-of` is an inclusive historical cutoff based only on `trade_date`.
+Transactions after the requested date are excluded, and historical valuation
+uses the latest persisted quote on or before that date. A later quote is never
+substituted. When no eligible quote exists, quantity and cost remain available
+while market fields and quote date render as `N/A`. The same day-level
+BUY-before-SELL policy applies at the cutoff; true intraday chronology remains
+unsupported.
 
 Holding rebuild is preview-only by default. Applying requires an explicit flag
 and preserves historical snapshots.

@@ -18,7 +18,7 @@ def transaction(
     *,
     transaction_type: TransactionType = TransactionType.BUY,
     trade_date: date = date(2026, 7, 1),
-    settlement_date: date = date(2026, 7, 3),
+    settlement_date: date | None = None,
     quantity: str = "1",
     price: str = "80",
 ) -> Transaction:
@@ -28,7 +28,7 @@ def transaction(
         market=Market.TWSE,
         transaction_type=transaction_type,
         trade_date=trade_date,
-        settlement_date=settlement_date,
+        settlement_date=settlement_date or trade_date,
         quantity=Decimal(quantity),
         price=Decimal(price),
         currency=Currency.TWD,
@@ -41,6 +41,21 @@ class TransactionRepository:
 
     def list_all(self) -> list[Transaction]:
         return list(self.values)
+
+    def list_filtered(
+        self,
+        *,
+        symbol: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[Transaction]:
+        return [
+            item
+            for item in self.values
+            if (symbol is None or item.symbol == symbol)
+            and (start_date is None or item.trade_date >= start_date)
+            and (end_date is None or item.trade_date <= end_date)
+        ]
 
 
 class HoldingRepository:
@@ -70,11 +85,59 @@ class QuoteRepository:
             source="test",
         )
 
+    def get_latest_on_or_before(
+        self, symbol: str, market: str, trade_date: date
+    ) -> PriceQuote | None:
+        quote = self.get_latest(symbol, market)
+        return quote if quote is not None and quote.trade_date <= trade_date else None
+
 
 class MissingQuoteRepository:
     def get_latest(self, symbol: str, market: str) -> None:
         del symbol, market
         return None
+
+    def get_latest_on_or_before(
+        self, symbol: str, market: str, trade_date: date
+    ) -> None:
+        del symbol, market, trade_date
+        return None
+
+
+class HistoricalQuoteRepository:
+    def __init__(self, values: list[PriceQuote]) -> None:
+        self.values = values
+
+    def get_latest(self, symbol: str, market: str) -> PriceQuote | None:
+        matches = [
+            item
+            for item in self.values
+            if item.symbol == symbol and item.market.value == market
+        ]
+        return max(matches, key=lambda item: item.trade_date, default=None)
+
+    def get_latest_on_or_before(
+        self, symbol: str, market: str, trade_date: date
+    ) -> PriceQuote | None:
+        matches = [
+            item
+            for item in self.values
+            if item.symbol == symbol
+            and item.market.value == market
+            and item.trade_date <= trade_date
+        ]
+        return max(matches, key=lambda item: item.trade_date, default=None)
+
+
+def quote(trade_date: date, close: str) -> PriceQuote:
+    return PriceQuote(
+        symbol="2330",
+        market=Market.TWSE,
+        trade_date=trade_date,
+        close_price=Decimal(close),
+        currency=Currency.TWD,
+        source="test",
+    )
 
 
 def use_case(values: list[Transaction]) -> QueryHoldingsUseCase:
@@ -199,3 +262,104 @@ def test_invalid_sell_history_is_a_typed_holding_query_error(
 ) -> None:
     with pytest.raises(InvalidHoldingHistoryError, match=message):
         use_case(transactions).execute()
+
+
+def test_as_of_excludes_later_transactions_and_preserves_current_query() -> None:
+    query = use_case(
+        [
+            transaction("a-buy", trade_date=date(2026, 7, 1), quantity="2"),
+            transaction("b-buy", trade_date=date(2026, 7, 10), quantity="3"),
+        ]
+    )
+    assert query.execute().holdings[0].quantity == Decimal("5")
+    historical = query.execute(as_of_date=date(2026, 7, 5))
+    assert historical.as_of_date == date(2026, 7, 5)
+    assert historical.holdings[0].quantity == Decimal("2")
+
+
+def test_position_opened_after_as_of_is_historically_missing() -> None:
+    query = use_case([transaction("buy", trade_date=date(2026, 7, 10))])
+    assert query.execute(as_of_date=date(2026, 7, 5)).holdings == ()
+    with pytest.raises(HoldingNotFoundError, match="No active"):
+        query.execute("2330", as_of_date=date(2026, 7, 5))
+
+
+def test_position_closure_is_effective_inclusively_on_trade_date() -> None:
+    query = use_case(
+        [
+            transaction("z-buy", trade_date=date(2026, 7, 1), quantity="2"),
+            transaction(
+                "a-sell",
+                transaction_type=TransactionType.SELL,
+                trade_date=date(2026, 7, 5),
+                settlement_date=date(2026, 7, 10),
+                quantity="2",
+            ),
+        ]
+    )
+    assert query.execute(as_of_date=date(2026, 7, 4)).holdings[0].quantity == Decimal(
+        "2"
+    )
+    assert query.execute(as_of_date=date(2026, 7, 5)).holdings == ()
+
+
+def test_same_day_buy_before_sell_is_preserved_at_cutoff() -> None:
+    query = use_case(
+        [
+            transaction(
+                "a-sell",
+                transaction_type=TransactionType.SELL,
+                trade_date=date(2026, 7, 5),
+                quantity="1",
+            ),
+            transaction("z-buy", trade_date=date(2026, 7, 5), quantity="2"),
+        ]
+    )
+    assert query.execute(as_of_date=date(2026, 7, 5)).holdings[0].quantity == Decimal(
+        "1"
+    )
+
+
+def test_historical_query_uses_latest_quote_not_after_cutoff() -> None:
+    query = QueryHoldingsUseCase(
+        TransactionRepository([transaction("buy", quantity="2")]),  # type: ignore[arg-type]
+        HoldingRepository(),  # type: ignore[arg-type]
+        HistoricalQuoteRepository(
+            [quote(date(2026, 7, 3), "90"), quote(date(2026, 7, 10), "120")]
+        ),  # type: ignore[arg-type]
+    )
+    result = query.execute(as_of_date=date(2026, 7, 5))
+    assert result.valuation_date == date(2026, 7, 3)
+    assert result.holdings[0].latest_price == Decimal("90")
+    assert result.holdings[0].quote_date == date(2026, 7, 3)
+
+
+def test_no_quote_before_cutoff_keeps_historical_cost_only() -> None:
+    query = QueryHoldingsUseCase(
+        TransactionRepository([transaction("buy", quantity="2")]),  # type: ignore[arg-type]
+        HoldingRepository(),  # type: ignore[arg-type]
+        HistoricalQuoteRepository([quote(date(2026, 7, 10), "120")]),  # type: ignore[arg-type]
+    )
+    result = query.execute(as_of_date=date(2026, 7, 5))
+    item = result.holdings[0]
+    assert result.valuation_date is None
+    assert item.total_cost == Decimal("160")
+    assert item.latest_price is None
+    assert item.market_value is None
+    assert item.quote_date is None
+
+
+def test_as_of_excludes_later_buy_and_preserves_cross_date_oversell() -> None:
+    query = use_case(
+        [
+            transaction(
+                "a-sell",
+                transaction_type=TransactionType.SELL,
+                trade_date=date(2026, 7, 2),
+                quantity="1",
+            ),
+            transaction("b-buy", trade_date=date(2026, 7, 3), quantity="2"),
+        ]
+    )
+    with pytest.raises(InvalidHoldingHistoryError, match="SELL before BUY"):
+        query.execute(as_of_date=date(2026, 7, 2))

@@ -22,6 +22,18 @@ from market_calendar import (
     OfficialHistoricalMarketDateProvider,
     OfficialMarketDateProvider,
 )
+from market_data.dividend_payments import (
+    MOPSDividendPaymentProvider,
+    OfficialDividendPaymentProvider,
+)
+from market_data.dividends import (
+    CompositeDividendSource,
+    OfficialDividendProvider,
+    TPExDividendProvider,
+    TPExHistoricalDividendProvider,
+    TWSEDividendProvider,
+    TWSEHistoricalDividendProvider,
+)
 from market_data.engine import MarketDataEngine
 from market_data.providers import (
     HistoricalTPExProvider,
@@ -30,22 +42,31 @@ from market_data.providers import (
     TPExProvider,
     TWSEProvider,
 )
-from market_data.transport import UrllibJSONDocumentTransport, UrllibJSONTransport
+from market_data.transport import (
+    UrllibJSONDocumentTransport,
+    UrllibJSONTransport,
+    UrllibTextFormTransport,
+)
 from pams.application import (
     AddTransactionUseCase,
     AnalyzePortfolioUseCase,
     ApplyRebuiltHoldingsUseCase,
     AuthorizeMicrosoftEmailUseCase,
+    BootstrapImportUseCase,
+    BuildReportSectionsUseCase,
     DemoDataUseCase,
+    DividendEventUseCase,
     ListTransactionsUseCase,
     MigrateDatabaseUseCase,
     PortfolioHistoryUseCase,
     PortfolioStatusUseCase,
     QueryHoldingsUseCase,
+    ReportSectionSettings,
     SendDailyReportUseCase,
     UpdatePortfolioUseCase,
     ValuatePortfolioUseCase,
     VerifySystemUseCase,
+    WatchlistUseCase,
 )
 from pams.application.send_daily_report import EmailEnvelope
 from pams.delivery import (
@@ -84,6 +105,9 @@ class ApplicationContext:
     valuate_portfolio: ValuatePortfolioUseCase | None = None
     analyze_portfolio: AnalyzePortfolioUseCase | None = None
     send_daily_report: SendDailyReportUseCase | None = None
+    watchlist: WatchlistUseCase | None = None
+    dividend_events: DividendEventUseCase | None = None
+    bootstrap_import: BootstrapImportUseCase | None = None
 
 
 class _DryRunEmailTransport:
@@ -116,6 +140,30 @@ def compose_database_migration() -> MigrateDatabaseUseCase:
     if not settings.migration_source_url:
         raise ValueError("PAMS_MIGRATION_SOURCE_URL is required for database migration")
     return MigrateDatabaseUseCase(settings.migration_source_url, settings.database_url)
+
+
+@contextmanager
+def compose_bootstrap_import(
+    database_override: Path | None = None,
+) -> Iterator[BootstrapImportUseCase]:
+    """Compose broker reconciliation without schema or portfolio writes."""
+    settings = get_settings()
+    database_url = database_url_for_override(database_override, settings.database_url)
+    database = open_database(database_url)
+    if not database.exists():
+        raise ValueError(f"Database does not exist: {database.location}")
+    connection = database.connection
+    try:
+        repositories = create_repositories(database.backend, connection)
+        yield BootstrapImportUseCase(
+            repositories.holdings,
+            repositories.transactions,
+            TransactionEngine(),
+            repositories.holding_rebuild_uow,
+            database.display_url,
+        )
+    finally:
+        connection.close()
 
 
 @contextmanager
@@ -229,6 +277,36 @@ def compose_daily_report(
             sender,
             recipient,
             asset_store,
+            BuildReportSectionsUseCase(
+                context.repositories.holdings,
+                context.repositories.transactions,
+                context.repositories.dividend_events,
+                context.repositories.price_quotes,
+                context.repositories.watchlist,
+                ReportSectionSettings(
+                    show_allocation=settings.report_show_allocation,
+                    show_market_snapshot=settings.report_show_market_snapshot,
+                    show_upcoming_events=settings.report_show_upcoming_events,
+                    show_dividends=settings.report_show_dividends,
+                    show_ai_news=settings.report_show_ai_news,
+                    show_semiconductor_news=settings.report_show_semiconductor_news,
+                    show_insights=settings.report_show_insights,
+                    show_risk=settings.report_show_risk,
+                    show_watchlist=settings.report_show_watchlist,
+                    show_transactions=settings.report_show_transactions,
+                    event_horizon_days=settings.report_event_horizon_days,
+                    dividend_scope=settings.report_dividend_scope,
+                    hide_empty_optional_sections=(
+                        settings.report_hide_empty_optional_sections
+                    ),
+                    news_limit=settings.report_news_limit,
+                    risk_single_holding_warning=(
+                        settings.risk_single_holding_warning_pct / 100
+                    ),
+                    risk_top3_warning=settings.risk_top3_warning_pct / 100,
+                    risk_market_warning=settings.risk_market_warning_pct / 100,
+                ),
+            ),
         )
         yield replace(context, send_daily_report=use_case)
 
@@ -417,6 +495,37 @@ def _compose(
             liabilities,
             repositories.market_data_uow,
         )
+        dividend_provider = OfficialDividendProvider(
+            CompositeDividendSource(
+                TWSEDividendProvider(latest_transport(Market.TWSE)),
+                TWSEHistoricalDividendProvider(
+                    UrllibJSONDocumentTransport(
+                        timeout_seconds=settings.market_http_timeout_seconds,
+                        attempts=settings.market_http_attempts,
+                        provider_name="TWSE dividends",
+                    )
+                ),
+            ),
+            CompositeDividendSource(
+                TPExDividendProvider(latest_transport(Market.TPEX)),
+                TPExHistoricalDividendProvider(
+                    UrllibJSONDocumentTransport(
+                        timeout_seconds=settings.market_http_timeout_seconds,
+                        attempts=settings.market_http_attempts,
+                        provider_name="TPEx dividends",
+                    )
+                ),
+            ),
+        )
+        payment_transport = UrllibTextFormTransport(
+            timeout_seconds=settings.market_http_timeout_seconds,
+            attempts=settings.market_http_attempts,
+            provider_name="MOPS dividend payments",
+        )
+        dividend_payment_provider = OfficialDividendPaymentProvider(
+            MOPSDividendPaymentProvider(Market.TWSE, payment_transport),
+            MOPSDividendPaymentProvider(Market.TPEX, payment_transport),
+        )
         if using_default_providers:
             date_providers = (
                 OfficialHistoricalMarketDateProvider(Market.TWSE, historical_twse),
@@ -504,7 +613,21 @@ def _compose(
                 transaction_engine,
             ),
             valuate_portfolio=valuate_portfolio,
-            analyze_portfolio=AnalyzePortfolioUseCase(snapshots),
+            analyze_portfolio=AnalyzePortfolioUseCase(
+                snapshots,
+                transactions=transaction_repository,
+                transaction_engine=transaction_engine,
+            ),
+            watchlist=WatchlistUseCase(repositories.watchlist, quotes),
+            dividend_events=DividendEventUseCase(
+                dividend_provider,
+                repositories.dividend_events,
+                holdings,
+                dividend_payment_provider,
+            ),
+            bootstrap_import=BootstrapImportUseCase(
+                holdings, transaction_repository, transaction_engine
+            ),
         )
     finally:
         connection.close()

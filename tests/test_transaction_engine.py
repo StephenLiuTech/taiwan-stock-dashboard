@@ -53,15 +53,17 @@ def transaction(
     )
 
 
-def test_one_buy_and_buy_fees_are_included_in_cost() -> None:
+def test_one_buy_tracks_fee_without_increasing_broker_cost() -> None:
     ledger = TransactionEngine().build_ledger(
         [transaction("buy-1", TransactionType.BUY, "100", "50", fees="10")]
     )
     position = ledger.positions[0]
     assert position.quantity == Decimal("100")
-    assert position.cost_basis == Decimal("5010")
-    assert position.average_cost == Decimal("50.1")
+    assert position.cost_basis == Decimal("5000")
+    assert position.average_cost == Decimal("50")
     assert position.realized_pnl == Decimal("0")
+    assert ledger.total_buy_fees == Decimal("10")
+    assert ledger.total_trading_expenses == Decimal("10")
 
 
 def test_multiple_buys_use_exact_weighted_average() -> None:
@@ -167,10 +169,14 @@ def test_partial_sell_keeps_average_cost_and_deducts_fees_and_tax() -> None:
     )
     position = ledger.positions[0]
     assert position.quantity == Decimal("60")
-    assert position.average_cost == Decimal("50.1")
-    assert position.cost_basis == Decimal("3006")
-    assert position.realized_pnl == Decimal("376")
-    assert ledger.total_realized_pnl == Decimal("376")
+    assert position.average_cost == Decimal("50")
+    assert position.cost_basis == Decimal("3000")
+    assert position.realized_pnl == Decimal("380")
+    assert ledger.total_realized_pnl == Decimal("380")
+    assert ledger.total_buy_fees == Decimal("10")
+    assert ledger.total_sell_fees == Decimal("5")
+    assert ledger.total_taxes == Decimal("15")
+    assert ledger.total_trading_expenses == Decimal("30")
 
 
 def test_full_liquidation_is_excluded_but_realized_pnl_is_retained() -> None:
@@ -397,8 +403,8 @@ def test_decimal_precision_is_not_quantized_or_converted_to_float() -> None:
         [transaction("precise", TransactionType.BUY, "3", "0.123456789", fees="0.01")]
     )
     position = ledger.positions[0]
-    assert position.cost_basis == Decimal("0.380370367")
-    assert position.average_cost == Decimal("0.380370367") / Decimal("3")
+    assert position.cost_basis == Decimal("0.370370367")
+    assert position.average_cost == Decimal("0.123456789")
     assert isinstance(position.average_cost, Decimal)
 
 
@@ -472,7 +478,11 @@ def test_application_use_case_returns_immutable_dto_without_writes() -> None:
     ).execute()
     assert result.transaction_count == 1
     assert result.persisted is False
-    assert result.positions[0].cost_basis == Decimal("101")
-    assert result.projected_holdings[0].average_cost == Decimal("20.2")
+    assert result.positions[0].cost_basis == Decimal("100")
+    assert result.projected_holdings[0].average_cost == Decimal("20")
+    assert result.total_buy_fees == Decimal("1")
+    assert result.total_sell_fees == Decimal("0")
+    assert result.total_taxes == Decimal("0")
+    assert result.total_trading_expenses == Decimal("1")
     assert transactions.write_calls == 0
     assert holdings.write_calls == 0
