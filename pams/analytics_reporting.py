@@ -122,6 +122,16 @@ def format_portfolio_analytics(
                 "trough_value": analytics.trough_value,
                 "max_drawdown": analytics.max_drawdown,
                 "snapshot_count": analytics.snapshot_count,
+                "total_buy_fees": analytics.total_buy_fees,
+                "total_sell_fees": analytics.total_sell_fees,
+                "total_taxes": analytics.total_taxes,
+                "total_trading_expenses": analytics.total_trading_expenses,
+                "net_investment_return_before_expenses": (
+                    analytics.net_investment_return_before_expenses
+                ),
+                "net_investment_return_after_expenses": (
+                    analytics.net_investment_return_after_expenses
+                ),
             },
             default=_json_default,
             ensure_ascii=True,
@@ -139,6 +149,14 @@ def format_portfolio_analytics(
         f"Peak Value: {_money(analytics.peak_value)}",
         f"Trough Value: {_money(analytics.trough_value)}",
         f"Maximum Drawdown: {_percentage(analytics.max_drawdown)}",
+        f"Total Buy Fees: {_money(analytics.total_buy_fees)}",
+        f"Total Sell Fees: {_money(analytics.total_sell_fees)}",
+        f"Total Taxes: {_money(analytics.total_taxes)}",
+        f"Total Trading Expenses: {_money(analytics.total_trading_expenses)}",
+        "Net Investment Return (before expenses): "
+        f"{_percentage(analytics.net_investment_return_before_expenses)}",
+        "Net Investment Return (after expenses): "
+        f"{_percentage(analytics.net_investment_return_after_expenses)}",
         "",
         "Daily Returns:",
     ]

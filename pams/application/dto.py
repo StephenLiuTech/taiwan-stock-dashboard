@@ -229,6 +229,10 @@ class RebuildHoldingsResult:
     positions: tuple[LedgerPositionResult, ...]
     projected_holdings: tuple[ProjectedHoldingResult, ...]
     total_realized_pnl: Decimal
+    total_buy_fees: Decimal
+    total_sell_fees: Decimal
+    total_taxes: Decimal
+    total_trading_expenses: Decimal
     transaction_count: int
     persisted: bool = False
 

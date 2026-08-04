@@ -7,6 +7,7 @@ from pams.reporting.builder import (
 )
 from pams.reporting.html import HtmlReportRenderer
 from pams.reporting.legacy import (
+    format_bootstrap_import_preview,
     format_decimal,
     format_demo_data_report,
     format_holding_change_plan,
@@ -32,6 +33,7 @@ __all__ = [
     "PortfolioReportSummary",
     "format_decimal",
     "format_demo_data_report",
+    "format_bootstrap_import_preview",
     "format_holding_change_plan",
     "format_holding_change_plan_json",
     "format_holding_detail",

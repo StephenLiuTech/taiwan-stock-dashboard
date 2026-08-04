@@ -10,10 +10,12 @@ MIGRATION_TABLES = (
     "liabilities",
     "transactions",
     "dividends",
+    "dividend_events",
     "price_quotes",
     "daily_snapshots",
     "position_snapshots",
     "report_deliveries",
+    "watchlist",
     "schema_version",
 )
 

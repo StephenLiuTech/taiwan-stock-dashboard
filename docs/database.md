@@ -6,6 +6,8 @@
 - `holdings`: identity, symbol/name, market/currency, quantity, average cost, type, pledge state, notes, timestamps.
 - `transactions`: identity, security, type, trade/settlement dates, quantity, price, fees, taxes, currency, notes.
 - `dividends`: identity, security, ex/payment dates, per-share and total amounts, tax, status.
+- `dividend_events`: normalized official distribution grain with nullable record
+  and payment dates; payment enrichment updates the same deterministic event.
 - `liabilities`: identity, type, principal, optional decimal-fraction interest rate, currency, dates, collateral, notes.
 - `price_quotes`: normalized TWSE/TPEx close and previous-close values by symbol, market, and trading date.
 - `daily_snapshots`: aggregate grain; exactly one portfolio totals row per date.
@@ -26,6 +28,11 @@ Version 2 adds normalized quotes and holding-grain position snapshots while pres
 Version 3 adds the nullable pre-calculated `daily_return` field to position snapshots for reporting without duplicating valuation logic.
 
 Version 4 adds idempotent daily-report delivery state.
+
+Version 6 adds `dividend_events`. Its existing nullable `payment_date` column is
+used for official MOPS enrichment, so payment-date support requires no schema
+version change or data rewrite. Upserts never replace a known payment date with
+an unavailable value.
 
 ## Transaction-derived holding rebuilds
 

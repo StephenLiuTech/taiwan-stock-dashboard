@@ -153,3 +153,11 @@ notifications are not part of v1.0.0.
   explicit settlement metadata
 - Transaction-derived holdings list/detail CLI queries reuse shared valuation
 - Inclusive historical holdings queries with cutoff-safe persisted quotes
+- Modular post-Holdings daily-report sections with immutable DTOs and
+  independently configurable rendering
+- Persistent SQLite/PostgreSQL watchlist with CLI management
+- Optional provider boundaries for market context, events, and news; production
+  providers remain future integrations
+- Official TWSE/TPEx stock and ETF dividend-event ingestion, persistence, CLI,
+  MOPS payment-date enrichment, and transaction-derived current-year calendar
+- Non-persisted expected-payment cash indicator and annual dividend summary

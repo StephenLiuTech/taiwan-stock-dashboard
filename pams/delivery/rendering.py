@@ -14,6 +14,13 @@ from pams.application.send_daily_report import (
     InlineImage,
     RenderedEmail,
 )
+from pams.delivery.html_styles import (
+    NEUTRAL_COLOR,
+    TAIWAN_GAIN_COLOR,
+    TAIWAN_LOSS_COLOR,
+    taiwan_performance_color,
+)
+from pams.delivery.sections import DailyReportSectionRenderer
 
 CHART_CONTENT_ID = "pams-asset-change-chart"
 CHART_FILENAME = "pams-30-day-asset-change.png"
@@ -21,9 +28,8 @@ CHART_FALLBACK = (
     "Only one portfolio snapshot is available; "
     "a trend chart requires at least two snapshots."
 )
-POSITIVE_COLOR = "#15803d"
-NEGATIVE_COLOR = "#b91c1c"
-NEUTRAL_COLOR = "#6b7280"
+POSITIVE_COLOR = TAIWAN_GAIN_COLOR
+NEGATIVE_COLOR = TAIWAN_LOSS_COLOR
 
 
 def _money(value: Decimal, *, signed: bool = False) -> str:
@@ -56,11 +62,7 @@ def _percent(value: Decimal | None, *, signed: bool = False) -> str:
 
 
 def _tone(value: Decimal) -> str:
-    if value > 0:
-        return POSITIVE_COLOR
-    if value < 0:
-        return NEGATIVE_COLOR
-    return NEUTRAL_COLOR
+    return taiwan_performance_color(value)
 
 
 def _history_text(history: tuple[DailyEmailHistoryPoint, ...]) -> list[str]:
@@ -261,6 +263,24 @@ def _summary_card(label: str, value: str, *, color: str = "#111827") -> str:
     )
 
 
+def _expected_dividend_card(estimated: Decimal, received: Decimal) -> str:
+    remaining = estimated - received
+    return (
+        '<td colspan="3" style="padding:12px;border:1px solid #e5e7eb;'
+        'background:#f9fafb;vertical-align:top">'
+        '<div style="font-size:12px;color:#6b7280">Expected Annual Dividend</div>'
+        '<table role="presentation" style="width:100%;border-collapse:collapse;'
+        'margin-top:6px"><tr>'
+        f'<td style="padding:2px 8px 2px 0;color:#111827">Estimated<br>'
+        f"<strong>{escape(_whole_money(estimated))}</strong></td>"
+        f'<td style="padding:2px 8px;color:#111827">Already Received<br>'
+        f"<strong>{escape(_whole_money(received))}</strong></td>"
+        f'<td style="padding:2px 0 2px 8px;color:#111827">Remaining<br>'
+        f"<strong>{escape(_whole_money(remaining))}</strong></td>"
+        "</tr></table></td>"
+    )
+
+
 class DailyEmailReportRenderer:
     """Render persisted daily portfolio facts into multipart email content."""
 
@@ -270,6 +290,18 @@ class DailyEmailReportRenderer:
         """Return deterministic plain text, HTML, subject, and inline chart."""
         subject = f"PAMS Daily Portfolio Report - {report.report_date}"
         contributors = _ranked_contributors(report.positions)
+        dividend_summary = report.sections.dividend_calendar
+        expected_dividend_text = (
+            [
+                "Expected Annual Dividend",
+                f"Estimated: {_whole_money(dividend_summary.estimated_annual_dividend)}",
+                f"Already Received: {_whole_money(dividend_summary.already_received)}",
+                "Remaining: "
+                f"{_whole_money(dividend_summary.estimated_annual_dividend - dividend_summary.already_received)}",
+            ]
+            if dividend_summary is not None and dividend_summary.items
+            else []
+        )
         text_lines = [
             "PAMS Daily Portfolio Report",
             f"Report date: {report.report_date}",
@@ -291,6 +323,7 @@ class DailyEmailReportRenderer:
             f"Liabilities: {_money(report.total_liabilities)}",
             f"Liability ratio: {_percent(report.liability_ratio)}",
             f"Position count: {len(report.positions)}",
+            *expected_dividend_text,
             "",
             "30-Day Asset Change",
             *_history_text(report.history),
@@ -502,6 +535,16 @@ class DailyEmailReportRenderer:
             + _summary_card("Position count", str(len(report.positions)))
             + '<td style="width:33%"></td><td style="width:33%"></td>'
             + "</tr>"
+            + (
+                "<tr>"
+                + _expected_dividend_card(
+                    dividend_summary.estimated_annual_dividend,
+                    dividend_summary.already_received,
+                )
+                + "</tr>"
+                if dividend_summary is not None and dividend_summary.items
+                else ""
+            )
         )
         html = f"""<!doctype html>
 <html><body style="margin:0;padding:16px;font-family:Arial,sans-serif;color:#111827">
@@ -528,10 +571,14 @@ impact. Share is unavailable when total portfolio daily P/L is zero.</p>
 <table style="border-collapse:collapse;width:100%;table-layout:auto">
 <thead><tr>{headers((("Symbol", "8%", "left"), ("Name", None, "left"), ("Quantity", "9%", "right"), ("Average Cost", "10%", "right"), ("Close", "8%", "right"), ("Today's P/L", "11%", "right"), ("Today's P/L %", "9%", "right"), ("Unrealized P/L", "11%", "right"), ("Return %", "8%", "right"), ("Market Value", "10%", "right")), font_size="13px")}</tr></thead>
 <tbody>{rows}</tbody></table>
+{DailyReportSectionRenderer().html(report.sections)}
 </div></body></html>"""
+        section_text = DailyReportSectionRenderer().text(report.sections)
         return RenderedEmail(
             subject,
-            "\n".join(text_lines) + "\n",
+            "\n".join(text_lines)
+            + ("\n\n" + section_text if section_text else "")
+            + "\n",
             html,
             inline_images,
         )

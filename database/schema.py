@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -34,6 +34,19 @@ CREATE TABLE IF NOT EXISTS dividends (
     UNIQUE(symbol, market, ex_dividend_date)
 );
 CREATE INDEX IF NOT EXISTS ix_dividends_symbol_date ON dividends(symbol, ex_dividend_date);
+CREATE TABLE IF NOT EXISTS dividend_events (
+    source_event_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, market TEXT NOT NULL,
+    name TEXT NOT NULL, dividend_year INTEGER NOT NULL,
+    ex_dividend_date TEXT NOT NULL, record_date TEXT, payment_date TEXT,
+    cash_dividend_per_share TEXT, stock_dividend_per_share TEXT,
+    source TEXT NOT NULL, source_updated_at TEXT, fetched_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_dividend_events_symbol_market
+    ON dividend_events(symbol, market);
+CREATE INDEX IF NOT EXISTS ix_dividend_events_ex_date
+    ON dividend_events(ex_dividend_date);
+CREATE INDEX IF NOT EXISTS ix_dividend_events_payment_date
+    ON dividend_events(payment_date);
 CREATE TABLE IF NOT EXISTS liabilities (
     id TEXT PRIMARY KEY, liability_type TEXT NOT NULL, principal TEXT NOT NULL,
     annual_interest_rate TEXT, currency TEXT NOT NULL, start_date TEXT,
@@ -82,6 +95,11 @@ CREATE TABLE IF NOT EXISTS report_deliveries (
 );
 CREATE INDEX IF NOT EXISTS ix_report_deliveries_date
     ON report_deliveries(report_type, report_date);
+CREATE TABLE IF NOT EXISTS watchlist (
+    symbol TEXT NOT NULL, market TEXT NOT NULL, display_name TEXT,
+    target_price TEXT, buy_below_price TEXT, notes TEXT,
+    PRIMARY KEY (symbol, market)
+);
 """
 
 

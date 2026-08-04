@@ -3,7 +3,20 @@
 from pams.application.analyze_portfolio import AnalyzePortfolioUseCase
 from pams.application.apply_rebuilt_holdings import ApplyRebuiltHoldingsUseCase
 from pams.application.authorize_email import AuthorizeMicrosoftEmailUseCase
+from pams.application.bootstrap_import import (
+    BootstrapHoldingReconciliation,
+    BootstrapImportError,
+    BootstrapImportPreview,
+    BootstrapImportUseCase,
+    BootstrapTransactionPreview,
+)
 from pams.application.demo_data import DemoDataUseCase
+from pams.application.dividends import (
+    DividendEventError,
+    DividendEventUseCase,
+    DividendUpdateResult,
+    NormalizeDividendEventsUseCase,
+)
 from pams.application.dto import (
     AddTransactionCommand,
     DemoDataResult,
@@ -62,6 +75,13 @@ from pams.application.portfolio_history import PortfolioHistoryUseCase
 from pams.application.portfolio_status import PortfolioStatusUseCase
 from pams.application.query_holdings import QueryHoldingsUseCase
 from pams.application.rebuild_holdings import RebuildHoldingsUseCase
+from pams.application.report_sections import (
+    BuildReportSectionsUseCase,
+    EventProvider,
+    MarketSnapshotProvider,
+    NewsProvider,
+    ReportSectionSettings,
+)
 from pams.application.send_daily_report import (
     ChartSource,
     DailyReportDeliveryError,
@@ -74,6 +94,12 @@ from pams.application.transactions import AddTransactionUseCase, ListTransaction
 from pams.application.update_portfolio import UpdatePortfolioUseCase
 from pams.application.valuate_portfolio import ValuatePortfolioUseCase
 from pams.application.verify_system import VerifySystemUseCase
+from pams.application.watchlist import (
+    DuplicateWatchlistItemError,
+    WatchlistError,
+    WatchlistItemNotFoundError,
+    WatchlistUseCase,
+)
 
 __all__ = [
     "AddTransactionCommand",
@@ -86,9 +112,18 @@ __all__ = [
     "AnalyzePortfolioUseCase",
     "ApplyRebuiltHoldingsUseCase",
     "AuthorizeMicrosoftEmailUseCase",
+    "BootstrapHoldingReconciliation",
+    "BootstrapImportError",
+    "BootstrapImportPreview",
+    "BootstrapImportUseCase",
+    "BootstrapTransactionPreview",
     "ChartSource",
     "DemoDataResult",
     "DemoDataUseCase",
+    "DividendEventError",
+    "DividendEventUseCase",
+    "DividendUpdateResult",
+    "NormalizeDividendEventsUseCase",
     "DailyReportDeliveryError",
     "DailyReportError",
     "DailyReportSendResult",
@@ -143,4 +178,13 @@ __all__ = [
     "ValuationDataUnavailableError",
     "ValuationRepositoryError",
     "VerifySystemUseCase",
+    "BuildReportSectionsUseCase",
+    "EventProvider",
+    "MarketSnapshotProvider",
+    "NewsProvider",
+    "ReportSectionSettings",
+    "DuplicateWatchlistItemError",
+    "WatchlistError",
+    "WatchlistItemNotFoundError",
+    "WatchlistUseCase",
 ]

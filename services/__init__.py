@@ -8,6 +8,7 @@ from services.analytics_engine import (
 )
 from services.bootstrap import BootstrapService
 from services.portfolio import MissingPriceQuoteError, PortfolioService
+from services.report_sections import NewsService, ReportSectionService
 from services.snapshot import DuplicateSnapshotError, SnapshotService
 from services.transaction_engine import (
     HoldingProjectionMetadata,
@@ -36,4 +37,6 @@ __all__ = [
     "TransactionEngineError",
     "UnsupportedTransactionTypeError",
     "ValuationEngine",
+    "NewsService",
+    "ReportSectionService",
 ]

@@ -187,6 +187,11 @@ Financial events include:
 
 Future features should model events rather than hard-code asset behavior.
 
+PAMS follows the broker portfolio cost convention. Trading fees and taxes are
+tracked separately as investment expenses. One canonical average cost is used
+by holdings, valuation, reporting, and analytics; no parallel accounting-cost
+overlay exists.
+
 ## Presentation Layer
 
 Supported interfaces:
@@ -280,3 +285,22 @@ A feature is complete only if:
 - Architecture remains consistent
 
 Features that violate architecture should be rejected even if they work.
+
+## Modular reporting direction
+
+Daily reporting may combine derived portfolio facts with replaceable external
+context, but external context is never business truth. Allocation, insights,
+risk warnings, watchlist data, dividends, and transactions remain traceable to
+persisted records and deterministic services. Market context, events, and news
+must enter through provider boundaries and must be labeled unavailable rather
+than fabricated when no trustworthy provider is configured.
+
+Official dividend announcements follow the same rule: exchange adapters are
+replaceable infrastructure, normalized events are persisted facts, and cash
+estimates derive only from transaction-reconstructed eligible quantities.
+Official payment dates may enrich those facts through a conservative provider
+join. Status and annual summaries remain derived estimates and never assert
+that cash was received.
+The report's `Actual Cash Received` indicator means payment is expected under
+the official payment date; it is not broker-settlement verification and does
+not become transaction or accounting truth.

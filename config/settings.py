@@ -1,5 +1,6 @@
 """Validated application settings."""
 
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
@@ -43,3 +44,24 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = None
     email_from: str | None = None
     email_to: str | None = None
+    report_show_allocation: bool = True
+    report_show_market_snapshot: bool = True
+    report_show_upcoming_events: bool = True
+    report_show_dividends: bool = True
+    report_show_ai_news: bool = True
+    report_show_semiconductor_news: bool = True
+    report_show_insights: bool = True
+    report_show_risk: bool = True
+    report_show_watchlist: bool = True
+    report_show_transactions: bool = True
+    report_event_horizon_days: int = Field(default=30, ge=1, le=365)
+    report_dividend_scope: Literal["current_year", "next_90_days", "all"] = (
+        "current_year"
+    )
+    report_hide_empty_optional_sections: bool = True
+    report_news_limit: int = Field(default=5, ge=1, le=20)
+    risk_single_holding_warning_pct: Decimal = Field(
+        default=Decimal("30"), ge=0, le=100
+    )
+    risk_top3_warning_pct: Decimal = Field(default=Decimal("70"), ge=0, le=100)
+    risk_market_warning_pct: Decimal = Field(default=Decimal("80"), ge=0, le=100)

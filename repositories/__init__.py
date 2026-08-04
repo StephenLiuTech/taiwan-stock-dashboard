@@ -2,6 +2,7 @@
 
 from repositories.holding_rebuild_uow import SQLiteHoldingRebuildUnitOfWork
 from repositories.interfaces import (
+    DividendEventRepository,
     DividendRepository,
     HoldingRebuildRepository,
     HoldingRebuildUnitOfWork,
@@ -14,9 +15,11 @@ from repositories.interfaces import (
     SnapshotRepository,
     TransactionLedgerRepository,
     TransactionRepository,
+    WatchlistRepository,
 )
 from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
 from repositories.postgresql import (
+    PostgreSQLDividendEventRepository,
     PostgreSQLDividendRepository,
     PostgreSQLHoldingRepository,
     PostgreSQLLiabilityRepository,
@@ -25,12 +28,14 @@ from repositories.postgresql import (
     PostgreSQLReportDeliveryRepository,
     PostgreSQLSnapshotRepository,
     PostgreSQLTransactionRepository,
+    PostgreSQLWatchlistRepository,
 )
 from repositories.postgresql_uow import (
     PostgreSQLHoldingRebuildUnitOfWork,
     PostgreSQLMarketDataUnitOfWork,
 )
 from repositories.sqlite import (
+    SQLiteDividendEventRepository,
     SQLiteDividendRepository,
     SQLiteHoldingRepository,
     SQLiteLiabilityRepository,
@@ -39,10 +44,12 @@ from repositories.sqlite import (
     SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
     SQLiteTransactionRepository,
+    SQLiteWatchlistRepository,
 )
 
 __all__ = [
     "DividendRepository",
+    "DividendEventRepository",
     "HoldingRepository",
     "HoldingRebuildRepository",
     "HoldingRebuildUnitOfWork",
@@ -50,6 +57,7 @@ __all__ = [
     "MarketDataUnitOfWork",
     "PositionSnapshotRepository",
     "PostgreSQLDividendRepository",
+    "PostgreSQLDividendEventRepository",
     "PostgreSQLHoldingRepository",
     "PostgreSQLHoldingRebuildUnitOfWork",
     "PostgreSQLLiabilityRepository",
@@ -59,9 +67,11 @@ __all__ = [
     "PostgreSQLReportDeliveryRepository",
     "PostgreSQLSnapshotRepository",
     "PostgreSQLTransactionRepository",
+    "PostgreSQLWatchlistRepository",
     "PriceQuoteRepository",
     "ReportDeliveryRepository",
     "SQLiteDividendRepository",
+    "SQLiteDividendEventRepository",
     "SQLiteHoldingRepository",
     "SQLiteHoldingRebuildUnitOfWork",
     "SQLiteLiabilityRepository",
@@ -71,7 +81,9 @@ __all__ = [
     "SQLiteReportDeliveryRepository",
     "SQLiteSnapshotRepository",
     "SQLiteTransactionRepository",
+    "SQLiteWatchlistRepository",
     "SnapshotRepository",
     "TransactionRepository",
     "TransactionLedgerRepository",
+    "WatchlistRepository",
 ]

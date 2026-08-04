@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping, Sequence
 from http.client import IncompleteRead
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from market_data.exceptions import ProviderDataError
@@ -41,6 +41,12 @@ class JSONDocumentTransport(Protocol):
     """Load a JSON object from an HTTP endpoint."""
 
     def get_document(self, url: str) -> JSONRecord: ...
+
+
+class TextFormTransport(Protocol):
+    """Submit an official form and return a completely buffered text response."""
+
+    def post_form(self, url: str, fields: Mapping[str, str]) -> str: ...
 
 
 def _is_transient_url_error(error: URLError) -> bool:
@@ -112,8 +118,10 @@ class _UrllibJSONTransportBase:
                 f"{self.provider_name} returned invalid JSON"
             ) from error
 
-    def _read_complete_body(self, url: str, user_agent: str) -> bytes:
-        request = Request(url, headers={"User-Agent": user_agent})
+    def _read_complete_body(
+        self, url: str, user_agent: str, data: bytes | None = None
+    ) -> bytes:
+        request = Request(url, data=data, headers={"User-Agent": user_agent})
         endpoint_host = urlsplit(url).hostname or "official endpoint"
         for attempt in range(1, self.attempts + 1):
             try:
@@ -167,3 +175,18 @@ class UrllibJSONDocumentTransport(_UrllibJSONTransportBase):
         if not isinstance(payload, dict):
             raise ProviderDataError("Market-data response must be an object")
         return payload
+
+
+class UrllibTextFormTransport(_UrllibJSONTransportBase):
+    """Standard-library form transport using the shared bounded retry policy."""
+
+    def post_form(self, url: str, fields: Mapping[str, str]) -> str:
+        body = self._read_complete_body(
+            url, "PAMS/1.0", urlencode(fields).encode("ascii")
+        )
+        try:
+            return body.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ProviderDataError(
+                f"{self.provider_name} returned invalid UTF-8"
+            ) from error
