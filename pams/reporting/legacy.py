@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 from pams.application import (
+    BootstrapImportPreview,
     DemoDataResult,
     HoldingChangePlan,
     HoldingsQueryResult,
@@ -16,6 +17,63 @@ from pams.application import (
     UpdateResult,
     VerificationReport,
 )
+
+
+def format_bootstrap_import_preview(result: BootstrapImportPreview) -> str:
+    """Render the read-only broker statement reconciliation."""
+    lines = [
+        "Portfolio Bootstrap Reconciliation",
+        f"Source: {result.source}",
+        "Mode: dry-run",
+        f"Actual transactions: {len(result.imported_transactions)}",
+        f"Synthetic bootstrap transactions: {len(result.bootstrap_transactions)}",
+        f"Excluded symbols: {', '.join(result.excluded_symbols) or 'none'}",
+        f"Placeholder records identified: {len(result.placeholder_transaction_ids)}",
+        f"Existing 2026 records to replace: {len(result.replaced_transaction_ids)}",
+        "",
+        "Synthetic bootstrap transactions:",
+    ]
+    lines.extend(
+        f"  {item.trade_date} {item.symbol} BUY {item.quantity} @ {item.price}"
+        for item in result.bootstrap_transactions
+    )
+    if not result.bootstrap_transactions:
+        lines.append("  none")
+    lines.extend(["", "Holdings verification:"])
+    for item in result.reconciliations:
+        lines.extend(
+            [
+                item.symbol,
+                f"  Quantity: expected {item.expected_quantity}; actual {item.actual_quantity}",
+                "  Average cost: expected "
+                f"{item.expected_average_cost}; actual {item.actual_average_cost}",
+                "  Total cost: expected "
+                f"{item.expected_total_cost}; actual {item.accounting_cost_basis}",
+                f"  {'PASS' if item.passed else 'FAIL'}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "Trading expenses:",
+            f"  Total Buy Fees: {result.total_buy_fees}",
+            f"  Total Sell Fees: {result.total_sell_fees}",
+            f"  Total Taxes: {result.total_taxes}",
+            f"  Total Trading Expenses: {result.total_trading_expenses}",
+            "",
+            f"Overall: {'PASS' if result.passed else 'FAIL'}",
+            (
+                "Result: already imported; no changes performed."
+                if result.duplicate
+                else (
+                    "Result: applied atomically."
+                    if result.applied
+                    else "No database changes performed."
+                )
+            ),
+        ]
+    )
+    return "\n".join(lines)
 
 
 def format_decimal(value: Decimal) -> str:

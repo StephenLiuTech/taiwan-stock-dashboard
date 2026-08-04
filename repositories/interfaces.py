@@ -7,11 +7,13 @@ from typing import Protocol
 from domain import (
     DailySnapshot,
     Dividend,
+    DividendEvent,
     Holding,
     Liability,
     PositionSnapshot,
     PriceQuote,
     Transaction,
+    WatchlistItem,
 )
 
 
@@ -51,6 +53,21 @@ class DividendRepository(Protocol):
     def list_by_symbol(self, symbol: str) -> list[Dividend]: ...
     def upsert(self, dividend: Dividend) -> None: ...
     def delete(self, dividend_id: str) -> None: ...
+
+
+class DividendEventRepository(Protocol):
+    """Normalized official dividend-event persistence."""
+
+    def upsert_many(self, events: list[DividendEvent]) -> int: ...
+    def list_filtered(
+        self,
+        *,
+        symbol: str | None = None,
+        market: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        year: int | None = None,
+    ) -> list[DividendEvent]: ...
 
 
 class LiabilityRepository(Protocol):
@@ -111,6 +128,15 @@ class ReportDeliveryRepository(Protocol):
     ) -> None: ...
 
 
+class WatchlistRepository(Protocol):
+    """Persistence operations for manually selected watchlist instruments."""
+
+    def list_all(self) -> list[WatchlistItem]: ...
+    def get(self, symbol: str, market: str | None = None) -> WatchlistItem | None: ...
+    def add(self, item: WatchlistItem) -> None: ...
+    def remove(self, symbol: str, market: str | None = None) -> bool: ...
+
+
 class MarketDataUnitOfWork(Protocol):
     """Atomic persistence boundary for one valuation snapshot."""
 
@@ -139,5 +165,14 @@ class HoldingRebuildUnitOfWork(Protocol):
 
     holdings: HoldingRebuildRepository
     transactions: TransactionLedgerRepository
+
+    def transaction(self) -> AbstractContextManager[None]: ...
+
+
+class BootstrapImportUnitOfWork(Protocol):
+    """Atomic full-ledger replacement and holding rebuild boundary."""
+
+    holdings: HoldingRepository
+    transactions: TransactionRepository
 
     def transaction(self) -> AbstractContextManager[None]: ...

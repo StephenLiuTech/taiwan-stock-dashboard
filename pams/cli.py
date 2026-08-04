@@ -5,7 +5,7 @@ import sqlite3
 import sys
 import traceback
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import IntEnum
 from pathlib import Path
@@ -14,6 +14,7 @@ from config import get_settings
 from config.yaml_loader import ConfigurationError
 from core.constants import PROJECT_ROOT
 from database.provider import redact_database_url
+from domain import Market
 from market_data import (
     ProviderDataError,
     SourceDateError,
@@ -29,17 +30,21 @@ from pams.application import (
     AddTransactionCommand,
     AnalyticsDataUnavailableError,
     AnalyticsRepositoryError,
+    BootstrapImportError,
     DailyReportDeliveryError,
     DailyReportSnapshotMissingError,
     DatabaseMigrationError,
+    DividendEventError,
     HoldingQueryError,
     InvalidAnalyticsPeriodError,
     PortfolioAnalyticsError,
     ValuationDataUnavailableError,
     ValuationRepositoryError,
+    WatchlistError,
 )
 from pams.composition import (
     compose_application,
+    compose_bootstrap_import,
     compose_daily_report,
     compose_database_migration,
     compose_demo_data,
@@ -52,6 +57,7 @@ from pams.reporting import (
     DailyReportBuilder,
     HtmlReportRenderer,
     MarkdownReportRenderer,
+    format_bootstrap_import_preview,
     format_demo_data_report,
     format_holding_change_plan,
     format_holding_change_plan_json,
@@ -182,6 +188,79 @@ def build_parser() -> argparse.ArgumentParser:
     listing.add_argument("--json", action="store_true", dest="json_output")
     listing.add_argument("--database", type=Path)
     listing.add_argument("--verbose", action="store_true")
+    bootstrap_import = transaction_commands.add_parser(
+        "bootstrap-import", help="reconcile a broker statement bootstrap import"
+    )
+    bootstrap_import.add_argument(
+        "--source",
+        type=Path,
+        default=PROJECT_ROOT / "data" / "imports" / "證券對帳單20260804102537.csv",
+    )
+    bootstrap_mode = bootstrap_import.add_mutually_exclusive_group(required=True)
+    bootstrap_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate and reconcile without writing the database",
+    )
+    bootstrap_mode.add_argument(
+        "--apply", action="store_true", help="atomically apply the reconciled import"
+    )
+    bootstrap_import.add_argument(
+        "--targets",
+        type=Path,
+        default=PROJECT_ROOT / "data" / "imports" / "bootstrap-targets.csv",
+    )
+    bootstrap_import.add_argument("--database", type=Path)
+    bootstrap_import.add_argument("--verbose", action="store_true")
+    bootstrap_import.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm a non-interactive production apply",
+    )
+    watchlist = commands.add_parser("watchlist", help="manage watchlist entries")
+    watchlist_commands = watchlist.add_subparsers(
+        dest="watchlist_command", required=True
+    )
+    watchlist_add = watchlist_commands.add_parser("add", help="add one instrument")
+    watchlist_add.add_argument("symbol")
+    watchlist_add.add_argument("--market", required=True, choices=("TWSE", "TPEX"))
+    watchlist_add.add_argument("--name")
+    watchlist_add.add_argument("--target-price", type=parse_decimal)
+    watchlist_add.add_argument("--buy-below", type=parse_decimal)
+    watchlist_add.add_argument("--notes")
+    watchlist_add.add_argument("--database", type=Path)
+    watchlist_add.add_argument("--verbose", action="store_true")
+    for command_name in ("list", "show", "remove"):
+        command = watchlist_commands.add_parser(command_name)
+        if command_name != "list":
+            command.add_argument("symbol")
+        command.add_argument("--database", type=Path)
+        command.add_argument("--verbose", action="store_true")
+    dividend = commands.add_parser("dividend", help="manage official dividend events")
+    dividend_commands = dividend.add_subparsers(dest="dividend_command", required=True)
+    dividend_update = dividend_commands.add_parser(
+        "update", help="fetch official events for current holdings"
+    )
+    dividend_update.add_argument("--market", choices=("TWSE", "TPEX"))
+    dividend_update.add_argument("--from", dest="start_date", type=parse_iso_date)
+    dividend_update.add_argument("--to", dest="end_date", type=parse_iso_date)
+    for command_name in ("list", "show"):
+        command = dividend_commands.add_parser(command_name)
+        if command_name == "show":
+            command.add_argument("symbol")
+            command.add_argument("--year", type=int)
+        else:
+            command.add_argument("--from", dest="start_date", type=parse_iso_date)
+            command.add_argument("--to", dest="end_date", type=parse_iso_date)
+            command.add_argument(
+                "--scope",
+                choices=("current_year", "next_90_days", "all"),
+                default="current_year",
+            )
+        command.add_argument("--database", type=Path)
+        command.add_argument("--verbose", action="store_true")
+    dividend_update.add_argument("--database", type=Path)
+    dividend_update.add_argument("--verbose", action="store_true")
     portfolio = commands.add_parser("portfolio", help="query portfolio values")
     portfolio_commands = portfolio.add_subparsers(
         dest="portfolio_command", required=True
@@ -265,6 +344,12 @@ def _error_exit_code(error: Exception) -> ExitCode:
         return ExitCode.SECURITY_ERROR
     if isinstance(error, HoldingQueryError):
         return ExitCode.SECURITY_ERROR
+    if isinstance(error, BootstrapImportError):
+        return ExitCode.SECURITY_ERROR
+    if isinstance(error, WatchlistError):
+        return ExitCode.SECURITY_ERROR
+    if isinstance(error, DividendEventError):
+        return ExitCode.SECURITY_ERROR
     if isinstance(error, SourceDateError):
         return ExitCode.SOURCE_DATE_ERROR
     if isinstance(error, ProviderDataError):
@@ -295,6 +380,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             authorization.execute(_show_device_authorization_prompt)
             print("Microsoft email authorization complete; token cache updated.")
             return int(ExitCode.SUCCESS)
+        if (
+            arguments.command == "transaction"
+            and arguments.transaction_command == "bootstrap-import"
+        ):
+            with compose_bootstrap_import(arguments.database) as use_case:
+                result = use_case.preview(arguments.source, arguments.targets)
+                if arguments.apply:
+                    print(format_bootstrap_import_preview(result))
+                    print(f"Target database: {result.database}")
+                    confirmed = (
+                        arguments.yes
+                        or input(
+                            "Type APPLY to replace the reconciled 2026 ledger: "
+                        ).strip()
+                        == "APPLY"
+                    )
+                    if not confirmed:
+                        print(
+                            "Bootstrap import cancelled; no database changes performed."
+                        )
+                        return int(ExitCode.SUCCESS)
+                    result = use_case.apply(arguments.source, arguments.targets)
+            print(format_bootstrap_import_preview(result))
+            return int(ExitCode.SUCCESS if result.passed else ExitCode.SECURITY_ERROR)
         if arguments.command == "daily-report":
             print(f"Email Transport : {selected_email_transport()}")
             composer = lambda database, verbose: compose_daily_report(  # noqa: E731
@@ -303,12 +412,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif arguments.command == "update":
             composer = compose_application
         elif (
-            arguments.command == "holdings"
-            and arguments.holdings_command == "rebuild"
-            and arguments.apply
-        ) or (
-            arguments.command == "transaction"
-            and arguments.transaction_command == "add"
+            (
+                arguments.command == "holdings"
+                and arguments.holdings_command == "rebuild"
+                and arguments.apply
+            )
+            or (
+                arguments.command == "transaction"
+                and arguments.transaction_command == "add"
+            )
+            or (
+                arguments.command == "watchlist"
+                and arguments.watchlist_command in {"add", "remove"}
+            )
+            or (
+                arguments.command == "dividend"
+                and arguments.dividend_command == "update"
+            )
         ):
             composer = compose_ledger_operations
         else:
@@ -432,6 +552,73 @@ def main(argv: Sequence[str] | None = None) -> int:
                     format_transaction_list(result, json_output=arguments.json_output)
                 )
                 return int(ExitCode.SUCCESS)
+            if arguments.command == "watchlist":
+                assert application.watchlist is not None
+                if arguments.watchlist_command == "add":
+                    item = application.watchlist.add(
+                        arguments.symbol,
+                        arguments.market,
+                        display_name=arguments.name,
+                        target_price=arguments.target_price,
+                        buy_below_price=arguments.buy_below,
+                        notes=arguments.notes,
+                    )
+                    print(_format_watchlist((item,)))
+                elif arguments.watchlist_command == "list":
+                    print(_format_watchlist(application.watchlist.list()))
+                elif arguments.watchlist_command == "show":
+                    print(
+                        _format_watchlist(
+                            (application.watchlist.show(arguments.symbol),)
+                        )
+                    )
+                else:
+                    application.watchlist.remove(arguments.symbol)
+                    print(
+                        f"Removed watchlist entry: {arguments.symbol.strip().upper()}"
+                    )
+                return int(ExitCode.SUCCESS)
+            if arguments.command == "dividend":
+                assert application.dividend_events is not None
+                if arguments.dividend_command == "update":
+                    market = Market(arguments.market) if arguments.market else None
+                    result = application.dividend_events.update(
+                        market=market,
+                        start_date=arguments.start_date,
+                        end_date=arguments.end_date,
+                    )
+                    print(
+                        f"PAMS Dividend Update\nFetched: {result.fetched}\n"
+                        f"Upserted: {result.upserted}\n"
+                        f"Payment dates enriched: {result.payment_dates_enriched}\n"
+                        "Payment-date enrichment: "
+                        + (
+                            "available"
+                            if result.payment_enrichment_available
+                            else "unavailable"
+                        )
+                    )
+                elif arguments.dividend_command == "list":
+                    start_date, end_date = _dividend_scope_dates(
+                        arguments.scope, arguments.start_date, arguments.end_date
+                    )
+                    print(
+                        _format_dividends(
+                            application.dividend_events.list(
+                                start_date=start_date,
+                                end_date=end_date,
+                            )
+                        )
+                    )
+                else:
+                    print(
+                        _format_dividends(
+                            application.dividend_events.show(
+                                arguments.symbol, year=arguments.year
+                            )
+                        )
+                    )
+                return int(ExitCode.SUCCESS)
             if arguments.command == "status":
                 print(format_status_report(application.portfolio_status.execute()))
                 return int(ExitCode.SUCCESS)
@@ -481,6 +668,68 @@ def main(argv: Sequence[str] | None = None) -> int:
         if getattr(arguments, "verbose", False) or getattr(arguments, "debug", False):
             traceback.print_exc()
         return int(_error_exit_code(error))
+
+
+def _format_watchlist(items: tuple[object, ...]) -> str:
+    """Render watchlist DTOs without deriving recommendations."""
+    lines = [
+        "PAMS Watchlist",
+        "Symbol | Market | Name | Latest | Quote Date | Target | Buy Below | Notes",
+    ]
+
+    def display(values: dict[str, object], key: str) -> object:
+        return values[key] if values[key] is not None else "N/A"
+
+    for item in items:
+        values = vars(item)
+        lines.append(
+            f"{values['symbol']} | {values['market']} | {display(values, 'display_name')} | "
+            f"{display(values, 'latest_price')} | {display(values, 'quote_date')} | "
+            f"{display(values, 'target_price')} | {display(values, 'buy_below_price')} | "
+            f"{display(values, 'notes')}"
+        )
+    lines.append(f"Count: {len(items)}")
+    return "\n".join(lines)
+
+
+def _format_dividends(items: tuple[object, ...]) -> str:
+    """Render persisted official dividend events without calculations."""
+    lines = [
+        "PAMS Dividend Calendar",
+        "Date | Symbol | Market | Name | Cash/Share | Stock/Share | Payment | Source",
+    ]
+
+    def display(values: dict[str, object], key: str) -> object:
+        value = values[key]
+        if isinstance(value, Decimal):
+            return f"{value:f}".rstrip("0").rstrip(".") or "0"
+        return value if value is not None else "N/A"
+
+    for item in items:
+        values = vars(item)
+        lines.append(
+            f"{values['ex_dividend_date']} | {values['symbol']} | "
+            f"{values['market'].value} | {values['name']} | "
+            f"{display(values, 'cash_dividend_per_share')} | "
+            f"{display(values, 'stock_dividend_per_share')} | "
+            f"{display(values, 'payment_date')} | "
+            f"{values['source']}"
+        )
+    lines.append(f"Count: {len(items)}")
+    return "\n".join(lines)
+
+
+def _dividend_scope_dates(
+    scope: str, start_date: date | None, end_date: date | None
+) -> tuple[date | None, date | None]:
+    if start_date is not None or end_date is not None:
+        return start_date, end_date
+    today = date.today()
+    if scope == "current_year":
+        return date(today.year, 1, 1), date(today.year, 12, 31)
+    if scope == "next_90_days":
+        return today, today + timedelta(days=90)
+    return None, None
 
 
 def _format_daily_report_delivery(result: object) -> str:
