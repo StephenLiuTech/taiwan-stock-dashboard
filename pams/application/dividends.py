@@ -30,6 +30,10 @@ class DividendUpdateResult:
 
 LOGGER = logging.getLogger(__name__)
 
+_UNAVAILABLE_DIVIDEND_AMOUNTS = frozenset(
+    {"", "-", "--", "N/A", "尚未公告", "尚未確定"}
+)
+
 
 def _roc_date(value: str) -> date:
     cleaned = (
@@ -51,7 +55,7 @@ def _roc_date(value: str) -> date:
 
 def _optional_decimal(value: str) -> Decimal | None:
     cleaned = value.strip().replace(",", "")
-    if cleaned in {"", "-", "--"}:
+    if cleaned in _UNAVAILABLE_DIVIDEND_AMOUNTS:
         return None
     try:
         result = Decimal(cleaned)

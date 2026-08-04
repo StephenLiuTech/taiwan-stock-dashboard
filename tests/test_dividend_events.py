@@ -220,6 +220,25 @@ def test_malformed_amount_is_rejected() -> None:
         NormalizeDividendEventsUseCase().execute((raw(cash="oops"),))
 
 
+@pytest.mark.parametrize(
+    "unavailable_value",
+    ["尚未公告", "尚未確定", "-", "--", "", "N/A"],
+)
+def test_known_unavailable_dividend_amount_is_normalized_to_none(
+    unavailable_value: str,
+) -> None:
+    values = NormalizeDividendEventsUseCase().execute(
+        (
+            raw(symbol="2330", cash=unavailable_value),
+            raw(symbol="0050", cash="3.25"),
+        )
+    )
+
+    by_symbol = {item.symbol: item for item in values}
+    assert by_symbol["2330"].cash_dividend_per_share is None
+    assert by_symbol["0050"].cash_dividend_per_share == Decimal("3.25")
+
+
 def event(payment=None) -> DividendEvent:
     return (
         NormalizeDividendEventsUseCase()
