@@ -64,6 +64,45 @@ def _table(headers: tuple[tuple[str, bool], ...], rows: list[tuple[Cell, ...]]) 
     )
 
 
+def _dividend_calendar_table(
+    headers: tuple[tuple[str, bool], ...], rows: list[tuple[Cell, ...]]
+) -> str:
+    """Render the wide dividend table within email and print boundaries."""
+    column_widths = ("10%", "11%", "7%", "10%", "10%", "11%", "14%", "14%", "13%")
+    columns = "".join(f'<col style="width:{width}">' for width in column_widths)
+    wrapping_style = (
+        "vertical-align:middle;white-space:normal;overflow-wrap:anywhere;"
+        "word-break:break-word"
+    )
+    header = "".join(
+        '<th style="padding:6px 4px;border:1px solid #d1d5db;'
+        f'background:#f3f4f6;text-align:{"right" if numeric else "left"};'
+        f'{wrapping_style}">{escape(label)}</th>'
+        for label, numeric in headers
+    )
+    body = "".join(
+        "<tr>"
+        + "".join(
+            '<td style="padding:6px 4px;border:1px solid #d1d5db;'
+            f'text-align:{"right" if headers[index][1] else "left"};'
+            f"{wrapping_style}"
+            + (f";color:{value[1]};font-weight:600" if isinstance(value, tuple) else "")
+            + '">'
+            + escape(value[0] if isinstance(value, tuple) else value)
+            + "</td>"
+            for index, value in enumerate(row)
+        )
+        + "</tr>"
+        for row in rows
+    )
+    return (
+        '<table style="border-collapse:collapse;width:100%;max-width:100%;'
+        'table-layout:fixed;font-size:11px">'
+        f"<colgroup>{columns}</colgroup>"
+        f"<thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
+    )
+
+
 def _empty(message: str) -> str:
     return f'<p style="color:{MUTED};margin:6px 0 16px">{escape(message)}</p>'
 
@@ -225,7 +264,7 @@ class DailyReportSectionRenderer:
         title = '<h2 style="font-size:18px;margin-top:24px">Dividend Calendar</h2>'
         if not value.items:
             return "" if value.hide_when_empty else title + _empty(value.status)
-        table = _table(
+        table = _dividend_calendar_table(
             (
                 ("Ex-Date", False),
                 ("Payment Date", False),
@@ -236,7 +275,6 @@ class DailyReportSectionRenderer:
                 ("Estimated Cash Dividend", True),
                 ("Actual Cash Received", True),
                 ("Status", False),
-                ("Source", False),
             ),
             [
                 (
@@ -262,7 +300,6 @@ class DailyReportSectionRenderer:
                         else "N/A"
                     ),
                     item.status,
-                    item.source_status,
                 )
                 for item in value.items
             ],
