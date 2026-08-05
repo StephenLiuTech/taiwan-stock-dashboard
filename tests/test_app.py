@@ -14,6 +14,8 @@ import app
 from config import get_settings
 from pams.application import DemoDataUseCase
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 
 def test_application_imports() -> None:
     """The application composition root imports without errors."""
@@ -36,7 +38,7 @@ def test_streamlit_application_starts(
     get_settings.cache_clear()
 
     try:
-        application = AppTest.from_file("app.py").run()
+        application = AppTest.from_file(str(PROJECT_ROOT / "app.py")).run()
 
         assert not application.exception
         assert application.title[0].value == "PAMS"
