@@ -21,6 +21,7 @@ from domain import (
 from repositories import (
     DividendEventRepository,
     HoldingRepository,
+    LiabilityRepository,
     PriceQuoteRepository,
     TransactionRepository,
     WatchlistRepository,
@@ -79,6 +80,7 @@ class BuildReportSectionsUseCase:
         event_provider: EventProvider | None = None,
         ai_news_provider: NewsProvider | None = None,
         semiconductor_news_provider: NewsProvider | None = None,
+        liabilities: LiabilityRepository | None = None,
     ) -> None:
         self.holdings = holdings
         self.transactions = transactions
@@ -90,12 +92,17 @@ class BuildReportSectionsUseCase:
         self.event_provider = event_provider
         self.ai_news_provider = ai_news_provider
         self.semiconductor_news_provider = semiconductor_news_provider
+        self.liabilities = liabilities
 
     def execute(
         self,
         report_date: date,
         positions: list[PositionSnapshot],
         daily_profit_loss: Decimal,
+        *,
+        total_market_value: Decimal | None = None,
+        net_asset_value: Decimal | None = None,
+        liability_ratio: Decimal | None = None,
     ) -> DailyReportSections:
         holdings = self.holdings.list_all()
         transactions = self.transactions.list_all()
@@ -123,6 +130,20 @@ class BuildReportSectionsUseCase:
             dividends_for_report = None
         else:
             dividends_for_report = dividends
+        liability_values = self.liabilities.list_all() if self.liabilities else []
+        financing = (
+            ReportSectionService.financing(
+                liability_values,
+                total_market_value,
+                net_asset_value,
+                liability_ratio,
+            )
+            if liability_values
+            and total_market_value is not None
+            and net_asset_value is not None
+            and liability_ratio is not None
+            else None
+        )
         events_failed = False
         if self.event_provider is None:
             external_events = ()
@@ -155,6 +176,7 @@ class BuildReportSectionsUseCase:
             dividend_calendar=(
                 dividends_for_report if self.settings.show_dividends else None
             ),
+            financing_leverage=financing,
             ai_news=(
                 self._news("ai_news", self.ai_news_provider, report_date)
                 if self.settings.show_ai_news

@@ -300,6 +300,9 @@ class SendDailyReportUseCase:
                 snapshot.snapshot_date,
                 persisted,
                 daily_performance.profit_loss,
+                total_market_value=snapshot.total_market_value,
+                net_asset_value=snapshot.net_asset_value,
+                liability_ratio=snapshot.leverage_ratio,
             )
             if self._section_builder is not None
             else DailyReportSections()

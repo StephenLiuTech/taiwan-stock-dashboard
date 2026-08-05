@@ -478,6 +478,16 @@ def test_html_and_plain_text_contain_correct_persisted_figures() -> None:
     assert "<html>" in message.html
     assert "Today's Contributors" in message.html
     assert "Share of Net P/L" in message.html
+    assert message.html.index("Portfolio Summary") < message.html.index(
+        "Portfolio Trend"
+    )
+    assert message.html.index("Portfolio Trend") < message.html.index(
+        "Today's Contributors"
+    )
+    assert message.html.index("Today's Contributors") < message.html.index("Holdings")
+    assert message.plain_text.index("Portfolio Summary") < message.plain_text.index(
+        "Portfolio Trend"
+    )
 
 
 def test_positive_daily_profit_loss_uses_persisted_position_movements() -> None:

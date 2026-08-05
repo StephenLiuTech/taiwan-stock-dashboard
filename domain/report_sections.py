@@ -83,6 +83,44 @@ class DividendCalendarSection:
 
 
 @dataclass(frozen=True)
+class CollateralHoldingReference:
+    symbol: str
+    quantity: Decimal
+
+
+@dataclass(frozen=True)
+class MarginFinancingSection:
+    principal: Decimal
+    accrued_interest: Decimal | None
+    position_symbol: str | None
+    position_quantity: Decimal | None
+    updated: date | None
+
+
+@dataclass(frozen=True)
+class StockPledgeSection:
+    principal: Decimal
+    accrued_interest: Decimal | None
+    repayment_total: Decimal | None
+    collateral_market_value: Decimal | None
+    maintenance_ratio: Decimal | None
+    collateral_holdings: tuple[CollateralHoldingReference, ...]
+    updated: date | None
+
+
+@dataclass(frozen=True)
+class FinancingLeverageSection:
+    total_principal_debt: Decimal
+    total_accrued_interest: Decimal | None
+    total_debt: Decimal | None
+    total_stock_market_value: Decimal
+    net_stock_equity: Decimal
+    liability_ratio: Decimal
+    margin_financing: MarginFinancingSection | None = None
+    stock_pledge: StockPledgeSection | None = None
+
+
+@dataclass(frozen=True)
 class NewsItem:
     headline: str
     publisher: str
@@ -165,6 +203,7 @@ class DailyReportSections:
     market_snapshot: MarketSnapshotSection | None = None
     upcoming_events: UpcomingEventsSection | None = None
     dividend_calendar: DividendCalendarSection | None = None
+    financing_leverage: FinancingLeverageSection | None = None
     ai_news: NewsSection | None = None
     semiconductor_news: NewsSection | None = None
     insights: PortfolioInsightsSection | None = None

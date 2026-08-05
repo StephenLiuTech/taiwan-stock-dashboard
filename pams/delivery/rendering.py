@@ -144,7 +144,7 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
 
     draw.text(
         (left, 30),
-        "30-Day Asset Change",
+        "Portfolio Trend",
         fill="#0f172a",
         font=title_font,
     )
@@ -307,14 +307,13 @@ class DailyEmailReportRenderer:
             f"Report date: {report.report_date}",
             f"Verified market source date: {report.verified_source_date or 'N/A'}",
             "",
+            "Portfolio Summary",
             "Today's P/L",
             f"Amount: {_money(report.daily_profit_loss, signed=True)}",
             (
                 "Percentage: "
                 f"{_percent(report.daily_profit_loss_percentage, signed=True)}"
             ),
-            "",
-            "Portfolio Summary",
             f"Net stock equity: {_money(report.net_asset_value)}",
             f"Total stock market value: {_money(report.total_market_value)}",
             f"Total investment cost: {_money(report.total_cost_basis)}",
@@ -325,7 +324,7 @@ class DailyEmailReportRenderer:
             f"Position count: {len(report.positions)}",
             *expected_dividend_text,
             "",
-            "30-Day Asset Change",
+            "Portfolio Trend",
             *_history_text(report.history),
             "",
             "Today's Contributors",
@@ -553,13 +552,12 @@ class DailyEmailReportRenderer:
 <p style="margin-top:0;color:#4b5563"><strong>Report date:</strong>
 {report.report_date}<br><strong>Verified market source date:</strong>
 {report.verified_source_date or "N/A"}</p>
-<h2 style="font-size:18px">Today's P/L</h2>
-<table role="presentation" style="border-collapse:collapse;width:100%;margin-bottom:24px">
-{daily_cards}</table>
 <h2 style="font-size:18px">Portfolio Summary</h2>
 <table role="presentation" style="border-collapse:collapse;width:100%;margin-bottom:24px">
+{daily_cards}</table>
+<table role="presentation" style="border-collapse:collapse;width:100%;margin-bottom:24px">
 {summary_cards}</table>
-<h2 style="font-size:18px">30-Day Asset Change</h2>
+<h2 style="font-size:18px">Portfolio Trend</h2>
 {chart_html}
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
 <table style="border-collapse:collapse;width:100%;table-layout:auto">

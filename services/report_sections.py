@@ -1,16 +1,22 @@
 """Pure deterministic calculations for modular daily-report sections."""
 
+import re
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
 from domain import (
     AllocationItem,
+    CollateralHoldingReference,
     DividendCalendarItem,
     DividendCalendarSection,
     DividendEvent,
+    FinancingLeverageSection,
     Holding,
     HoldingType,
+    Liability,
+    LiabilityType,
+    MarginFinancingSection,
     NewsItem,
     NewsSection,
     PortfolioAllocationSection,
@@ -18,6 +24,7 @@ from domain import (
     PositionSnapshot,
     RiskItem,
     RiskMonitorSection,
+    StockPledgeSection,
     Transaction,
     TransactionSummaryItem,
     TransactionSummarySection,
@@ -28,8 +35,132 @@ from domain import (
 from services.transaction_engine import TransactionEngine
 
 
+def _metadata_money(notes: str | None, label: str) -> Decimal | None:
+    if not notes:
+        return None
+    match = re.search(rf"{re.escape(label)}:\s*NT\$([\d,]+(?:\.\d+)?)", notes)
+    return Decimal(match.group(1).replace(",", "")) if match else None
+
+
+def _metadata_percent(notes: str | None, label: str) -> Decimal | None:
+    if not notes:
+        return None
+    match = re.search(rf"{re.escape(label)}:\s*([\d,]+(?:\.\d+)?)%", notes)
+    return Decimal(match.group(1).replace(",", "")) / 100 if match else None
+
+
+def _metadata_updated_date(notes: str | None) -> date | None:
+    if not notes:
+        return None
+    match = re.search(r"Source/update:.*?(\d{4}-\d{2}-\d{2})", notes)
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
+
+
+def _margin_reference(description: str | None) -> tuple[str | None, Decimal | None]:
+    if not description:
+        return None, None
+    match = re.search(
+        r"([0-9A-Z]+)\s+margin quantity:\s*([\d,]+)\s+shares", description
+    )
+    if not match:
+        return None, None
+    return match.group(1), Decimal(match.group(2).replace(",", ""))
+
+
+def _collateral_references(
+    description: str | None,
+) -> tuple[CollateralHoldingReference, ...]:
+    if not description:
+        return ()
+    return tuple(
+        CollateralHoldingReference(symbol, Decimal(quantity.replace(",", "")))
+        for symbol, quantity in re.findall(
+            r"([0-9A-Z]+):\s*([\d,]+)\s+shares", description
+        )
+    )
+
+
 class ReportSectionService:
     """Build report facts from repository-loaded domain records."""
+
+    @staticmethod
+    def financing(
+        liabilities: list[Liability],
+        total_market_value: Decimal,
+        net_asset_value: Decimal,
+        liability_ratio: Decimal,
+    ) -> FinancingLeverageSection | None:
+        """Build financing facts from principal and descriptive metadata."""
+        if not liabilities:
+            return None
+        principal = sum((item.principal for item in liabilities), Decimal("0"))
+        accrued_values = [
+            _metadata_money(item.notes, "Accrued interest reference")
+            for item in liabilities
+        ]
+        total_accrued = (
+            sum((item for item in accrued_values if item is not None), Decimal("0"))
+            if all(item is not None for item in accrued_values)
+            else None
+        )
+        margin = next(
+            (
+                item
+                for item in liabilities
+                if item.liability_type is LiabilityType.MARGIN_FINANCING
+            ),
+            None,
+        )
+        pledge = next(
+            (
+                item
+                for item in liabilities
+                if item.liability_type is LiabilityType.STOCK_PLEDGE
+            ),
+            None,
+        )
+        margin_reference = (
+            _margin_reference(margin.collateral_description) if margin else (None, None)
+        )
+        margin_section = (
+            MarginFinancingSection(
+                margin.principal,
+                _metadata_money(margin.notes, "Accrued interest reference"),
+                margin_reference[0],
+                margin_reference[1],
+                _metadata_updated_date(margin.notes),
+            )
+            if margin
+            else None
+        )
+        pledge_section = (
+            StockPledgeSection(
+                pledge.principal,
+                _metadata_money(pledge.notes, "Accrued interest reference"),
+                _metadata_money(pledge.notes, "Repayment total reference"),
+                _metadata_money(pledge.notes, "Collateral market value reference"),
+                _metadata_percent(pledge.notes, "Maintenance ratio reference"),
+                _collateral_references(pledge.collateral_description),
+                _metadata_updated_date(pledge.notes),
+            )
+            if pledge
+            else None
+        )
+        return FinancingLeverageSection(
+            principal,
+            total_accrued,
+            principal + total_accrued if total_accrued is not None else None,
+            total_market_value,
+            net_asset_value,
+            liability_ratio,
+            margin_section,
+            pledge_section,
+        )
 
     @staticmethod
     def allocation(

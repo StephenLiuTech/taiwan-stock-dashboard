@@ -306,6 +306,7 @@ def compose_daily_report(
                     risk_top3_warning=settings.risk_top3_warning_pct / 100,
                     risk_market_warning=settings.risk_market_warning_pct / 100,
                 ),
+                liabilities=context.repositories.liabilities,
             ),
         )
         yield replace(context, send_daily_report=use_case)
