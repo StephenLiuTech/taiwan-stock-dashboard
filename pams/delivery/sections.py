@@ -113,9 +113,10 @@ class DailyReportSectionRenderer:
     def html(self, sections: DailyReportSections) -> str:
         renderers = (
             self.allocation_html(sections),
-            self.market_snapshot_html(sections),
             self.upcoming_events_html(sections),
             self.dividend_calendar_html(sections),
+            self.financing_html(sections),
+            self.market_snapshot_html(sections),
             self.news_html("AI News", sections.ai_news),
             self.news_html("Semiconductor News", sections.semiconductor_news),
             self.insights_html(sections),
@@ -128,9 +129,10 @@ class DailyReportSectionRenderer:
     def text(self, sections: DailyReportSections) -> str:
         blocks = (
             self.allocation_text(sections),
-            self.market_snapshot_text(sections),
             self.upcoming_events_text(sections),
             self.dividend_calendar_text(sections),
+            self.financing_text(sections),
+            self.market_snapshot_text(sections),
             self.news_text("AI News", sections.ai_news),
             self.news_text("Semiconductor News", sections.semiconductor_news),
             self.insights_text(sections),
@@ -329,6 +331,147 @@ class DailyReportSectionRenderer:
         )
 
     @staticmethod
+    def financing_html(sections: DailyReportSections) -> str:
+        value = sections.financing_leverage
+        if value is None:
+            return ""
+
+        def subsection(title: str, rows: tuple[tuple[str, str], ...]) -> str:
+            content = "".join(
+                '<tr><td style="width:55%;padding:7px 9px;border-top:1px solid '
+                '#e5e7eb;color:#4b5563;vertical-align:top">'
+                f"{escape(label)}</td>"
+                '<td style="width:45%;padding:7px 9px;border-top:1px solid #e5e7eb;'
+                "text-align:right;vertical-align:top;font-weight:600;white-space:normal;"
+                'overflow-wrap:anywhere">'
+                f"{escape(display)}</td></tr>"
+                for label, display in rows
+            )
+            return (
+                '<table role="presentation" style="border-collapse:collapse;width:100%;'
+                "max-width:100%;table-layout:fixed;border:1px solid #d1d5db;"
+                'background:#ffffff;margin:0 0 12px;font-size:12px">'
+                '<tr><td colspan="2" style="padding:9px;background:#f3f4f6;'
+                f'font-weight:700;font-size:14px">{escape(title)}</td></tr>'
+                f"{content}</table>"
+            )
+
+        cards: list[tuple[str, tuple[tuple[str, str], ...]]] = [
+            (
+                "Overall Financing",
+                (
+                    ("Total Principal Debt", _money(value.total_principal_debt)),
+                    (
+                        "Total Accrued Interest",
+                        (
+                            _money(value.total_accrued_interest)
+                            if value.total_accrued_interest is not None
+                            else "N/A"
+                        ),
+                    ),
+                    (
+                        "Total Debt (Principal + Interest)",
+                        (
+                            _money(value.total_debt)
+                            if value.total_debt is not None
+                            else "N/A"
+                        ),
+                    ),
+                    (
+                        "Total Stock Market Value",
+                        _money(value.total_stock_market_value),
+                    ),
+                    ("Net Stock Equity", _money(value.net_stock_equity)),
+                    ("Liability Ratio", _percent(value.liability_ratio)),
+                ),
+            )
+        ]
+        if value.margin_financing is not None:
+            margin = value.margin_financing
+            cards.append(
+                (
+                    "Margin Financing",
+                    (
+                        ("Principal", _money(margin.principal)),
+                        (
+                            "Accrued Interest",
+                            (
+                                _money(margin.accrued_interest)
+                                if margin.accrued_interest is not None
+                                else "N/A"
+                            ),
+                        ),
+                        ("Margin Position", margin.position_symbol or "N/A"),
+                        (
+                            "Margin Quantity",
+                            (
+                                f"{margin.position_quantity:,.0f} shares"
+                                if margin.position_quantity is not None
+                                else "N/A"
+                            ),
+                        ),
+                        ("Updated", str(margin.updated or "N/A")),
+                    ),
+                )
+            )
+        if value.stock_pledge is not None:
+            pledge = value.stock_pledge
+            collateral = (
+                "; ".join(
+                    f"{item.symbol} — {item.quantity:,.0f} shares"
+                    for item in pledge.collateral_holdings
+                )
+                or "N/A"
+            )
+            cards.append(
+                (
+                    "Stock Pledge",
+                    (
+                        ("Principal", _money(pledge.principal)),
+                        (
+                            "Accrued Interest",
+                            (
+                                _money(pledge.accrued_interest)
+                                if pledge.accrued_interest is not None
+                                else "N/A"
+                            ),
+                        ),
+                        (
+                            "Repayment Total",
+                            (
+                                _money(pledge.repayment_total)
+                                if pledge.repayment_total is not None
+                                else "N/A"
+                            ),
+                        ),
+                        (
+                            "Collateral Market Value",
+                            (
+                                _money(pledge.collateral_market_value)
+                                if pledge.collateral_market_value is not None
+                                else "N/A"
+                            ),
+                        ),
+                        (
+                            "Maintenance Ratio",
+                            (
+                                _percent(pledge.maintenance_ratio)
+                                if pledge.maintenance_ratio is not None
+                                else "N/A"
+                            ),
+                        ),
+                        ("Collateral Holdings", collateral),
+                        ("Updated", str(pledge.updated or "N/A")),
+                    ),
+                )
+            )
+        rendered_sections = "".join(subsection(title, rows) for title, rows in cards)
+        return (
+            '<h2 style="font-size:18px;margin-top:24px">Financing &amp; Leverage</h2>'
+            + rendered_sections
+        )
+
+    @staticmethod
     def news_html(title: str, value: NewsSection | None) -> str:
         if value is None:
             return ""
@@ -510,6 +653,90 @@ class DailyReportSectionRenderer:
 
     def dividend_calendar_text(self, sections):
         return self._dividend_text(sections)
+
+    def financing_text(self, sections):
+        value = sections.financing_leverage
+        if value is None:
+            return ""
+        lines = [
+            "Financing & Leverage",
+            "Overall Financing",
+            f"Total Principal Debt: {_money(value.total_principal_debt)}",
+            "Total Accrued Interest: "
+            + (
+                _money(value.total_accrued_interest)
+                if value.total_accrued_interest is not None
+                else "N/A"
+            ),
+            "Total Debt (Principal + Interest): "
+            + (_money(value.total_debt) if value.total_debt is not None else "N/A"),
+            f"Total Stock Market Value: {_money(value.total_stock_market_value)}",
+            f"Net Stock Equity: {_money(value.net_stock_equity)}",
+            f"Liability Ratio: {_percent(value.liability_ratio)}",
+        ]
+        if value.margin_financing is not None:
+            margin = value.margin_financing
+            lines.extend(
+                (
+                    "",
+                    "Margin Financing",
+                    f"Principal: {_money(margin.principal)}",
+                    "Accrued Interest: "
+                    + (
+                        _money(margin.accrued_interest)
+                        if margin.accrued_interest is not None
+                        else "N/A"
+                    ),
+                    f"Margin Position: {margin.position_symbol or 'N/A'}",
+                    "Margin Quantity: "
+                    + (
+                        f"{margin.position_quantity:,.0f} shares"
+                        if margin.position_quantity is not None
+                        else "N/A"
+                    ),
+                    f"Updated: {margin.updated or 'N/A'}",
+                )
+            )
+        if value.stock_pledge is not None:
+            pledge = value.stock_pledge
+            lines.extend(
+                (
+                    "",
+                    "Stock Pledge",
+                    f"Principal: {_money(pledge.principal)}",
+                    "Accrued Interest: "
+                    + (
+                        _money(pledge.accrued_interest)
+                        if pledge.accrued_interest is not None
+                        else "N/A"
+                    ),
+                    "Repayment Total: "
+                    + (
+                        _money(pledge.repayment_total)
+                        if pledge.repayment_total is not None
+                        else "N/A"
+                    ),
+                    "Collateral Market Value: "
+                    + (
+                        _money(pledge.collateral_market_value)
+                        if pledge.collateral_market_value is not None
+                        else "N/A"
+                    ),
+                    "Maintenance Ratio: "
+                    + (
+                        _percent(pledge.maintenance_ratio)
+                        if pledge.maintenance_ratio is not None
+                        else "N/A"
+                    ),
+                    "Collateral Holdings:",
+                    *(
+                        f"{item.symbol} — {item.quantity:,.0f} shares"
+                        for item in pledge.collateral_holdings
+                    ),
+                    f"Updated: {pledge.updated or 'N/A'}",
+                )
+            )
+        return "\n".join(lines)
 
     def insights_text(self, sections):
         return (

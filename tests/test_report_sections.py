@@ -11,8 +11,11 @@ from domain import (
     DailyReportSections,
     DividendCalendarItem,
     DividendCalendarSection,
+    FinancingLeverageSection,
     Holding,
     HoldingType,
+    Liability,
+    LiabilityType,
     Market,
     MarketSnapshotItem,
     MarketSnapshotSection,
@@ -24,6 +27,7 @@ from domain import (
     TransactionSummarySection,
     TransactionType,
     UpcomingEventItem,
+    UpcomingEventsSection,
 )
 from pams.application.report_sections import (
     BuildReportSectionsUseCase,
@@ -223,6 +227,143 @@ def test_renderer_orders_sections_and_omits_empty_watchlist_transactions() -> No
     assert "News provider not configured" in text
 
 
+def financing_liabilities() -> list[Liability]:
+    return [
+        Liability(
+            id="liability-margin-financing",
+            liability_type=LiabilityType.MARGIN_FINANCING,
+            principal=Decimal("595000"),
+            currency=Currency.TWD,
+            collateral_description="2027 margin quantity: 24,000 shares",
+            notes=(
+                "Source/update: broker screenshot, 2026-08-05. "
+                "Accrued interest reference: NT$4,583 (not included in principal)."
+            ),
+        ),
+        Liability(
+            id="liability-stock-pledge",
+            liability_type=LiabilityType.STOCK_PLEDGE,
+            principal=Decimal("998000"),
+            currency=Currency.TWD,
+            collateral_description=(
+                "Pledged collateral: 0050: 4,000 shares; 3293: 2,000 shares"
+            ),
+            notes=(
+                "Source/update: broker screenshot, 2026-08-05. "
+                "Accrued interest reference: NT$26,368 (not included in principal). "
+                "Repayment total reference: NT$1,024,368. "
+                "Collateral market value reference: NT$1,969,200. "
+                "Maintenance ratio reference: 197.31%."
+            ),
+        ),
+    ]
+
+
+def test_financing_section_parses_metadata_without_changing_principal_totals() -> None:
+    result = ReportSectionService.financing(
+        financing_liabilities(),
+        Decimal("4262330"),
+        Decimal("2669330"),
+        Decimal("0.373738"),
+    )
+
+    assert result is not None
+    assert result.total_principal_debt == Decimal("1593000")
+    assert result.total_accrued_interest == Decimal("30951")
+    assert result.total_debt == Decimal("1623951")
+    assert result.net_stock_equity == Decimal("2669330")
+    assert result.margin_financing is not None
+    assert result.margin_financing.position_symbol == "2027"
+    assert result.margin_financing.position_quantity == Decimal("24000")
+    assert result.margin_financing.updated == date(2026, 8, 5)
+    assert result.stock_pledge is not None
+    assert result.stock_pledge.repayment_total == Decimal("1024368")
+    assert result.stock_pledge.collateral_market_value == Decimal("1969200")
+    assert result.stock_pledge.maintenance_ratio == Decimal("1.9731")
+    assert [item.symbol for item in result.stock_pledge.collateral_holdings] == [
+        "0050",
+        "3293",
+    ]
+
+
+def test_financing_renderer_cards_text_order_and_empty_state() -> None:
+    financing = ReportSectionService.financing(
+        financing_liabilities(),
+        Decimal("4262330"),
+        Decimal("2669330"),
+        Decimal("0.3732"),
+    )
+    assert isinstance(financing, FinancingLeverageSection)
+    sections = DailyReportSections(
+        allocation=PortfolioAllocationSection((), (), (), ()),
+        upcoming_events=UpcomingEventsSection(status="No upcoming events"),
+        dividend_calendar=DividendCalendarSection(
+            items=(
+                DividendCalendarItem(
+                    "2330",
+                    "TSMC",
+                    date(2026, 8, 5),
+                    None,
+                    None,
+                    "Cash dividend",
+                    Decimal("1"),
+                    Decimal("1"),
+                    Decimal("1"),
+                    Decimal("0"),
+                    "Unknown Payment Date",
+                    "official",
+                ),
+            )
+        ),
+        financing_leverage=financing,
+        market_snapshot=MarketSnapshotSection(status="Market data unavailable"),
+    )
+    renderer = DailyReportSectionRenderer()
+    html = renderer.html(sections)
+    text = renderer.text(sections)
+    financing_html = renderer.financing_html(sections)
+
+    assert html.index("Portfolio Allocation") < html.index("Upcoming Events")
+    assert html.index("Dividend Calendar") < html.index("Financing &amp; Leverage")
+    assert html.index("Financing &amp; Leverage") < html.index("Market Snapshot")
+    assert "NT$1,593,000" in html
+    assert "NT$30,951" in html
+    assert "NT$1,623,951" in html
+    assert "24,000 shares" in html
+    assert "width:33.33%" not in financing_html
+    assert "width:50%" not in financing_html
+    assert financing_html.count("max-width:100%;table-layout:fixed") == 3
+    assert financing_html.index("Overall Financing") < financing_html.index(
+        "Margin Financing"
+    )
+    assert financing_html.index("Margin Financing") < financing_html.index(
+        "Stock Pledge"
+    )
+    assert "0050 — 4,000 shares" in text
+    assert "Maintenance Ratio: 197.31%" in text
+    assert DailyReportSectionRenderer().financing_html(DailyReportSections()) == ""
+    assert (
+        ReportSectionService.financing([], Decimal("0"), Decimal("0"), Decimal("0"))
+        is None
+    )
+
+
+def test_financing_renderer_shows_only_present_liability_subsection() -> None:
+    financing = ReportSectionService.financing(
+        financing_liabilities()[:1],
+        Decimal("1000000"),
+        Decimal("405000"),
+        Decimal("0.595"),
+    )
+    html = DailyReportSectionRenderer.financing_html(
+        DailyReportSections(financing_leverage=financing)
+    )
+
+    assert "Overall Financing" in html
+    assert "Margin Financing" in html
+    assert "Stock Pledge" not in html
+
+
 def test_upcoming_events_are_sorted_cut_off_and_preserve_relevance() -> None:
     start = date(2026, 7, 22)
     external = (
@@ -333,6 +474,28 @@ def test_section_settings_can_disable_every_section() -> None:
         disabled,
     ).execute(date(2026, 7, 22), [], Decimal("0"))
     assert result == DailyReportSections()
+
+
+def test_application_builder_loads_financing_with_snapshot_totals() -> None:
+    result = BuildReportSectionsUseCase(
+        _ListRepository(),
+        _ListRepository(),
+        _ListRepository(),
+        _Quotes(),
+        _ListRepository(),
+        ReportSectionSettings(),
+        liabilities=_ListRepository(financing_liabilities()),
+    ).execute(
+        date(2026, 8, 5),
+        [],
+        Decimal("0"),
+        total_market_value=Decimal("4262330"),
+        net_asset_value=Decimal("2669330"),
+        liability_ratio=Decimal("0.3732"),
+    )
+
+    assert result.financing_leverage is not None
+    assert result.financing_leverage.total_principal_debt == Decimal("1593000")
 
 
 def test_taiwan_performance_color_helper_preserves_semantic_direction() -> None:
