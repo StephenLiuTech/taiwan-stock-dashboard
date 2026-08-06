@@ -13,6 +13,10 @@ class ProviderDataError(MarketDataError):
     """The provider failed or returned structurally invalid data."""
 
 
+class ProviderRateLimitError(ProviderDataError):
+    """The configured provider rejected a request because its quota was exhausted."""
+
+
 class MarketDateUnavailableError(ProviderDataError):
     """The official date-query endpoint has no dataset for one requested date."""
 

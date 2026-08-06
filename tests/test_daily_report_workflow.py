@@ -44,6 +44,8 @@ def test_workflow_defines_exact_production_environment_at_job_level() -> None:
         "PAMS_ENVIRONMENT": "production",
         "PAMS_LOG_LEVEL": "INFO",
         "PAMS_EMAIL_TRANSPORT": "resend",
+        "PAMS_US_MARKET_DATA_PROVIDER": "alphavantage",
+        "PAMS_FX_PROVIDER": "alphavantage",
         "PAMS_DATABASE_URL": "${{ secrets.PAMS_DATABASE_URL }}",
         "PAMS_RESEND_API_KEY": "${{ secrets.PAMS_RESEND_API_KEY }}",
         "PAMS_EMAIL_FROM": "${{ secrets.PAMS_EMAIL_FROM }}",
@@ -54,6 +56,7 @@ def test_workflow_defines_exact_production_environment_at_job_level() -> None:
         ),
         "PAMS_REPORT_ASSET_BUCKET": "${{ secrets.PAMS_REPORT_ASSET_BUCKET }}",
         "PAMS_REPORT_ASSET_PREFIX": "${{ secrets.PAMS_REPORT_ASSET_PREFIX }}",
+        "PAMS_ALPHA_VANTAGE_API_KEY": "${{ secrets.PAMS_ALPHA_VANTAGE_API_KEY }}",
     }
     steps = job["steps"]
     assert isinstance(steps, list)

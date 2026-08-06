@@ -20,6 +20,7 @@ class PortfolioAllocationSection:
     by_instrument: tuple[AllocationItem, ...]
     unquoted_holdings: tuple[str, ...]
     classification_status: str = "Classification unavailable"
+    by_currency: tuple[AllocationItem, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,19 @@ class FinancingLeverageSection:
 
 
 @dataclass(frozen=True)
+class CurrencyExposureSection:
+    """Quoted TWD/USD exposure translated at persisted report-date FX."""
+
+    twd_exposure: Decimal
+    usd_exposure_twd: Decimal | None
+    total_quoted_market_value: Decimal
+    usd_portfolio_weight: Decimal | None
+    usd_twd_rate: Decimal | None
+    fx_rate_date: date | None
+    estimated_one_percent_usd_move: Decimal | None
+
+
+@dataclass(frozen=True)
 class NewsItem:
     headline: str
     publisher: str
@@ -204,6 +218,7 @@ class DailyReportSections:
     upcoming_events: UpcomingEventsSection | None = None
     dividend_calendar: DividendCalendarSection | None = None
     financing_leverage: FinancingLeverageSection | None = None
+    currency_exposure: CurrencyExposureSection | None = None
     ai_news: NewsSection | None = None
     semiconductor_news: NewsSection | None = None
     insights: PortfolioInsightsSection | None = None

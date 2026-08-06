@@ -73,6 +73,21 @@ class VerificationStub:
         )
 
 
+class EnrichmentEngine(FakeEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.enrich_called = False
+
+    def requires_enrichment(self, trade_date: date, **kwargs: object) -> bool:
+        del trade_date, kwargs
+        return True
+
+    def enrich_existing(self, trade_date: date, **kwargs: object) -> object:
+        del trade_date, kwargs
+        self.enrich_called = True
+        return sample_result()
+
+
 def test_update_automatic_date_runs_engine_when_sources_match() -> None:
     calendar = CalendarStub(date(2026, 7, 22), date(2026, 7, 22))
     engine = FakeEngine()
@@ -102,6 +117,20 @@ def test_repeated_automatic_update_returns_no_op_without_refresh() -> None:
     assert snapshots.queries == [selected_date]
     assert engine.refresh_called is False
     assert engine.preview_called is False
+
+
+def test_existing_snapshot_routes_incomplete_global_data_to_enrichment() -> None:
+    selected_date = date(2026, 7, 22)
+    engine = EnrichmentEngine()
+    result = UpdatePortfolioUseCase(
+        CalendarStub(selected_date, selected_date),  # type: ignore[arg-type]
+        engine,  # type: ignore[arg-type]
+        Path("pams.db"),
+        snapshot_repository=SnapshotsStub(selected_date),  # type: ignore[arg-type]
+    ).execute()
+    assert result.mode is UpdateMode.ENRICHED
+    assert engine.enrich_called is True
+    assert engine.refresh_called is False
 
 
 def test_repeated_automatic_update_force_rebuilds_existing_snapshot() -> None:

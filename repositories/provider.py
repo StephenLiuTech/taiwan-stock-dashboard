@@ -6,6 +6,7 @@ from repositories.holding_rebuild_uow import SQLiteHoldingRebuildUnitOfWork
 from repositories.interfaces import (
     DividendEventRepository,
     DividendRepository,
+    FxRateRepository,
     HoldingRebuildUnitOfWork,
     HoldingRepository,
     LiabilityRepository,
@@ -21,6 +22,7 @@ from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
 from repositories.postgresql import (
     PostgreSQLDividendEventRepository,
     PostgreSQLDividendRepository,
+    PostgreSQLFxRateRepository,
     PostgreSQLHoldingRepository,
     PostgreSQLLiabilityRepository,
     PostgreSQLPositionSnapshotRepository,
@@ -37,6 +39,7 @@ from repositories.postgresql_uow import (
 from repositories.sqlite import (
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
+    SQLiteFxRateRepository,
     SQLiteHoldingRepository,
     SQLiteLiabilityRepository,
     SQLitePositionSnapshotRepository,
@@ -56,6 +59,7 @@ class RepositoryBundle:
     transactions: TransactionRepository
     dividends: DividendRepository
     dividend_events: DividendEventRepository
+    fx_rates: FxRateRepository
     liabilities: LiabilityRepository
     price_quotes: PriceQuoteRepository
     daily_snapshots: SnapshotRepository
@@ -74,6 +78,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             SQLiteTransactionRepository(connection),
             SQLiteDividendRepository(connection),
             SQLiteDividendEventRepository(connection),
+            SQLiteFxRateRepository(connection),
             SQLiteLiabilityRepository(connection),
             SQLitePriceQuoteRepository(connection),
             SQLiteSnapshotRepository(connection),
@@ -89,6 +94,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             PostgreSQLTransactionRepository(connection),
             PostgreSQLDividendRepository(connection),
             PostgreSQLDividendEventRepository(connection),
+            PostgreSQLFxRateRepository(connection),
             PostgreSQLLiabilityRepository(connection),
             PostgreSQLPriceQuoteRepository(connection),
             PostgreSQLSnapshotRepository(connection),

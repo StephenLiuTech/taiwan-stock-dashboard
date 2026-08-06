@@ -304,3 +304,7 @@ that cash was received.
 The report's `Actual Cash Received` indicator means payment is expected under
 the official payment date; it is not broker-settlement verification and does
 not become transaction or accounting truth.
+
+PAMS uses TWD as its portfolio reporting currency while retaining each asset's
+native currency. The first multi-market boundary supports Taiwan equities in
+TWD and US equities/ETFs in USD through replaceable adapters.

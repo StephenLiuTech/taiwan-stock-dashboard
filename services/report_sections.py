@@ -8,6 +8,7 @@ from decimal import Decimal
 from domain import (
     AllocationItem,
     CollateralHoldingReference,
+    CurrencyExposureSection,
     DividendCalendarItem,
     DividendCalendarSection,
     DividendEvent,
@@ -17,6 +18,7 @@ from domain import (
     Liability,
     LiabilityType,
     MarginFinancingSection,
+    Market,
     NewsItem,
     NewsSection,
     PortfolioAllocationSection,
@@ -163,6 +165,53 @@ class ReportSectionService:
         )
 
     @staticmethod
+    def currency_exposure(
+        positions: list[PositionSnapshot], holdings: list[Holding]
+    ) -> CurrencyExposureSection | None:
+        """Derive neutral currency exposure only from quoted TWD position values."""
+        has_us_holding = any(
+            item.market is Market.US and item.quantity > 0 for item in holdings
+        )
+        if not has_us_holding:
+            return None
+        twd_exposure = sum(
+            (
+                item.market_value
+                for item in positions
+                if item.native_currency.value == "TWD"
+            ),
+            Decimal("0"),
+        )
+        us_positions = [
+            item for item in positions if item.native_currency.value == "USD"
+        ]
+        total = sum((item.market_value for item in positions), Decimal("0"))
+        if not us_positions:
+            return CurrencyExposureSection(
+                twd_exposure,
+                None,
+                total,
+                None,
+                None,
+                None,
+                None,
+            )
+        usd_exposure = sum((item.market_value for item in us_positions), Decimal("0"))
+        provenance = max(
+            us_positions,
+            key=lambda item: item.fx_rate_date or date.min,
+        )
+        return CurrencyExposureSection(
+            twd_exposure,
+            usd_exposure,
+            total,
+            usd_exposure / total if total else Decimal("0"),
+            provenance.fx_rate,
+            provenance.fx_rate_date,
+            usd_exposure * Decimal("0.01"),
+        )
+
+    @staticmethod
     def allocation(
         positions: list[PositionSnapshot], holdings: list[Holding]
     ) -> PortfolioAllocationSection:
@@ -184,13 +233,16 @@ class ReportSectionService:
             )
         )
         market_values: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        currency_values: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
         instrument_values: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
         quoted_ids = {item.holding_id for item in positions}
         for item in positions:
             holding = metadata.get(item.holding_id)
+            market = item.market if holding is None else holding.market
             market_values[
-                holding.market.value if holding else "Unknown"
+                "United States" if market is Market.US else "Taiwan"
             ] += item.market_value
+            currency_values[item.native_currency.value] += item.market_value
             kind = (
                 "ETF"
                 if holding and holding.holding_type is HoldingType.ETF
@@ -213,7 +265,11 @@ class ReportSectionService:
             )
         )
         return PortfolioAllocationSection(
-            by_holding, groups(market_values), groups(instrument_values), unquoted
+            by_holding,
+            groups(market_values),
+            groups(instrument_values),
+            unquoted,
+            by_currency=groups(currency_values),
         )
 
     @staticmethod

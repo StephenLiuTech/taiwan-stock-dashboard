@@ -119,6 +119,14 @@ def format_human_report(result: UpdateResult) -> str:
         f"Verified source date: {result.verified_source_date}",
         f"Database: {result.database_path}",
         f"Mode: {mode}",
+        *(
+            [
+                "Taiwan snapshot already exists; skipped Taiwan fetch",
+                f"Revalued existing snapshot for {result.requested_date}",
+            ]
+            if result.mode is UpdateMode.ENRICHED
+            else []
+        ),
         "",
         "Positions:",
     ]
@@ -208,6 +216,13 @@ def format_status_report(status: PortfolioOverview) -> str:
             f"{availability.tpex_latest_date or unavailable}",
             "Latest live commonly ingestible date: "
             f"{availability.commonly_ingestible_date or 'not currently available'}",
+            f"US market provider: {status.us_market_provider_status}",
+            f"FX provider: {status.fx_provider_status}",
+            "Latest persisted US quote date: "
+            f"{status.latest_us_quote_date or unavailable}",
+            "Latest persisted USD/TWD rate date: "
+            f"{status.latest_usd_twd_rate_date or unavailable}",
+            f"Active US holding count: {status.active_us_holding_count}",
         ]
     )
 

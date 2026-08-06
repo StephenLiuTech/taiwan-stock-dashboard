@@ -143,6 +143,9 @@ class PortfolioService:
         return PositionValuation(
             holding_id=holding.id,
             symbol=holding.symbol,
+            market=holding.market,
+            native_currency=holding.currency,
+            quote_date=quote.trade_date,
             quantity=holding.quantity,
             average_cost=holding.average_cost,
             close_price=quote.close_price,

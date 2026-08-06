@@ -101,6 +101,31 @@ def test_explicit_settlement_date_remains_compatible() -> None:
     assert result.settlement_date == date(2026, 7, 3)
 
 
+def test_us_transaction_requires_and_preserves_usd() -> None:
+    repository = FakeTransactionRepository()
+    us = AddTransactionCommand(
+        **{
+            **vars(command()),
+            "symbol": "mu",
+            "market": "US",
+            "currency": "USD",
+        }
+    )
+    result = AddTransactionUseCase(repository).execute(us)  # type: ignore[arg-type]
+    assert result.symbol == "MU"
+    assert result.market == "US"
+    assert result.currency == "USD"
+
+
+def test_market_currency_mismatch_is_rejected() -> None:
+    repository = FakeTransactionRepository()
+    invalid = AddTransactionCommand(
+        **{**vars(command()), "market": "US", "currency": "TWD"}
+    )
+    with pytest.raises(ValueError, match="US transactions require USD"):
+        AddTransactionUseCase(repository).execute(invalid)  # type: ignore[arg-type]
+
+
 def test_duplicate_transaction_id_is_rejected_without_overwrite() -> None:
     repository = FakeTransactionRepository()
     use_case = AddTransactionUseCase(repository)  # type: ignore[arg-type]

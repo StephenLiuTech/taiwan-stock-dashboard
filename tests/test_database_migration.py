@@ -110,7 +110,7 @@ def test_migration_copies_and_validates_every_table(
     ).execute()
     counts = dict(result.rows_copied)
     assert counts["liabilities"] == 1
-    assert counts["schema_version"] == 6
+    assert counts["schema_version"] == 7
     assert destination.execute("SELECT COUNT(*) FROM liabilities").fetchone()[0] == 1
 
 

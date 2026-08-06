@@ -45,3 +45,11 @@ The rebuild transaction does not expose or write `daily_snapshots`, `position_sn
 report date, and recipient. Its uniqueness constraint is the durable
 idempotency key. `SENDING` is an atomic claim, `SENT` prevents normal duplicate
 delivery, and `FAILED` remains retryable.
+
+## Multi-currency provenance
+
+Schema version 7 adds `fx_rates` at grain `(base_currency, quote_currency,
+rate_date, source)`, makes holding identity unique by `(symbol, market)`, and
+adds market, native currency, quote date, FX rate, and FX date to each position
+snapshot. Existing Taiwan rows migrate as TWD/FX 1 without rewriting aggregate
+snapshot values.

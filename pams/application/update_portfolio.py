@@ -68,19 +68,6 @@ class UpdatePortfolioUseCase:
             requested_date = source_availability.commonly_ingestible_date
             sources_synchronized = source_availability.synchronized
 
-        if (
-            not force
-            and self.snapshot_repository is not None
-            and self.snapshot_repository.get_by_date(requested_date) is not None
-        ):
-            return UpdateResult(
-                mode=UpdateMode.SNAPSHOT_EXISTS,
-                database_path=self.database_path,
-                requested_date=requested_date,
-                verified_source_date=None,
-                availability=availability,
-            )
-
         needs_historical_provider = (
             not automatic
             or not sources_synchronized
@@ -96,6 +83,27 @@ class UpdatePortfolioUseCase:
             else self.engine
         )
         projected_holdings = self._project_current_holdings()
+        existing_snapshot = (
+            self.snapshot_repository.get_by_date(requested_date)
+            if self.snapshot_repository is not None
+            else None
+        )
+        enrichment_required = (
+            existing_snapshot is not None
+            and not force
+            and hasattr(selected_engine, "requires_enrichment")
+            and selected_engine.requires_enrichment(
+                requested_date, holdings_override=projected_holdings
+            )
+        )
+        if existing_snapshot is not None and not force and not enrichment_required:
+            return UpdateResult(
+                mode=UpdateMode.SNAPSHOT_EXISTS,
+                database_path=self.database_path,
+                requested_date=requested_date,
+                verified_source_date=None,
+                availability=availability,
+            )
         if dry_run:
             engine_result = (
                 selected_engine.preview(requested_date)
@@ -103,6 +111,10 @@ class UpdatePortfolioUseCase:
                 else selected_engine.preview(
                     requested_date, holdings_override=projected_holdings
                 )
+            )
+        elif enrichment_required:
+            engine_result = selected_engine.enrich_existing(
+                requested_date, holdings_override=projected_holdings
             )
         elif force:
             engine_result = (
@@ -121,7 +133,11 @@ class UpdatePortfolioUseCase:
                 )
             )
         return self._result_dto(
-            engine_result, requested_date, dry_run=dry_run, availability=availability
+            engine_result,
+            requested_date,
+            dry_run=dry_run,
+            availability=availability,
+            enriched=enrichment_required,
         )
 
     def _project_current_holdings(self) -> tuple[Holding, ...] | None:
@@ -139,6 +155,7 @@ class UpdatePortfolioUseCase:
         *,
         dry_run: bool,
         availability: MarketAvailabilitySummary | None,
+        enriched: bool = False,
     ) -> UpdateResult:
         holdings = {holding.id: holding for holding in result.holdings}
         quotes = {(quote.symbol, quote.market): quote for quote in result.quotes}
@@ -164,7 +181,11 @@ class UpdatePortfolioUseCase:
             )
         summary = result.summary
         return UpdateResult(
-            mode=UpdateMode.DRY_RUN if dry_run else UpdateMode.UPDATED,
+            mode=(
+                UpdateMode.DRY_RUN
+                if dry_run
+                else (UpdateMode.ENRICHED if enriched else UpdateMode.UPDATED)
+            ),
             database_path=self.database_path,
             requested_date=requested_date,
             verified_source_date=result.verified_source_date,

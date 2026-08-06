@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from repositories.postgresql import (
+    PostgreSQLFxRateRepository,
     PostgreSQLHoldingRepository,
     PostgreSQLPositionSnapshotRepository,
     PostgreSQLPriceQuoteRepository,
@@ -20,6 +21,7 @@ class PostgreSQLMarketDataUnitOfWork:
         self.price_quotes = PostgreSQLPriceQuoteRepository(
             connection, auto_commit=False
         )
+        self.fx_rates = PostgreSQLFxRateRepository(connection, auto_commit=False)
         self.daily_snapshots = PostgreSQLSnapshotRepository(
             connection, auto_commit=False
         )

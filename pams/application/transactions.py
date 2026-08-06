@@ -36,9 +36,16 @@ class AddTransactionUseCase:
         self.transactions = transactions
 
     def execute(self, command: AddTransactionCommand) -> TransactionRecord:
+        market = Market(command.market)
+        currency = Currency(command.currency)
+        expected_currency = Currency.USD if market is Market.US else Currency.TWD
+        if currency is not expected_currency:
+            raise ValueError(
+                f"{market.value} transactions require {expected_currency.value} currency"
+            )
         transaction_values = {
             "symbol": command.symbol,
-            "market": Market(command.market),
+            "market": market,
             "transaction_type": TransactionType(command.transaction_type),
             "trade_date": command.trade_date,
             "settlement_date": command.settlement_date or command.trade_date,
@@ -46,7 +53,7 @@ class AddTransactionUseCase:
             "price": command.price,
             "fees": command.fees,
             "taxes": command.taxes,
-            "currency": Currency(command.currency),
+            "currency": currency,
             "notes": command.notes,
         }
         if command.transaction_id is not None:

@@ -12,6 +12,7 @@ MIGRATION_TABLES = (
     "dividends",
     "dividend_events",
     "price_quotes",
+    "fx_rates",
     "daily_snapshots",
     "position_snapshots",
     "report_deliveries",

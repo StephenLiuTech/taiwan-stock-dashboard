@@ -6,6 +6,7 @@ from io import BytesIO
 
 from PIL import Image, ImageDraw, ImageFont
 
+from domain import Currency, Market
 from pams.application.send_daily_report import (
     ChartSource,
     DailyEmailHistoryPoint,
@@ -32,7 +33,9 @@ POSITIVE_COLOR = TAIWAN_GAIN_COLOR
 NEGATIVE_COLOR = TAIWAN_LOSS_COLOR
 
 
-def _money(value: Decimal, *, signed: bool = False) -> str:
+def _money(value: Decimal | None, *, signed: bool = False) -> str:
+    if value is None:
+        return "N/A"
     if signed and value > 0:
         return f"+NT${value:,.2f}"
     if signed and value < 0:
@@ -40,8 +43,10 @@ def _money(value: Decimal, *, signed: bool = False) -> str:
     return f"NT${value:,.2f}"
 
 
-def _whole_money(value: Decimal, *, signed: bool = False) -> str:
+def _whole_money(value: Decimal | None, *, signed: bool = False) -> str:
     """Format an HTML table monetary value as a whole dollar."""
+    if value is None:
+        return "N/A"
     if signed and value > 0:
         return f"+NT${value:,.0f}"
     if signed and value < 0:
@@ -49,9 +54,16 @@ def _whole_money(value: Decimal, *, signed: bool = False) -> str:
     return f"NT${value:,.0f}"
 
 
-def _compact_number(value: Decimal) -> str:
+def _compact_number(value: Decimal | None) -> str:
     """Format a table price with at most two decimal places."""
-    return f"{value:,.2f}".rstrip("0").rstrip(".")
+    return "N/A" if value is None else f"{value:,.2f}".rstrip("0").rstrip(".")
+
+
+def _native_money(value: Decimal | None, currency: Currency) -> str:
+    if value is None:
+        return "N/A"
+    prefix = "US$" if currency is Currency.USD else "NT$"
+    return f"{prefix}{_compact_number(value)}"
 
 
 def _percent(value: Decimal | None, *, signed: bool = False) -> str:
@@ -61,12 +73,12 @@ def _percent(value: Decimal | None, *, signed: bool = False) -> str:
     return f"{prefix}{value * 100:,.2f}%"
 
 
-def _tone(value: Decimal) -> str:
+def _tone(value: Decimal | None) -> str:
     return taiwan_performance_color(value)
 
 
 def _history_text(history: tuple[DailyEmailHistoryPoint, ...]) -> list[str]:
-    if len(history) == 1:
+    if len(history) <= 1:
         return [CHART_FALLBACK]
     lines = [
         (
@@ -88,20 +100,29 @@ def _ranked_contributors(
 ) -> list[DailyEmailPosition]:
     return sorted(
         positions,
-        key=lambda item: (-abs(item.daily_profit_loss), item.symbol),
+        key=lambda item: (
+            -(
+                abs(item.daily_profit_loss)
+                if item.daily_profit_loss is not None
+                else Decimal("-1")
+            ),
+            item.symbol,
+        ),
     )
 
 
 def _contributor_text(positions: tuple[DailyEmailPosition, ...]) -> list[str]:
     lines = [
-        "Rank | Symbol | Name | Today's P/L | Today's P/L % | Share of net daily P/L"
+        "Rank | Market | Symbol | Name | Quote Date | Today's P/L | Today's P/L % | Share of net daily P/L"
     ]
     lines.extend(
         " | ".join(
             (
                 str(rank),
+                item.market.value,
                 item.symbol,
                 item.name,
+                str(item.quote_date or "N/A"),
                 _money(item.daily_profit_loss, signed=True),
                 _percent(item.daily_profit_loss_percentage, signed=True),
                 _percent(item.daily_profit_loss_share, signed=True),
@@ -290,6 +311,22 @@ class DailyEmailReportRenderer:
         """Return deterministic plain text, HTML, subject, and inline chart."""
         subject = f"PAMS Daily Portfolio Report - {report.report_date}"
         contributors = _ranked_contributors(report.positions)
+        taiwan_market_value = sum(
+            (
+                item.market_value
+                for item in report.positions
+                if item.market is not Market.US and item.market_value is not None
+            ),
+            Decimal("0"),
+        )
+        us_market_value = sum(
+            (
+                item.market_value
+                for item in report.positions
+                if item.market is Market.US and item.market_value is not None
+            ),
+            Decimal("0"),
+        )
         dividend_summary = report.sections.dividend_calendar
         expected_dividend_text = (
             [
@@ -315,6 +352,8 @@ class DailyEmailReportRenderer:
                 f"{_percent(report.daily_profit_loss_percentage, signed=True)}"
             ),
             f"Net stock equity: {_money(report.net_asset_value)}",
+            f"Taiwan Holdings: {_money(taiwan_market_value)}",
+            f"US Holdings: {_money(us_market_value)}",
             f"Total stock market value: {_money(report.total_market_value)}",
             f"Total investment cost: {_money(report.total_cost_basis)}",
             f"Unrealized P/L: {_money(report.total_unrealized_pnl, signed=True)}",
@@ -332,26 +371,32 @@ class DailyEmailReportRenderer:
             "",
             "Holdings",
             (
-                "Symbol | Name | Quantity | Average Cost | Close | Daily Change | "
-                "Today's P/L | Today's P/L % | Market Value | Unrealized P/L | "
-                "Return | Weight"
+                "Market | Symbol | Name | Currency | Quantity | Average Cost | Close | "
+                "Quote Date | FX | Today's P/L | Today's P/L % | Unrealized P/L | "
+                "Return % | Market Value"
             ),
         ]
         text_lines.extend(
             " | ".join(
                 (
+                    item.market.value,
                     item.symbol,
                     item.name,
+                    item.native_currency.value,
                     f"{item.quantity:,.2f}",
-                    _money(item.average_cost),
-                    _money(item.close_price),
-                    _percent(item.daily_return, signed=True),
+                    _native_money(item.average_cost, item.native_currency),
+                    _native_money(item.close_price, item.native_currency),
+                    str(item.quote_date or "N/A"),
+                    (
+                        _compact_number(item.fx_rate)
+                        if item.market is Market.US
+                        else "—"
+                    ),
                     _money(item.daily_profit_loss, signed=True),
                     _percent(item.daily_profit_loss_percentage, signed=True),
-                    _money(item.market_value),
                     _money(item.unrealized_pnl, signed=True),
                     _percent(item.unrealized_return, signed=True),
-                    _percent(item.portfolio_weight),
+                    _money(item.market_value),
                 )
             )
             for item in report.positions
@@ -366,8 +411,10 @@ class DailyEmailReportRenderer:
                 font_size="14px",
                 padding="11px 6px",
             )
-            + _cell(item.symbol, width="13%", font_size="14px")
+            + _cell(item.market.value, width="8%", font_size="14px")
+            + _cell(item.symbol, width="11%", font_size="14px")
             + _cell(item.name, name=True, font_size="14px")
+            + _cell(str(item.quote_date or "N/A"), width="13%", font_size="14px")
             + _cell(
                 _whole_money(item.daily_profit_loss, signed=True),
                 color=_tone(item.daily_profit_loss),
@@ -397,8 +444,10 @@ class DailyEmailReportRenderer:
         )
         rows = "".join(
             "<tr>"
-            + _cell(item.symbol, width="8%", padding="10px 6px")
+            + _cell(item.market.value, width="7%", padding="10px 6px")
+            + _cell(item.symbol, width="7%", padding="10px 6px")
             + _cell(item.name, name=True, padding="10px 6px")
+            + _cell(item.native_currency.value, width="7%", padding="10px 6px")
             + _cell(
                 f"{item.quantity:,.0f}",
                 align="right",
@@ -406,15 +455,27 @@ class DailyEmailReportRenderer:
                 padding="10px 6px",
             )
             + _cell(
-                _compact_number(item.average_cost),
+                _native_money(item.average_cost, item.native_currency),
                 align="right",
                 width="10%",
                 padding="10px 6px",
             )
             + _cell(
-                _compact_number(item.close_price),
+                _native_money(item.close_price, item.native_currency),
                 align="right",
                 width="8%",
+                padding="10px 6px",
+            )
+            + _cell(
+                str(item.quote_date or "N/A"),
+                align="right",
+                width="9%",
+                padding="10px 6px",
+            )
+            + _cell(
+                _compact_number(item.fx_rate) if item.market is Market.US else "—",
+                align="right",
+                width="7%",
                 padding="10px 6px",
             )
             + _cell(
@@ -514,6 +575,9 @@ class DailyEmailReportRenderer:
         summary_cards = (
             "<tr>"
             + _summary_card("Net stock equity", _money(report.net_asset_value))
+            + _summary_card("Taiwan Holdings", _money(taiwan_market_value))
+            + _summary_card("US Holdings", _money(us_market_value))
+            + "</tr><tr>"
             + _summary_card(
                 "Total stock market value", _money(report.total_market_value)
             )
@@ -561,13 +625,13 @@ class DailyEmailReportRenderer:
 {chart_html}
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
 <table style="border-collapse:collapse;width:100%;table-layout:auto">
-<thead><tr>{headers((("Rank", "7%", "right"), ("Symbol", "13%", "left"), ("Name", None, "left"), ("Today's P/L", "19%", "right"), ("Today's P/L %", "17%", "right"), ("Share of Net P/L", "20%", "right")), font_size="14px")}</tr></thead>
+<thead><tr>{headers((("Rank", "5%", "right"), ("Market", "8%", "left"), ("Symbol", "10%", "left"), ("Name", None, "left"), ("Quote Date", "13%", "left"), ("Today's P/L", "15%", "right"), ("Today's P/L %", "13%", "right"), ("Share of Net P/L", "16%", "right")), font_size="14px")}</tr></thead>
 <tbody>{contributor_rows}</tbody></table>
 <p style="font-size:12px;color:{NEUTRAL_COLOR}">Ranked by absolute daily P/L
 impact. Share is unavailable when total portfolio daily P/L is zero.</p>
 <h2 style="font-size:18px;margin-top:24px">Holdings</h2>
 <table style="border-collapse:collapse;width:100%;table-layout:auto">
-<thead><tr>{headers((("Symbol", "8%", "left"), ("Name", None, "left"), ("Quantity", "9%", "right"), ("Average Cost", "10%", "right"), ("Close", "8%", "right"), ("Today's P/L", "11%", "right"), ("Today's P/L %", "9%", "right"), ("Unrealized P/L", "11%", "right"), ("Return %", "8%", "right"), ("Market Value", "10%", "right")), font_size="13px")}</tr></thead>
+<thead><tr>{headers((("Market", "6%", "left"), ("Symbol", "7%", "left"), ("Name", None, "left"), ("Currency", "7%", "left"), ("Quantity", "7%", "right"), ("Average Cost", "9%", "right"), ("Close", "7%", "right"), ("Quote Date", "9%", "right"), ("FX", "6%", "right"), ("Today's P/L", "9%", "right"), ("Today's P/L %", "7%", "right"), ("Unrealized P/L", "9%", "right"), ("Return %", "6%", "right"), ("Market Value", "9%", "right")), font_size="13px")}</tr></thead>
 <tbody>{rows}</tbody></table>
 {DailyReportSectionRenderer().html(report.sections)}
 </div></body></html>"""

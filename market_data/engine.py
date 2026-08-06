@@ -28,6 +28,8 @@ from repositories.interfaces import (
 from services.portfolio import PortfolioService
 from services.snapshot import DuplicateSnapshotError, SnapshotService
 
+TAIWAN_MARKETS = (Market.TWSE, Market.TPEX)
+
 
 @dataclass(frozen=True)
 class MarketDataRefreshResult:
@@ -61,7 +63,7 @@ class MarketDataEngine:
 
     def dependency_graph_ready(self) -> bool:
         """Return whether every concrete dependency required to run is wired."""
-        return set(self.providers) == set(Market) and all(
+        return set(self.providers) == set(TAIWAN_MARKETS) and all(
             dependency is not None
             for dependency in (
                 self.holdings,
@@ -136,9 +138,12 @@ class MarketDataEngine:
             if holdings_override is not None
             else self.holdings.list_all()
         )
+        taiwan_holdings = [
+            holding for holding in holdings if holding.market in TAIWAN_MARKETS
+        ]
         requested = {
             market: {holding.symbol for holding in holdings if holding.market == market}
-            for market in Market
+            for market in TAIWAN_MARKETS
         }
         fetched_at = datetime.now(UTC)
         quotes: list[PriceQuote] = []
@@ -189,7 +194,7 @@ class MarketDataEngine:
             )
 
         summary = self.portfolio.value_portfolio(
-            holdings, quotes, self.liabilities.list_all(), trade_date
+            taiwan_holdings, quotes, self.liabilities.list_all(), trade_date
         )
         snapshot = SnapshotService(self.unit_of_work.daily_snapshots).preview(summary)
         return MarketDataRefreshResult(

@@ -1,5 +1,6 @@
 """Current portfolio valuation application workflow."""
 
+from domain import Currency, Market, MultiCurrencyPortfolioValuation
 from pams.application.dto import PortfolioValuation
 from pams.application.exceptions import (
     MissingQuoteError,
@@ -7,11 +8,12 @@ from pams.application.exceptions import (
     ValuationRepositoryError,
 )
 from repositories.interfaces import (
+    FxRateRepository,
     HoldingRepository,
     PriceQuoteRepository,
     TransactionRepository,
 )
-from services import TransactionEngine, ValuationEngine
+from services import MultiCurrencyValuationEngine, TransactionEngine, ValuationEngine
 
 
 class ValuatePortfolioUseCase:
@@ -24,14 +26,20 @@ class ValuatePortfolioUseCase:
         engine: ValuationEngine | None = None,
         transactions: TransactionRepository | None = None,
         transaction_engine: TransactionEngine | None = None,
+        fx_rates: FxRateRepository | None = None,
+        multi_currency_engine: MultiCurrencyValuationEngine | None = None,
     ) -> None:
         self.holdings = holdings
         self.quotes = quotes
         self.engine = engine or ValuationEngine()
         self.transactions = transactions
         self.transaction_engine = transaction_engine or TransactionEngine()
+        self.fx_rates = fx_rates
+        self.multi_currency_engine = (
+            multi_currency_engine or MultiCurrencyValuationEngine()
+        )
 
-    def execute(self) -> PortfolioValuation:
+    def execute(self) -> PortfolioValuation | MultiCurrencyPortfolioValuation:
         """Value every persisted holding against its latest matching quote."""
         try:
             holdings = self.holdings.list_all()
@@ -66,4 +74,20 @@ class ValuatePortfolioUseCase:
                 quotes.append(quote)
         if missing:
             raise MissingQuoteError("Missing latest quote for: " + ", ".join(missing))
+        if any(holding.market is Market.US for holding in holdings):
+            report_date = max(quote.trade_date for quote in quotes)
+            fx_rate = (
+                self.fx_rates.get_latest_on_or_before(
+                    Currency.USD.value, Currency.TWD.value, report_date
+                )
+                if self.fx_rates
+                else None
+            )
+            if fx_rate is None:
+                raise MissingQuoteError(
+                    "Missing eligible USD/TWD FX rate for multi-market valuation"
+                )
+            return self.multi_currency_engine.valuate(
+                report_date, holdings, quotes, fx_rate
+            )
         return self.engine.valuate(holdings, quotes)

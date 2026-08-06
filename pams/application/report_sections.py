@@ -144,6 +144,7 @@ class BuildReportSectionsUseCase:
             and liability_ratio is not None
             else None
         )
+        currency_exposure = ReportSectionService.currency_exposure(positions, holdings)
         events_failed = False
         if self.event_provider is None:
             external_events = ()
@@ -177,6 +178,7 @@ class BuildReportSectionsUseCase:
                 dividends_for_report if self.settings.show_dividends else None
             ),
             financing_leverage=financing,
+            currency_exposure=currency_exposure,
             ai_news=(
                 self._news("ai_news", self.ai_news_provider, report_date)
                 if self.settings.show_ai_news

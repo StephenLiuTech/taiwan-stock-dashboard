@@ -5,7 +5,13 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Protocol
 
-from domain import DailyReportSections, DailySnapshot, PositionSnapshot
+from domain import (
+    Currency,
+    DailyReportSections,
+    DailySnapshot,
+    Market,
+    PositionSnapshot,
+)
 from pams.application.report_sections import BuildReportSectionsUseCase
 from pams.application.update_portfolio import UpdatePortfolioUseCase
 from repositories import (
@@ -44,15 +50,20 @@ class DailyEmailPosition:
     name: str
     quantity: Decimal
     average_cost: Decimal
-    close_price: Decimal
+    close_price: Decimal | None
     daily_return: Decimal | None
-    market_value: Decimal
-    unrealized_pnl: Decimal
-    unrealized_return: Decimal
-    portfolio_weight: Decimal
-    daily_profit_loss: Decimal
-    daily_profit_loss_percentage: Decimal
+    market_value: Decimal | None
+    unrealized_pnl: Decimal | None
+    unrealized_return: Decimal | None
+    portfolio_weight: Decimal | None
+    daily_profit_loss: Decimal | None
+    daily_profit_loss_percentage: Decimal | None
     daily_profit_loss_share: Decimal | None
+    market: Market = Market.TWSE
+    native_currency: Currency = Currency.TWD
+    quote_date: date | None = None
+    fx_rate: Decimal = Decimal("1")
+    fx_rate_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -265,7 +276,8 @@ class SendDailyReportUseCase:
     def _build_report(
         self, snapshot: DailySnapshot, verified_source_date: date
     ) -> DailyEmailReport:
-        names = {holding.id: holding.name for holding in self._holdings.list_all()}
+        holdings = self._holdings.list_all()
+        names = {holding.id: holding.name for holding in holdings}
         persisted = self._positions.list_by_date(snapshot.snapshot_date)
         daily_performance = PortfolioService.calculate_daily_performance(persisted)
         contribution_by_holding = {
@@ -285,7 +297,7 @@ class SendDailyReportUseCase:
             )
             for item in historical_snapshots
         )
-        positions = tuple(
+        quoted_positions = tuple(
             self._position(
                 item,
                 names.get(item.holding_id, item.symbol),
@@ -293,7 +305,37 @@ class SendDailyReportUseCase:
                 contribution_by_holding[item.holding_id].return_percentage,
                 contribution_by_holding[item.holding_id].portfolio_profit_loss_share,
             )
-            for item in sorted(persisted, key=lambda value: value.symbol)
+            for item in sorted(
+                persisted, key=lambda value: (value.market.value, value.symbol)
+            )
+        )
+        quoted_ids = {item.holding_id for item in persisted}
+        unavailable_positions = tuple(
+            DailyEmailPosition(
+                symbol=item.symbol,
+                name=item.name,
+                quantity=item.quantity,
+                average_cost=item.average_cost,
+                close_price=None,
+                daily_return=None,
+                market_value=None,
+                unrealized_pnl=None,
+                unrealized_return=None,
+                portfolio_weight=None,
+                daily_profit_loss=None,
+                daily_profit_loss_percentage=None,
+                daily_profit_loss_share=None,
+                market=item.market,
+                native_currency=item.currency,
+            )
+            for item in holdings
+            if item.quantity > 0 and item.id not in quoted_ids
+        )
+        positions = tuple(
+            sorted(
+                (*quoted_positions, *unavailable_positions),
+                key=lambda value: (value.market.value, value.symbol),
+            )
         )
         sections = (
             self._section_builder.execute(
@@ -346,4 +388,9 @@ class SendDailyReportUseCase:
             daily_profit_loss,
             daily_profit_loss_percentage,
             daily_profit_loss_share,
+            value.market,
+            value.native_currency,
+            value.quote_date,
+            value.fx_rate,
+            value.fx_rate_date,
         )

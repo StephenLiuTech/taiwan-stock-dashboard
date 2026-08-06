@@ -569,3 +569,23 @@ cash dividend per share only when `payment_date <= report_date`; otherwise it
 is zero. An unavailable estimate produces `N/A`. Actual Cash Received means the
 dividend is expected to have been paid according to the official payment date.
 It does not verify actual broker settlement.
+
+## Multi-market valuation boundary
+
+`GlobalMarketDataEngine` coordinates the existing official Taiwan engine with
+separate `USMarketDataProvider` and `FXRateProvider` ports. Vendor parsing stays
+in adapters. The pure `MultiCurrencyValuationEngine` uses `Decimal` and constant
+report-date USD/TWD translation. Repositories persist quote and FX provenance.
+Taiwan-only portfolios retain the existing flow. The orchestrator requests
+each distinct active US symbol once and USD/TWD once. Optional-provider
+failures are isolated from Taiwan ingestion: eligible non-future persisted US
+quotes and FX may be reused, and failures never delete persisted market data.
+Without an eligible fallback the affected US translated fields remain
+unavailable rather than fabricated, while the Taiwan snapshot stays valid.
+All values selected for a successful snapshot are written at one atomic
+quote/rate/snapshot boundary.
+
+`Market.US` is the canonical portfolio market. NASDAQ, NYSE, NYSE Arca, and
+similar identifiers are listing or execution venues, not portfolio identity.
+Holding and quote identity remains `(symbol, market)`; venue metadata may be
+added later without changing that identity if a reliable provider supplies it.

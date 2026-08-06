@@ -1,0 +1,10 @@
+PAMS Daily Portfolio Report
+Report date: 2026-08-05
+Reporting currency: TWD
+
+Holdings
+Market | Symbol | Name | Currency | Quantity | Average Cost | Close | Quote Date | FX | Today's P/L | Today's P/L % | Unrealized P/L | Return % | Market Value
+TWSE | 2330 | TSMC | TWD | 10 | NT$100 | NT$110 | 2026-08-05 | — | +NT$20 | +1.85% | +NT$100 | +10.00% | NT$1,100
+US | MU | Micron | USD | 10 | US$150.25 | US$158.3 | 2026-08-04 | 31.42 | +NT$2,608 | +5.53% | +NT$2,529 | +5.36% | NT$49,738
+
+Translation: constant report-date USD/TWD FX. US quote date: 2026-08-04.

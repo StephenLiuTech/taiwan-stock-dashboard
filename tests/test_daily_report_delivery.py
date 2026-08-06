@@ -484,7 +484,9 @@ def test_html_and_plain_text_contain_correct_persisted_figures() -> None:
     assert message.html.index("Portfolio Trend") < message.html.index(
         "Today's Contributors"
     )
-    assert message.html.index("Today's Contributors") < message.html.index("Holdings")
+    assert message.html.index("Today's Contributors") < message.html.index(
+        ">Holdings</h2>"
+    )
     assert message.plain_text.index("Portfolio Summary") < message.plain_text.index(
         "Portfolio Trend"
     )
@@ -548,9 +550,9 @@ def test_position_daily_contributions_cover_positive_negative_and_zero() -> None
     case.execute(date(2026, 7, 22))
 
     text = transport.messages[0].plain_text
-    assert "2330 | TSMC | +NT$25.00 | +2.56%" in text
-    assert "8299 | Phison | -NT$10.00 | -4.76%" in text
-    assert "ZERO | ZERO | NT$0.00 | 0.00%" in text
+    assert "TWSE | 2330 | TSMC | N/A | +NT$25.00 | +2.56%" in text
+    assert "TWSE | 8299 | Phison | N/A | -NT$10.00 | -4.76%" in text
+    assert "TWSE | ZERO | ZERO | N/A | NT$0.00 | 0.00%" in text
     html = transport.messages[0].html
     contributors = html.split(">Today's Contributors</h2>", maxsplit=1)[1].split(
         "</table>", maxsplit=1
@@ -577,8 +579,8 @@ def test_contributors_are_ranked_by_absolute_portfolio_impact() -> None:
         "Today's Contributors\n", maxsplit=1
     )[1]
     contributor_rows = contributor_section.split("\n")
-    assert contributor_rows[1].startswith("1 | 8299 | Phison | -NT$50.00")
-    assert contributor_rows[2].startswith("2 | 2330 | TSMC | +NT$5.00")
+    assert contributor_rows[1].startswith("1 | TWSE | 8299 | Phison | N/A | -NT$50.00")
+    assert contributor_rows[2].startswith("2 | TWSE | 2330 | TSMC | N/A | +NT$5.00")
 
 
 def test_holdings_include_daily_pnl_columns_and_conditional_formatting() -> None:
@@ -622,8 +624,8 @@ def test_html_holdings_uses_compact_non_scrolling_column_set() -> None:
     assert "overflow-x:auto" not in holdings
     assert "word-break:keep-all" in holdings
     assert ">2</td>" in holdings
-    assert ">400</td>" in holdings
-    assert ">500</td>" in holdings
+    assert ">NT$400</td>" in holdings
+    assert ">NT$500</td>" in holdings
     assert "+NT$20</td>" in holdings
     assert "+NT$20.00</td>" not in holdings
     assert "NT$1,000</td>" in holdings
@@ -695,8 +697,8 @@ def test_html_table_numbers_follow_display_precision_rules() -> None:
         "</table>", maxsplit=1
     )[0]
     assert ">6,100</td>" in holdings
-    assert ">97.6</td>" in holdings
-    assert ">44.45</td>" in holdings
+    assert ">NT$97.6</td>" in holdings
+    assert ">NT$44.45</td>" in holdings
     assert "+NT$37,500</td>" in holdings
     assert "+NT$105,970</td>" in holdings
     assert "NT$622,200</td>" in holdings

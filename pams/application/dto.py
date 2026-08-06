@@ -15,6 +15,7 @@ class UpdateMode(StrEnum):
     """Stable operational outcomes for a portfolio update."""
 
     UPDATED = "updated"
+    ENRICHED = "enriched_existing_snapshot"
     DRY_RUN = "dry_run"
     SNAPSHOT_EXISTS = "no_update_snapshot_exists"
     SOURCES_UNSYNCHRONIZED = "no_update_sources_unsynchronized"
@@ -133,6 +134,11 @@ class PortfolioOverview:
     schema_version: int | None
     database_size_bytes: int
     market_availability: MarketAvailabilitySummary
+    us_market_provider_status: str = "disabled"
+    fx_provider_status: str = "disabled"
+    latest_us_quote_date: date | None = None
+    latest_usd_twd_rate_date: date | None = None
+    active_us_holding_count: int = 0
     market_value: Decimal | None = None
     net_equity: Decimal | None = None
     unrealized_pnl: Decimal | None = None

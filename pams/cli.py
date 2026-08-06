@@ -165,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     add = transaction_commands.add_parser("add", help="record one transaction")
     add.add_argument("--id", dest="transaction_id")
     add.add_argument("--symbol", required=True)
-    add.add_argument("--market", required=True, choices=("TWSE", "TPEX"))
+    add.add_argument("--market", required=True, choices=("TWSE", "TPEX", "US"))
     add.add_argument("--type", required=True, choices=("buy", "sell"))
     add.add_argument("--trade-date", required=True, type=parse_iso_date)
     add.add_argument(
@@ -223,7 +223,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     watchlist_add = watchlist_commands.add_parser("add", help="add one instrument")
     watchlist_add.add_argument("symbol")
-    watchlist_add.add_argument("--market", required=True, choices=("TWSE", "TPEX"))
+    watchlist_add.add_argument(
+        "--market", required=True, choices=("TWSE", "TPEX", "US")
+    )
     watchlist_add.add_argument("--name")
     watchlist_add.add_argument("--target-price", type=parse_decimal)
     watchlist_add.add_argument("--buy-below", type=parse_decimal)

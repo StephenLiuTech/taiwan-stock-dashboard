@@ -4,6 +4,12 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from domain import Market
+from market_data.providers.global_markets import (
+    AlphaVantageFXRateProvider,
+    AlphaVantageUSMarketDataProvider,
+    FXRateProvider,
+    USMarketDataProvider,
+)
 from market_data.providers.historical_tpex import HistoricalTPExProvider
 from market_data.providers.historical_twse import HistoricalTWSEProvider
 from market_data.providers.latest import TPExProvider, TWSEProvider
@@ -22,7 +28,11 @@ class MarketDataProvider(Protocol):
 __all__ = [
     "HistoricalTPExProvider",
     "HistoricalTWSEProvider",
+    "AlphaVantageFXRateProvider",
+    "AlphaVantageUSMarketDataProvider",
+    "FXRateProvider",
     "MarketDataProvider",
     "TPExProvider",
     "TWSEProvider",
+    "USMarketDataProvider",
 ]

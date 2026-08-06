@@ -4,6 +4,7 @@ from repositories.holding_rebuild_uow import SQLiteHoldingRebuildUnitOfWork
 from repositories.interfaces import (
     DividendEventRepository,
     DividendRepository,
+    FxRateRepository,
     HoldingRebuildRepository,
     HoldingRebuildUnitOfWork,
     HoldingRepository,
@@ -21,6 +22,7 @@ from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
 from repositories.postgresql import (
     PostgreSQLDividendEventRepository,
     PostgreSQLDividendRepository,
+    PostgreSQLFxRateRepository,
     PostgreSQLHoldingRepository,
     PostgreSQLLiabilityRepository,
     PostgreSQLPositionSnapshotRepository,
@@ -37,6 +39,7 @@ from repositories.postgresql_uow import (
 from repositories.sqlite import (
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
+    SQLiteFxRateRepository,
     SQLiteHoldingRepository,
     SQLiteLiabilityRepository,
     SQLitePositionSnapshotRepository,
@@ -50,6 +53,7 @@ from repositories.sqlite import (
 __all__ = [
     "DividendRepository",
     "DividendEventRepository",
+    "FxRateRepository",
     "HoldingRepository",
     "HoldingRebuildRepository",
     "HoldingRebuildUnitOfWork",
@@ -58,6 +62,7 @@ __all__ = [
     "PositionSnapshotRepository",
     "PostgreSQLDividendRepository",
     "PostgreSQLDividendEventRepository",
+    "PostgreSQLFxRateRepository",
     "PostgreSQLHoldingRepository",
     "PostgreSQLHoldingRebuildUnitOfWork",
     "PostgreSQLLiabilityRepository",
@@ -72,6 +77,7 @@ __all__ = [
     "ReportDeliveryRepository",
     "SQLiteDividendRepository",
     "SQLiteDividendEventRepository",
+    "SQLiteFxRateRepository",
     "SQLiteHoldingRepository",
     "SQLiteHoldingRebuildUnitOfWork",
     "SQLiteLiabilityRepository",

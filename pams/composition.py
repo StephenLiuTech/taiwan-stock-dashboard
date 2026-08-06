@@ -35,7 +35,10 @@ from market_data.dividends import (
     TWSEHistoricalDividendProvider,
 )
 from market_data.engine import MarketDataEngine
+from market_data.global_engine import GlobalMarketDataEngine
 from market_data.providers import (
+    AlphaVantageFXRateProvider,
+    AlphaVantageUSMarketDataProvider,
     HistoricalTPExProvider,
     HistoricalTWSEProvider,
     MarketDataProvider,
@@ -496,6 +499,54 @@ def _compose(
             liabilities,
             repositories.market_data_uow,
         )
+        alpha_key = (
+            settings.alpha_vantage_api_key.get_secret_value()
+            if settings.alpha_vantage_api_key is not None
+            else None
+        )
+
+        def global_engine(
+            taiwan_engine: MarketDataEngine,
+        ) -> MarketDataEngine | GlobalMarketDataEngine:
+            has_us_holdings = any(
+                item.market is Market.US for item in holdings.list_all()
+            )
+            if not has_us_holdings:
+                return taiwan_engine
+            if settings.us_market_data_provider == "alphavantage" and not alpha_key:
+                raise ValueError(
+                    "PAMS_ALPHA_VANTAGE_API_KEY is required for the configured US provider"
+                )
+            if settings.fx_provider == "alphavantage" and not alpha_key:
+                raise ValueError(
+                    "PAMS_ALPHA_VANTAGE_API_KEY is required for the configured FX provider"
+                )
+            document_transport = UrllibJSONDocumentTransport(
+                timeout_seconds=settings.market_http_timeout_seconds,
+                attempts=settings.market_http_attempts,
+                provider_name="Alpha Vantage",
+            )
+            us_provider = (
+                AlphaVantageUSMarketDataProvider(alpha_key, document_transport)
+                if settings.us_market_data_provider == "alphavantage" and alpha_key
+                else None
+            )
+            fx_provider = (
+                AlphaVantageFXRateProvider(alpha_key, document_transport)
+                if settings.fx_provider == "alphavantage" and alpha_key
+                else None
+            )
+            return GlobalMarketDataEngine(
+                taiwan_engine,
+                holdings,
+                liabilities,
+                repositories.market_data_uow,
+                repositories.fx_rates,
+                us_provider,
+                fx_provider,
+            )
+
+        engine = global_engine(engine)
         dividend_provider = OfficialDividendProvider(
             CompositeDividendSource(
                 TWSEDividendProvider(latest_transport(Market.TWSE)),
@@ -540,8 +591,25 @@ def _compose(
         status_service = OperationalStatusService(
             connection, database_path, repositories, database.size_bytes
         )
+        us_provider_status = (
+            "ready"
+            if settings.us_market_data_provider == "alphavantage" and alpha_key
+            else "disabled"
+        )
+        fx_provider_status = (
+            "ready"
+            if settings.fx_provider == "alphavantage" and alpha_key
+            else "disabled"
+        )
         verification_service = VerificationService(
-            connection, database_path, date_providers, calendar, engine
+            connection,
+            database_path,
+            date_providers,
+            calendar,
+            engine,
+            repositories,
+            us_provider_status,
+            fx_provider_status,
         )
         snapshots = repositories.daily_snapshots
         position_snapshots = repositories.position_snapshots
@@ -553,6 +621,7 @@ def _compose(
             quotes,
             transactions=transaction_repository,
             transaction_engine=transaction_engine,
+            fx_rates=repositories.fx_rates,
         )
         holding_metadata = {
             (holding.symbol, holding.market, holding.currency): (
@@ -561,15 +630,19 @@ def _compose(
             for holding in holdings.list_all()
         }
 
-        def historical_engine(trade_date: date) -> MarketDataEngine:
-            return MarketDataEngine(
-                (
-                    historical_twse(trade_date),
-                    historical_tpex(trade_date),
-                ),
-                holdings,
-                liabilities,
-                repositories.market_data_uow,
+        def historical_engine(
+            trade_date: date,
+        ) -> MarketDataEngine | GlobalMarketDataEngine:
+            return global_engine(
+                MarketDataEngine(
+                    (
+                        historical_twse(trade_date),
+                        historical_tpex(trade_date),
+                    ),
+                    holdings,
+                    liabilities,
+                    repositories.market_data_uow,
+                )
             )
 
         yield ApplicationContext(
@@ -599,6 +672,9 @@ def _compose(
                 snapshots,
                 position_snapshots,
                 quotes,
+                repositories.fx_rates,
+                us_market_provider_status=us_provider_status,
+                fx_provider_status=fx_provider_status,
             ),
             verify_system=VerifySystemUseCase(verification_service),
             portfolio_history=PortfolioHistoryUseCase(snapshots),

@@ -108,11 +108,12 @@ CREATE TABLE IF NOT EXISTS schema_version (
     applied_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS holdings (
-    id TEXT PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+    id TEXT PRIMARY KEY, symbol TEXT NOT NULL, name TEXT NOT NULL,
     market TEXT NOT NULL, currency TEXT NOT NULL, quantity TEXT NOT NULL,
     average_cost TEXT NOT NULL, holding_type TEXT NOT NULL,
     is_pledged INTEGER NOT NULL CHECK (is_pledged IN (0, 1)), notes TEXT,
-    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE(symbol, market)
 );
 CREATE INDEX IF NOT EXISTS ix_holdings_symbol ON holdings(symbol);
 CREATE TABLE IF NOT EXISTS transactions (
@@ -158,6 +159,14 @@ CREATE TABLE IF NOT EXISTS price_quotes (
 CREATE INDEX IF NOT EXISTS ix_price_quotes_date ON price_quotes(trade_date);
 CREATE INDEX IF NOT EXISTS ix_price_quotes_symbol_date
     ON price_quotes(symbol, market, trade_date DESC);
+CREATE TABLE IF NOT EXISTS fx_rates (
+    base_currency TEXT NOT NULL, quote_currency TEXT NOT NULL,
+    rate_date TEXT NOT NULL, rate TEXT NOT NULL, source TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (base_currency, quote_currency, rate_date, source)
+);
+CREATE INDEX IF NOT EXISTS ix_fx_rates_pair_date
+    ON fx_rates(base_currency, quote_currency, rate_date DESC);
 CREATE TABLE IF NOT EXISTS daily_snapshots (
     snapshot_date TEXT PRIMARY KEY, total_market_value TEXT NOT NULL,
     total_cost_basis TEXT NOT NULL, total_unrealized_pnl TEXT NOT NULL,
@@ -168,6 +177,8 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
 CREATE INDEX IF NOT EXISTS ix_daily_snapshots_date ON daily_snapshots(snapshot_date);
 CREATE TABLE IF NOT EXISTS position_snapshots (
     snapshot_date TEXT NOT NULL, holding_id TEXT NOT NULL, symbol TEXT NOT NULL,
+    market TEXT NOT NULL, native_currency TEXT NOT NULL, quote_date TEXT,
+    fx_rate TEXT NOT NULL, fx_rate_date TEXT,
     quantity TEXT NOT NULL, average_cost TEXT NOT NULL, close_price TEXT NOT NULL,
     cost_basis TEXT NOT NULL, market_value TEXT NOT NULL,
     unrealized_pnl TEXT NOT NULL, unrealized_return TEXT NOT NULL,
@@ -199,6 +210,31 @@ def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
     for statement in POSTGRESQL_SCHEMA.split(";"):
         if statement.strip():
             connection.execute(statement)
+    connection.execute(
+        "ALTER TABLE holdings DROP CONSTRAINT IF EXISTS holdings_symbol_key"
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_holdings_symbol_market "
+        "ON holdings(symbol, market)"
+    )
+    for column, definition in (
+        ("market", "TEXT"),
+        ("native_currency", "TEXT"),
+        ("quote_date", "TEXT"),
+        ("fx_rate", "TEXT"),
+        ("fx_rate_date", "TEXT"),
+    ):
+        connection.execute(
+            f"ALTER TABLE position_snapshots ADD COLUMN IF NOT EXISTS {column} {definition}"
+        )
+    connection.execute(
+        """UPDATE position_snapshots p SET
+        market = COALESCE(p.market, h.market),
+        native_currency = COALESCE(p.native_currency, h.currency),
+        quote_date = COALESCE(p.quote_date, p.snapshot_date),
+        fx_rate = COALESCE(p.fx_rate, '1')
+        FROM holdings h WHERE h.id = p.holding_id"""
+    )
     for version in range(1, SCHEMA_VERSION + 1):
         connection.execute(
             """INSERT INTO schema_version(version, applied_at)

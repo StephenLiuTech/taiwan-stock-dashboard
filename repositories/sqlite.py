@@ -9,6 +9,7 @@ from domain import (
     DailySnapshot,
     Dividend,
     DividendEvent,
+    FxRate,
     Holding,
     Liability,
     PositionSnapshot,
@@ -639,6 +640,53 @@ class SQLitePriceQuoteRepository:
         return PriceQuote.model_validate(values)
 
 
+class SQLiteFxRateRepository:
+    """Persist positive native-to-reporting currency rates."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def upsert(self, rate: FxRate) -> None:
+        self.connection.execute(
+            """INSERT INTO fx_rates VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(base_currency, quote_currency, rate_date, source)
+            DO UPDATE SET rate=excluded.rate, fetched_at=excluded.fetched_at""",
+            (
+                rate.base_currency.value,
+                rate.quote_currency.value,
+                rate.rate_date.isoformat(),
+                str(rate.rate),
+                rate.source,
+                rate.fetched_at.isoformat(),
+            ),
+        )
+        if self.auto_commit:
+            self.connection.commit()
+
+    def get_latest_on_or_before(
+        self,
+        base_currency: str,
+        quote_currency: str,
+        rate_date: date,
+    ) -> FxRate | None:
+        row = self.connection.execute(
+            """SELECT * FROM fx_rates
+            WHERE base_currency = ? AND quote_currency = ? AND rate_date <= ?
+            ORDER BY rate_date DESC, source LIMIT 1""",
+            (base_currency, quote_currency, rate_date.isoformat()),
+        ).fetchone()
+        if row is None:
+            return None
+        values = dict(row)
+        values["rate_date"] = date.fromisoformat(values["rate_date"])
+        values["rate"] = _decimal(values["rate"])
+        values["fetched_at"] = datetime.fromisoformat(values["fetched_at"])
+        return FxRate.model_validate(values)
+
+
 class SQLitePositionSnapshotRepository:
     """Persist one position valuation per holding and snapshot date."""
 
@@ -650,13 +698,31 @@ class SQLitePositionSnapshotRepository:
 
     def add_many(self, snapshots: list[PositionSnapshot]) -> None:
         self.connection.executemany(
-            """INSERT INTO position_snapshots VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO position_snapshots (
+                snapshot_date, holding_id, symbol, market, native_currency,
+                quote_date, fx_rate, fx_rate_date, quantity, average_cost,
+                close_price, cost_basis, market_value, unrealized_pnl,
+                unrealized_return, portfolio_weight, daily_value_change,
+                daily_return
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (
                     item.snapshot_date.isoformat(),
                     item.holding_id,
                     item.symbol,
+                    item.market.value,
+                    item.native_currency.value,
+                    (
+                        item.quote_date.isoformat()
+                        if item.quote_date is not None
+                        else None
+                    ),
+                    str(item.fx_rate),
+                    (
+                        item.fx_rate_date.isoformat()
+                        if item.fx_rate_date is not None
+                        else None
+                    ),
                     str(item.quantity),
                     str(item.average_cost),
                     str(item.close_price),
@@ -703,7 +769,12 @@ class SQLitePositionSnapshotRepository:
     def _from_row(row: sqlite3.Row) -> PositionSnapshot:
         values = dict(row)
         values["snapshot_date"] = date.fromisoformat(values["snapshot_date"])
+        if values.get("quote_date"):
+            values["quote_date"] = date.fromisoformat(values["quote_date"])
+        if values.get("fx_rate_date"):
+            values["fx_rate_date"] = date.fromisoformat(values["fx_rate_date"])
         for key in (
+            "fx_rate",
             "quantity",
             "average_cost",
             "close_price",

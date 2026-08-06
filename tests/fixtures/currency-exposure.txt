@@ -1,0 +1,10 @@
+Currency Exposure
+Overall Currency Exposure
+TWD Exposure: NT$1,100
+USD Exposure in TWD: NT$49,738
+Total Quoted Market Value: NT$50,838
+USD Portfolio Weight: 97.84%
+USD/TWD Rate: 31.42
+FX Rate Date: 2026-08-04
+Estimated impact of a 1% USD/TWD move: NT$497
+This is a sensitivity estimate, not a forecast.

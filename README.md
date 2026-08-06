@@ -579,9 +579,12 @@ Configure these repository-level GitHub Actions secrets:
 | `PAMS_SUPABASE_SERVICE_ROLE_KEY` | Server-side Storage upload credential |
 | `PAMS_REPORT_ASSET_BUCKET` | Public report-image bucket |
 | `PAMS_REPORT_ASSET_PREFIX` | Stable random deployment-specific object prefix |
+| `PAMS_ALPHA_VANTAGE_API_KEY` | Alpha Vantage key for opt-in US closes and USD/TWD FX |
 
 The job sets `PAMS_EMAIL_TRANSPORT=resend`,
-`PAMS_ENVIRONMENT=production`, and `PAMS_LOG_LEVEL=INFO`; these values are not
+`PAMS_US_MARKET_DATA_PROVIDER=alphavantage`,
+`PAMS_FX_PROVIDER=alphavantage`, `PAMS_ENVIRONMENT=production`, and
+`PAMS_LOG_LEVEL=INFO`; these values are not
 secrets. Secret values are scoped only to the verification and delivery steps
 that require them and are never echoed by workflow steps.
 
@@ -812,3 +815,30 @@ intended recipient and subject without starting OAuth, reading a token, making
 a network connection, or creating a SENT record. Delivery is idempotent for
 `(report type, report date, recipient)`; FAILED attempts remain retryable and
 `--force` intentionally resends.
+
+## Multi-market and currency valuation
+
+PAMS can combine TWSE/TPEX holdings in TWD with opt-in US equities and ETFs in
+USD. TWD remains the reporting currency. Native USD average cost and closing
+price are preserved, while US cost basis, market value, and P/L are translated
+with one persisted USD/TWD rate on or before the report date. This is
+**constant report-date FX translation** and excludes historical FX gain/loss.
+Portfolio trends can still move when the report-date FX rate changes.
+
+US and Taiwan rows may have different quote dates because each uses its latest
+completed eligible session. Missing FX never defaults to 1. Configure
+`PAMS_US_MARKET_DATA_PROVIDER=alphavantage`,
+`PAMS_FX_PROVIDER=alphavantage`, and `PAMS_ALPHA_VANTAGE_API_KEY`; their default
+`disabled` values preserve Taiwan-only operation.
+
+`Market.US` represents the portfolio market, while NASDAQ, NYSE, and NYSE Arca
+are exchange/venue metadata and are not part of holding uniqueness. The current
+Alpha Vantage adapters are replaceable and opt-in. Operational deployments must
+account for the provider plan's request-per-minute and request-per-day limits;
+the adapter performs one daily-series request per US symbol plus one FX request.
+PAMS uses only completed daily closes and never labels intraday data as a close.
+For the current MU and DRAM portfolio this is three requests per update run:
+one request for each distinct US symbol and one USD/TWD request. A transient or
+quota failure retains eligible persisted US quotes and FX rates; without an
+eligible persisted value, the affected translated fields remain unavailable
+and Taiwan valuation continues.

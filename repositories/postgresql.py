@@ -3,6 +3,7 @@
 from repositories.sqlite import (
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
+    SQLiteFxRateRepository,
     SQLiteHoldingRepository,
     SQLiteLiabilityRepository,
     SQLitePositionSnapshotRepository,
@@ -28,6 +29,10 @@ class PostgreSQLDividendRepository(SQLiteDividendRepository):
 
 class PostgreSQLDividendEventRepository(SQLiteDividendEventRepository):
     """Persist normalized official dividend events in PostgreSQL."""
+
+
+class PostgreSQLFxRateRepository(SQLiteFxRateRepository):
+    """Persist FX rates in PostgreSQL."""
 
 
 class PostgreSQLLiabilityRepository(SQLiteLiabilityRepository):

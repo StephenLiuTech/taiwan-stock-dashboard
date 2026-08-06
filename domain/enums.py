@@ -8,6 +8,7 @@ class Market(StrEnum):
 
     TWSE = "TWSE"
     TPEX = "TPEx"
+    US = "US"
 
 
 class Currency(StrEnum):

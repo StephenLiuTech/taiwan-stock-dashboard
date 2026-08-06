@@ -8,6 +8,7 @@ from decimal import Decimal
 from domain import (
     AllocationItem,
     Currency,
+    CurrencyExposureSection,
     DailyReportSections,
     DividendCalendarItem,
     DividendCalendarSection,
@@ -316,6 +317,15 @@ def test_financing_renderer_cards_text_order_and_empty_state() -> None:
             )
         ),
         financing_leverage=financing,
+        currency_exposure=CurrencyExposureSection(
+            Decimal("1000"),
+            Decimal("500"),
+            Decimal("1500"),
+            Decimal("0.3333333333"),
+            Decimal("31.42"),
+            date(2026, 8, 4),
+            Decimal("5"),
+        ),
         market_snapshot=MarketSnapshotSection(status="Market data unavailable"),
     )
     renderer = DailyReportSectionRenderer()
@@ -325,7 +335,8 @@ def test_financing_renderer_cards_text_order_and_empty_state() -> None:
 
     assert html.index("Portfolio Allocation") < html.index("Upcoming Events")
     assert html.index("Dividend Calendar") < html.index("Financing &amp; Leverage")
-    assert html.index("Financing &amp; Leverage") < html.index("Market Snapshot")
+    assert html.index("Financing &amp; Leverage") < html.index("Currency Exposure")
+    assert html.index("Currency Exposure") < html.index("Market Snapshot")
     assert "NT$1,593,000" in html
     assert "NT$30,951" in html
     assert "NT$1,623,951" in html
@@ -345,6 +356,71 @@ def test_financing_renderer_cards_text_order_and_empty_state() -> None:
     assert (
         ReportSectionService.financing([], Decimal("0"), Decimal("0"), Decimal("0"))
         is None
+    )
+
+
+def test_currency_exposure_uses_translated_values_and_neutral_rendering() -> None:
+    tw = holding("tw", "2330", Market.TWSE, HoldingType.STOCK)
+    us = Holding(
+        id="us",
+        symbol="MU",
+        name="Micron",
+        market=Market.US,
+        currency=Currency.USD,
+        quantity=Decimal("10"),
+        average_cost=Decimal("150"),
+    )
+    tw_position = position("tw", "2330", "1000").model_copy(
+        update={"market": Market.TWSE, "native_currency": Currency.TWD}
+    )
+    us_position = position("us", "MU", "500").model_copy(
+        update={
+            "market": Market.US,
+            "native_currency": Currency.USD,
+            "quote_date": date(2026, 8, 4),
+            "fx_rate": Decimal("31.42"),
+            "fx_rate_date": date(2026, 8, 4),
+        }
+    )
+    result = ReportSectionService.currency_exposure(
+        [tw_position, us_position], [tw, us]
+    )
+    assert result is not None
+    assert result.usd_exposure_twd == Decimal("500")
+    assert result.usd_portfolio_weight == Decimal("500") / Decimal("1500")
+    assert result.estimated_one_percent_usd_move == Decimal("5")
+    sections = DailyReportSections(currency_exposure=result)
+    html = DailyReportSectionRenderer().currency_exposure_html(sections)
+    text = DailyReportSectionRenderer().currency_exposure_text(sections)
+    assert "USD Exposure in TWD" in html
+    assert "NT$500" in html
+    assert "31.42" in html
+    assert "2026-08-04" in text
+    assert "sensitivity estimate, not a forecast" in text
+    assert TAIWAN_GAIN_COLOR not in html
+    assert TAIWAN_LOSS_COLOR not in html
+
+
+def test_currency_exposure_hides_taiwan_only_and_marks_missing_fx() -> None:
+    tw = holding("tw", "2330", Market.TWSE, HoldingType.STOCK)
+    assert (
+        ReportSectionService.currency_exposure([position("tw", "2330", "1")], [tw])
+        is None
+    )
+    us = Holding(
+        id="us",
+        symbol="MU",
+        name="Micron",
+        market=Market.US,
+        currency=Currency.USD,
+        quantity=Decimal("1"),
+        average_cost=Decimal("1"),
+    )
+    missing = ReportSectionService.currency_exposure([], [us])
+    assert missing is not None
+    assert missing.usd_exposure_twd is None
+    assert "USD/TWD Rate: N/A" in DailyReportSectionRenderer().currency_exposure_text(
+        DailyReportSections(currency_exposure=missing)
     )
 
 

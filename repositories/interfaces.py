@@ -8,6 +8,7 @@ from domain import (
     DailySnapshot,
     Dividend,
     DividendEvent,
+    FxRate,
     Holding,
     Liability,
     PositionSnapshot,
@@ -105,6 +106,18 @@ class PriceQuoteRepository(Protocol):
     ) -> None: ...
 
 
+class FxRateRepository(Protocol):
+    """Persistence operations for native/reporting currency rates."""
+
+    def upsert(self, rate: FxRate) -> None: ...
+    def get_latest_on_or_before(
+        self,
+        base_currency: str,
+        quote_currency: str,
+        rate_date: date,
+    ) -> FxRate | None: ...
+
+
 class PositionSnapshotRepository(Protocol):
     """Persistence operations for holding-level snapshot rows."""
 
@@ -141,6 +154,7 @@ class MarketDataUnitOfWork(Protocol):
     """Atomic persistence boundary for one valuation snapshot."""
 
     price_quotes: PriceQuoteRepository
+    fx_rates: FxRateRepository
     daily_snapshots: SnapshotRepository
     position_snapshots: PositionSnapshotRepository
 

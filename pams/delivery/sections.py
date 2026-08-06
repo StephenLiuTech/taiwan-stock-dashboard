@@ -116,6 +116,7 @@ class DailyReportSectionRenderer:
             self.upcoming_events_html(sections),
             self.dividend_calendar_html(sections),
             self.financing_html(sections),
+            self.currency_exposure_html(sections),
             self.market_snapshot_html(sections),
             self.news_html("AI News", sections.ai_news),
             self.news_html("Semiconductor News", sections.semiconductor_news),
@@ -132,6 +133,7 @@ class DailyReportSectionRenderer:
             self.upcoming_events_text(sections),
             self.dividend_calendar_text(sections),
             self.financing_text(sections),
+            self.currency_exposure_text(sections),
             self.market_snapshot_text(sections),
             self.news_text("AI News", sections.ai_news),
             self.news_text("Semiconductor News", sections.semiconductor_news),
@@ -172,6 +174,7 @@ class DailyReportSectionRenderer:
         )
         for title, items in (
             ("By Market", value.by_market),
+            ("By Currency", value.by_currency),
             ("By Instrument Type", value.by_instrument),
         ):
             html += f"<h3>{title}</h3>" + _table(
@@ -472,6 +475,66 @@ class DailyReportSectionRenderer:
         )
 
     @staticmethod
+    def currency_exposure_html(sections: DailyReportSections) -> str:
+        value = sections.currency_exposure
+        if value is None:
+            return ""
+
+        def display_money(amount: Decimal | None) -> str:
+            return _money(amount) if amount is not None else "N/A"
+
+        rows = (
+            ("TWD Exposure", display_money(value.twd_exposure)),
+            ("USD Exposure in TWD", display_money(value.usd_exposure_twd)),
+            (
+                "Total Quoted Market Value",
+                display_money(value.total_quoted_market_value),
+            ),
+            (
+                "USD Portfolio Weight",
+                (
+                    _percent(value.usd_portfolio_weight)
+                    if value.usd_portfolio_weight is not None
+                    else "N/A"
+                ),
+            ),
+            (
+                "USD/TWD Rate",
+                (
+                    f"{value.usd_twd_rate:,.4f}".rstrip("0").rstrip(".")
+                    if value.usd_twd_rate is not None
+                    else "N/A"
+                ),
+            ),
+            ("FX Rate Date", str(value.fx_rate_date or "N/A")),
+            (
+                "Estimated impact of a 1% USD/TWD move",
+                display_money(value.estimated_one_percent_usd_move),
+            ),
+        )
+        body = "".join(
+            '<tr><td style="padding:8px 10px;border-top:1px solid #e5e7eb;'
+            'color:#4b5563">'
+            f"{escape(label)}</td>"
+            '<td style="padding:8px 10px;border-top:1px solid #e5e7eb;'
+            'text-align:right;white-space:nowrap;color:#111827">'
+            f"{escape(display)}</td></tr>"
+            for label, display in rows
+        )
+        return (
+            '<h2 style="font-size:18px;margin-top:24px">Currency Exposure</h2>'
+            '<table role="presentation" style="border-collapse:collapse;width:100%;'
+            "max-width:100%;table-layout:fixed;border:1px solid #d1d5db;"
+            'background:#ffffff;font-size:12px">'
+            '<tr><td colspan="2" style="padding:9px;background:#f3f4f6;'
+            'font-weight:700;font-size:14px">Overall Currency Exposure</td></tr>'
+            f"{body}</table>"
+            '<p style="color:#6b7280;font-size:12px;margin:8px 0 16px">'
+            "The 1% USD/TWD move impact is a sensitivity estimate, not a forecast."
+            "</p>"
+        )
+
+    @staticmethod
     def news_html(title: str, value: NewsSection | None) -> str:
         if value is None:
             return ""
@@ -737,6 +800,40 @@ class DailyReportSectionRenderer:
                 )
             )
         return "\n".join(lines)
+
+    def currency_exposure_text(self, sections):
+        value = sections.currency_exposure
+        if value is None:
+            return ""
+
+        def money(amount: Decimal | None) -> str:
+            return _money(amount) if amount is not None else "N/A"
+
+        return "\n".join(
+            (
+                "Currency Exposure",
+                "Overall Currency Exposure",
+                f"TWD Exposure: {money(value.twd_exposure)}",
+                f"USD Exposure in TWD: {money(value.usd_exposure_twd)}",
+                f"Total Quoted Market Value: {money(value.total_quoted_market_value)}",
+                "USD Portfolio Weight: "
+                + (
+                    _percent(value.usd_portfolio_weight)
+                    if value.usd_portfolio_weight is not None
+                    else "N/A"
+                ),
+                "USD/TWD Rate: "
+                + (
+                    f"{value.usd_twd_rate:,.4f}".rstrip("0").rstrip(".")
+                    if value.usd_twd_rate is not None
+                    else "N/A"
+                ),
+                f"FX Rate Date: {value.fx_rate_date or 'N/A'}",
+                "Estimated impact of a 1% USD/TWD move: "
+                + money(value.estimated_one_percent_usd_move),
+                "This is a sensitivity estimate, not a forecast.",
+            )
+        )
 
     def insights_text(self, sections):
         return (

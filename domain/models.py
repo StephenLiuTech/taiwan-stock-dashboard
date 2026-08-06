@@ -189,6 +189,23 @@ class PriceQuote(SymbolModel):
     fetched_at: datetime = Field(default_factory=utc_now)
 
 
+class FxRate(DomainModel):
+    """One persisted native-to-reporting currency conversion rate."""
+
+    base_currency: Currency
+    quote_currency: Currency
+    rate_date: date
+    rate: Decimal = Field(gt=0)
+    source: str = Field(min_length=1)
+    fetched_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_pair(self) -> Self:
+        if self.base_currency == self.quote_currency:
+            raise ValueError("FX base and quote currencies must differ")
+        return self
+
+
 class PositionValuation(SymbolModel):
     """Calculated valuation for one holding."""
 
@@ -203,6 +220,11 @@ class PositionValuation(SymbolModel):
     portfolio_weight: UnitDecimal
     daily_value_change: Decimal
     daily_return: Decimal | None
+    market: Market = Market.TWSE
+    native_currency: Currency = Currency.TWD
+    quote_date: date | None = None
+    fx_rate: Decimal = Field(default=Decimal("1"), gt=0)
+    fx_rate_date: date | None = None
 
 
 class PositionSnapshot(PositionValuation):

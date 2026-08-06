@@ -161,3 +161,5 @@ notifications are not part of v1.0.0.
 - Official TWSE/TPEx stock and ETF dividend-event ingestion, persistence, CLI,
   MOPS payment-date enrichment, and transaction-derived current-year calendar
 - Non-persisted expected-payment cash indicator and annual dividend summary
+- Multi-market foundation: TWSE/TPEX plus opt-in US/USD valuation, persisted
+  USD/TWD rates, and combined TWD reporting (in progress)

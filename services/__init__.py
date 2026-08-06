@@ -7,6 +7,10 @@ from services.analytics_engine import (
     EmptySnapshotHistoryError,
 )
 from services.bootstrap import BootstrapService
+from services.multi_currency_valuation import (
+    MultiCurrencyValuationEngine,
+    MultiCurrencyValuationError,
+)
 from services.portfolio import MissingPriceQuoteError, PortfolioService
 from services.report_sections import NewsService, ReportSectionService
 from services.snapshot import DuplicateSnapshotError, SnapshotService
@@ -38,5 +42,7 @@ __all__ = [
     "UnsupportedTransactionTypeError",
     "ValuationEngine",
     "NewsService",
+    "MultiCurrencyValuationEngine",
+    "MultiCurrencyValuationError",
     "ReportSectionService",
 ]

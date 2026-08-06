@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -10,11 +10,12 @@ CREATE TABLE IF NOT EXISTS schema_version (
     applied_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS holdings (
-    id TEXT PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+    id TEXT PRIMARY KEY, symbol TEXT NOT NULL, name TEXT NOT NULL,
     market TEXT NOT NULL, currency TEXT NOT NULL, quantity TEXT NOT NULL,
     average_cost TEXT NOT NULL, holding_type TEXT NOT NULL,
     is_pledged INTEGER NOT NULL CHECK (is_pledged IN (0, 1)), notes TEXT,
-    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE(symbol, market)
 );
 CREATE INDEX IF NOT EXISTS ix_holdings_symbol ON holdings(symbol);
 CREATE TABLE IF NOT EXISTS transactions (
@@ -61,6 +62,14 @@ CREATE TABLE IF NOT EXISTS price_quotes (
 CREATE INDEX IF NOT EXISTS ix_price_quotes_date ON price_quotes(trade_date);
 CREATE INDEX IF NOT EXISTS ix_price_quotes_symbol_date
     ON price_quotes(symbol, market, trade_date DESC);
+CREATE TABLE IF NOT EXISTS fx_rates (
+    base_currency TEXT NOT NULL, quote_currency TEXT NOT NULL,
+    rate_date TEXT NOT NULL, rate TEXT NOT NULL, source TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (base_currency, quote_currency, rate_date, source)
+);
+CREATE INDEX IF NOT EXISTS ix_fx_rates_pair_date
+    ON fx_rates(base_currency, quote_currency, rate_date DESC);
 CREATE TABLE IF NOT EXISTS daily_snapshots (
     snapshot_date TEXT PRIMARY KEY, total_market_value TEXT NOT NULL,
     total_cost_basis TEXT NOT NULL, total_unrealized_pnl TEXT NOT NULL,
@@ -72,6 +81,8 @@ CREATE INDEX IF NOT EXISTS ix_daily_snapshots_date
     ON daily_snapshots(snapshot_date);
 CREATE TABLE IF NOT EXISTS position_snapshots (
     snapshot_date TEXT NOT NULL, holding_id TEXT NOT NULL, symbol TEXT NOT NULL,
+    market TEXT NOT NULL, native_currency TEXT NOT NULL, quote_date TEXT,
+    fx_rate TEXT NOT NULL, fx_rate_date TEXT,
     quantity TEXT NOT NULL, average_cost TEXT NOT NULL, close_price TEXT NOT NULL,
     cost_basis TEXT NOT NULL, market_value TEXT NOT NULL,
     unrealized_pnl TEXT NOT NULL, unrealized_return TEXT NOT NULL,
@@ -105,14 +116,26 @@ CREATE TABLE IF NOT EXISTS watchlist (
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
     """Create the initial schema and record its version idempotently."""
+    existing_holdings = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'holdings'"
+    ).fetchone()
+    if existing_holdings is not None:
+        holdings_sql = existing_holdings[0]
+        position_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(position_snapshots)")
+        }
+        if "daily_return" not in position_columns:
+            connection.execute(
+                "ALTER TABLE position_snapshots ADD COLUMN daily_return TEXT"
+            )
+            position_columns.add("daily_return")
+        if (
+            "symbol TEXT NOT NULL UNIQUE" in holdings_sql
+            or "market" not in position_columns
+        ):
+            _migrate_multi_currency_schema(connection)
     connection.executescript(INITIAL_SCHEMA)
-    position_columns = {
-        row[1] for row in connection.execute("PRAGMA table_info(position_snapshots)")
-    }
-    if "daily_return" not in position_columns:
-        connection.execute(
-            "ALTER TABLE position_snapshots ADD COLUMN daily_return TEXT"
-        )
     for version in range(1, SCHEMA_VERSION + 1):
         connection.execute(
             """INSERT OR IGNORE INTO schema_version(version, applied_at)
@@ -120,3 +143,62 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             (version,),
         )
     connection.commit()
+
+
+def _migrate_multi_currency_schema(connection: sqlite3.Connection) -> None:
+    """Rebuild legacy holding/snapshot tables for schema version 7."""
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        connection.executescript(
+            """
+            BEGIN;
+            CREATE TABLE holdings_v7 (
+                id TEXT PRIMARY KEY, symbol TEXT NOT NULL, name TEXT NOT NULL,
+                market TEXT NOT NULL, currency TEXT NOT NULL, quantity TEXT NOT NULL,
+                average_cost TEXT NOT NULL, holding_type TEXT NOT NULL,
+                is_pledged INTEGER NOT NULL CHECK (is_pledged IN (0, 1)), notes TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(symbol, market)
+            );
+            INSERT INTO holdings_v7 SELECT * FROM holdings;
+            CREATE TABLE position_snapshots_v7 (
+                snapshot_date TEXT NOT NULL, holding_id TEXT NOT NULL,
+                symbol TEXT NOT NULL, market TEXT NOT NULL,
+                native_currency TEXT NOT NULL, quote_date TEXT,
+                fx_rate TEXT NOT NULL, fx_rate_date TEXT,
+                quantity TEXT NOT NULL, average_cost TEXT NOT NULL,
+                close_price TEXT NOT NULL, cost_basis TEXT NOT NULL,
+                market_value TEXT NOT NULL, unrealized_pnl TEXT NOT NULL,
+                unrealized_return TEXT NOT NULL, portfolio_weight TEXT NOT NULL,
+                daily_value_change TEXT NOT NULL, daily_return TEXT,
+                PRIMARY KEY (snapshot_date, holding_id),
+                FOREIGN KEY (holding_id) REFERENCES holdings_v7(id) ON DELETE RESTRICT
+            );
+            INSERT INTO position_snapshots_v7 (
+                snapshot_date, holding_id, symbol, market, native_currency,
+                quote_date, fx_rate, fx_rate_date, quantity, average_cost,
+                close_price, cost_basis, market_value, unrealized_pnl,
+                unrealized_return, portfolio_weight, daily_value_change, daily_return
+            )
+            SELECT p.snapshot_date, p.holding_id, p.symbol, h.market, h.currency,
+                   p.snapshot_date, '1', NULL, p.quantity, p.average_cost,
+                   p.close_price, p.cost_basis, p.market_value, p.unrealized_pnl,
+                   p.unrealized_return, p.portfolio_weight, p.daily_value_change,
+                   p.daily_return
+            FROM position_snapshots p JOIN holdings h ON h.id = p.holding_id;
+            DROP TABLE position_snapshots;
+            DROP TABLE holdings;
+            ALTER TABLE holdings_v7 RENAME TO holdings;
+            ALTER TABLE position_snapshots_v7 RENAME TO position_snapshots;
+            CREATE INDEX ix_holdings_symbol ON holdings(symbol);
+            CREATE INDEX ix_position_snapshots_symbol_date
+                ON position_snapshots(symbol, snapshot_date DESC);
+            COMMIT;
+            """
+        )
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")

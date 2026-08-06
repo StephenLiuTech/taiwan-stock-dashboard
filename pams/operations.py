@@ -107,12 +107,18 @@ class VerificationService:
         date_providers: tuple[MarketDateProvider, ...],
         calendar: MarketCalendar,
         engine: MarketDataEngine,
+        repositories: RepositoryBundle | None = None,
+        us_market_provider_status: str = "disabled",
+        fx_provider_status: str = "disabled",
     ) -> None:
         self.connection = connection
         self.database_path = database_path
         self.date_providers = date_providers
         self.calendar = calendar
         self.engine = engine
+        self.repositories = repositories
+        self.us_market_provider_status = us_market_provider_status
+        self.fx_provider_status = fx_provider_status
 
     def run(self) -> VerificationReport:
         """Execute all checks and retain failures as report rows."""
@@ -126,6 +132,7 @@ class VerificationService:
         for provider in self.date_providers:
             checks.append(self._provider_check(provider))
         checks.append(self._calendar_check())
+        checks.extend(self._optional_global_provider_checks())
         checks.append(
             VerificationCheck(
                 "Market Data Engine",
@@ -142,6 +149,68 @@ class VerificationService:
             )
         )
         return VerificationReport(tuple(checks))
+
+    def _optional_global_provider_checks(self) -> list[VerificationCheck]:
+        """Report optional-provider readiness without probing or exposing secrets."""
+        if self.repositories is None:
+            return []
+        us_holdings = [
+            item
+            for item in self.repositories.holdings.list_all()
+            if item.market.value == "US"
+        ]
+        if not us_holdings:
+            return [
+                VerificationCheck(
+                    "US Market Provider",
+                    CheckLevel.PASS,
+                    f"{self.us_market_provider_status}; no active US holdings",
+                ),
+                VerificationCheck(
+                    "FX Provider",
+                    CheckLevel.PASS,
+                    f"{self.fx_provider_status}; no active US holdings",
+                ),
+            ]
+        us_dates = [
+            quote.trade_date
+            for holding in us_holdings
+            if (
+                quote := self.repositories.price_quotes.get_latest(holding.symbol, "US")
+            )
+            is not None
+        ]
+        fx = self.repositories.fx_rates.get_latest_on_or_before("USD", "TWD", date.max)
+        us_ready = self.us_market_provider_status == "ready"
+        fx_ready = self.fx_provider_status == "ready"
+        return [
+            VerificationCheck(
+                "US Market Provider",
+                CheckLevel.PASS if us_ready else CheckLevel.WARN,
+                (
+                    f"ready; latest persisted US quote {max(us_dates)}"
+                    if us_ready and us_dates
+                    else (
+                        "ready; no persisted US quotes"
+                        if us_ready
+                        else "disabled with active US holdings"
+                    )
+                ),
+            ),
+            VerificationCheck(
+                "FX Provider",
+                CheckLevel.PASS if fx_ready else CheckLevel.WARN,
+                (
+                    f"ready; latest persisted USD/TWD rate {fx.rate_date}"
+                    if fx_ready and fx
+                    else (
+                        "ready; no persisted USD/TWD rate"
+                        if fx_ready
+                        else "disabled with active US holdings"
+                    )
+                ),
+            ),
+        ]
 
     def _database_check(self) -> VerificationCheck:
         try:
