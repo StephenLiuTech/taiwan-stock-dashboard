@@ -472,7 +472,7 @@ def test_html_and_plain_text_contain_correct_persisted_figures() -> None:
     result = case.execute(date(2026, 7, 22))
     message = transport.messages[0]
     assert result.status == "sent"
-    assert "Total stock market value: NT$1,200.00" in message.plain_text
+    assert "Total stock market value: NT$1,200" in message.plain_text
     assert "Total return: +20.00%" in message.plain_text
     assert "TSMC" in message.plain_text
     assert "<html>" in message.html
@@ -498,9 +498,9 @@ def test_positive_daily_profit_loss_uses_persisted_position_movements() -> None:
     case.execute(date(2026, 7, 22))
 
     message = transport.messages[0]
-    assert "Amount: +NT$10.00" in message.plain_text
+    assert "Amount: +NT$10" in message.plain_text
     assert "Percentage: +0.84%" in message.plain_text
-    assert "+NT$10.00" in message.html
+    assert "+NT$10" in message.html
     assert "+0.84%" in message.html
 
 
@@ -516,7 +516,7 @@ def test_negative_daily_profit_loss_preserves_negative_sign() -> None:
     case.execute(date(2026, 7, 22))
 
     message = transport.messages[0]
-    assert "Amount: -NT$20.00" in message.plain_text
+    assert "Amount: -NT$20" in message.plain_text
     assert "Percentage: -1.64%" in message.plain_text
 
 
@@ -550,9 +550,9 @@ def test_position_daily_contributions_cover_positive_negative_and_zero() -> None
     case.execute(date(2026, 7, 22))
 
     text = transport.messages[0].plain_text
-    assert "TWSE | 2330 | TSMC | N/A | +NT$25.00 | +2.56%" in text
-    assert "TWSE | 8299 | Phison | N/A | -NT$10.00 | -4.76%" in text
-    assert "TWSE | ZERO | ZERO | N/A | NT$0.00 | 0.00%" in text
+    assert "TWSE | 2330 | TSMC | N/A | +NT$25 | +2.56%" in text
+    assert "TWSE | 8299 | Phison | N/A | -NT$10 | -4.76%" in text
+    assert "TWSE | ZERO | ZERO | N/A | NT$0 | 0.00%" in text
     html = transport.messages[0].html
     contributors = html.split(">Today's Contributors</h2>", maxsplit=1)[1].split(
         "</table>", maxsplit=1
@@ -579,8 +579,8 @@ def test_contributors_are_ranked_by_absolute_portfolio_impact() -> None:
         "Today's Contributors\n", maxsplit=1
     )[1]
     contributor_rows = contributor_section.split("\n")
-    assert contributor_rows[1].startswith("1 | TWSE | 8299 | Phison | N/A | -NT$50.00")
-    assert contributor_rows[2].startswith("2 | TWSE | 2330 | TSMC | N/A | +NT$5.00")
+    assert contributor_rows[1].startswith("1 | TWSE | 8299 | Phison | N/A | -NT$50")
+    assert contributor_rows[2].startswith("2 | TWSE | 2330 | TSMC | N/A | +NT$5")
 
 
 def test_holdings_include_daily_pnl_columns_and_conditional_formatting() -> None:
@@ -713,7 +713,7 @@ def test_html_summary_emphasizes_daily_profit_loss() -> None:
 
     html = transport.messages[0].html
     assert "font-size:20px;font-weight:700;color:#b91c1c" in html
-    assert "+NT$10.00" in html
+    assert "+NT$10" in html
 
 
 def test_zero_daily_profit_loss_is_zero_without_positive_sign() -> None:
@@ -728,7 +728,7 @@ def test_zero_daily_profit_loss_is_zero_without_positive_sign() -> None:
     case.execute(date(2026, 7, 22))
 
     message = transport.messages[0]
-    assert "Amount: NT$0.00" in message.plain_text
+    assert "Amount: NT$0" in message.plain_text
     assert "Percentage: 0.00%" in message.plain_text
 
 
@@ -750,7 +750,7 @@ def test_multiple_snapshots_create_embedded_png_and_readable_text_history() -> N
         assert chart.format == "PNG"
         assert chart.size == (1200, 650)
     assert "2026-07-20 to 2026-07-22 (3 available snapshots)" in message.plain_text
-    assert "2026-07-21 | NT$1,100.00 | NT$1,000.00" in message.plain_text
+    assert "2026-07-21 | NT$1,100 | NT$1,000" in message.plain_text
 
 
 def test_resend_asset_flow_publishes_png_and_uses_https_without_attachment() -> None:
@@ -774,7 +774,7 @@ def test_resend_asset_flow_publishes_png_and_uses_https_without_attachment() -> 
     assert f'src="{store.url}"' in message.html
     assert "cid:" not in message.html
     assert message.inline_images == ()
-    assert "2026-07-21 | NT$1,100.00 | NT$1,000.00" in message.plain_text
+    assert "2026-07-21 | NT$1,100 | NT$1,000" in message.plain_text
 
 
 def test_forced_resend_upserts_the_same_date_object_path() -> None:

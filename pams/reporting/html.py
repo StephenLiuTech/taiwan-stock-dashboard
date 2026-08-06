@@ -4,12 +4,12 @@ from decimal import Decimal
 from html import escape
 
 from pams.analytics_reporting import analytics_view_model
+from pams.delivery.formatting import format_percentage, format_twd_amount
 from pams.reporting.builder import DailyReport
 
 
 def _money(value: Decimal, *, signed: bool = False) -> str:
-    sign = "+" if signed and value > 0 else ""
-    return f"{sign}NT${value:,.0f}"
+    return format_twd_amount(value, signed=signed)
 
 
 def _number(value: Decimal) -> str:
@@ -17,8 +17,7 @@ def _number(value: Decimal) -> str:
 
 
 def _percent(value: Decimal, *, signed: bool = False) -> str:
-    sign = "+" if signed and value > 0 else ""
-    return f"{sign}{value * 100:,.2f}%"
+    return format_percentage(value, signed=signed)
 
 
 def _table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
@@ -97,7 +96,7 @@ class HtmlReportRenderer:
             ],
         )
         if report.analytics is not None:
-            analytics = analytics_view_model(report.analytics)
+            analytics = analytics_view_model(report.analytics, whole_twd=True)
             analytics_section = "".join(
                 [
                     "<section><h2>Portfolio Analytics</h2><dl>",

@@ -12,6 +12,7 @@ from pams.application import (
     InvalidAnalyticsPeriodError,
     PortfolioAnalytics,
 )
+from pams.delivery.formatting import format_twd_amount
 
 
 @dataclass(frozen=True)
@@ -58,16 +59,19 @@ def _percentage(value: Decimal, *, signed: bool = False) -> str:
     return f"{sign}{value * 100:,.2f}%"
 
 
-def analytics_view_model(analytics: PortfolioAnalytics) -> AnalyticsViewModel:
+def analytics_view_model(
+    analytics: PortfolioAnalytics, *, whole_twd: bool = False
+) -> AnalyticsViewModel:
     """Format and reshape analytics without deriving financial results."""
+    money = format_twd_amount if whole_twd else _money
     return AnalyticsViewModel(
         period=f"{analytics.start_date} to {analytics.end_date}",
-        starting_value=_money(analytics.starting_value),
-        ending_value=_money(analytics.ending_value),
-        absolute_profit_loss=_money(analytics.absolute_profit_loss, signed=True),
+        starting_value=money(analytics.starting_value),
+        ending_value=money(analytics.ending_value),
+        absolute_profit_loss=money(analytics.absolute_profit_loss, signed=True),
         total_return=_percentage(analytics.total_return, signed=True),
-        peak_value=_money(analytics.peak_value),
-        trough_value=_money(analytics.trough_value),
+        peak_value=money(analytics.peak_value),
+        trough_value=money(analytics.trough_value),
         max_drawdown=_percentage(analytics.max_drawdown),
         snapshot_count=str(analytics.snapshot_count),
         daily_returns=tuple(

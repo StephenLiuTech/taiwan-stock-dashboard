@@ -15,6 +15,12 @@ from pams.application.send_daily_report import (
     InlineImage,
     RenderedEmail,
 )
+from pams.delivery.formatting import (
+    format_compact_decimal,
+    format_native_currency_amount,
+    format_percentage,
+    format_twd_amount,
+)
 from pams.delivery.html_styles import (
     NEUTRAL_COLOR,
     TAIWAN_GAIN_COLOR,
@@ -34,43 +40,25 @@ NEGATIVE_COLOR = TAIWAN_LOSS_COLOR
 
 
 def _money(value: Decimal | None, *, signed: bool = False) -> str:
-    if value is None:
-        return "N/A"
-    if signed and value > 0:
-        return f"+NT${value:,.2f}"
-    if signed and value < 0:
-        return f"-NT${abs(value):,.2f}"
-    return f"NT${value:,.2f}"
+    return format_twd_amount(value, signed=signed)
 
 
 def _whole_money(value: Decimal | None, *, signed: bool = False) -> str:
     """Format an HTML table monetary value as a whole dollar."""
-    if value is None:
-        return "N/A"
-    if signed and value > 0:
-        return f"+NT${value:,.0f}"
-    if signed and value < 0:
-        return f"-NT${abs(value):,.0f}"
-    return f"NT${value:,.0f}"
+    return format_twd_amount(value, signed=signed)
 
 
 def _compact_number(value: Decimal | None) -> str:
     """Format a table price with at most two decimal places."""
-    return "N/A" if value is None else f"{value:,.2f}".rstrip("0").rstrip(".")
+    return format_compact_decimal(value)
 
 
 def _native_money(value: Decimal | None, currency: Currency) -> str:
-    if value is None:
-        return "N/A"
-    prefix = "US$" if currency is Currency.USD else "NT$"
-    return f"{prefix}{_compact_number(value)}"
+    return format_native_currency_amount(value, currency)
 
 
 def _percent(value: Decimal | None, *, signed: bool = False) -> str:
-    if value is None:
-        return "N/A"
-    prefix = "+" if signed and value > 0 else ""
-    return f"{prefix}{value * 100:,.2f}%"
+    return format_percentage(value, signed=signed)
 
 
 def _tone(value: Decimal | None) -> str:

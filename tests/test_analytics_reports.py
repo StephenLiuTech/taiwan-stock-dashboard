@@ -43,9 +43,9 @@ def test_markdown_report_renders_application_analytics_values() -> None:
     rendered = MarkdownReportRenderer().render(report)
     assert "## Portfolio Analytics" in rendered
     assert "Period: 2026-07-21 to 2026-07-22" in rendered
-    assert "Starting Value: NT$1,000.00" in rendered
-    assert "Ending Value: NT$900.00" in rendered
-    assert "Profit / Loss: NT$-100.00" in rendered
+    assert "Starting Value: NT$1,000" in rendered
+    assert "Ending Value: NT$900" in rendered
+    assert "Profit / Loss: -NT$100" in rendered
     assert "Total Return: -10.00%" in rendered
     assert "Maximum Drawdown: -10.00%" in rendered
 

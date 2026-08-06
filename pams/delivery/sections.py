@@ -6,6 +6,7 @@ from decimal import Decimal
 from html import escape
 
 from domain import DailyReportSections, NewsSection
+from pams.delivery.formatting import format_percentage, format_twd_amount
 from pams.delivery.html_styles import (
     NEUTRAL_COLOR,
     taiwan_performance_color,
@@ -18,9 +19,7 @@ Cell = str | tuple[str, str]
 
 
 def _money(value: Decimal, *, signed: bool = False) -> str:
-    prefix = "+" if signed and value > 0 else ""
-    sign = "-" if value < 0 else prefix
-    return f"{sign}NT${abs(value):,.0f}"
+    return format_twd_amount(value, signed=signed)
 
 
 def _price(value: Decimal | None) -> str:
@@ -28,7 +27,7 @@ def _price(value: Decimal | None) -> str:
 
 
 def _percent(value: Decimal) -> str:
-    return f"{value * 100:,.2f}%"
+    return format_percentage(value)
 
 
 def _dividend_per_share(value: Decimal | None) -> str:
