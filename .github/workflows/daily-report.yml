@@ -2,7 +2,7 @@ name: Daily Portfolio Report
 
 on:
   schedule:
-    - cron: "35 13 * * 1-5"
+    - cron: '0 3 * * 1-5'
       timezone: "Asia/Taipei"
 
   workflow_dispatch:
