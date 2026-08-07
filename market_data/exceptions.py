@@ -17,6 +17,18 @@ class ProviderRateLimitError(ProviderDataError):
     """The configured provider rejected a request because its quota was exhausted."""
 
 
+class ProviderAuthenticationError(ProviderDataError):
+    """The provider rejected or could not validate configured credentials."""
+
+
+class ProviderSymbolError(ProviderDataError):
+    """The provider rejected one requested instrument symbol."""
+
+
+class ProviderInformationError(ProviderDataError):
+    """The provider returned a non-specific informational response."""
+
+
 class MarketDateUnavailableError(ProviderDataError):
     """The official date-query endpoint has no dataset for one requested date."""
 

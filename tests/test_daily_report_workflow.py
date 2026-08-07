@@ -15,9 +15,7 @@ def test_daily_report_workflow_exists_with_expected_schedule() -> None:
     workflow = _workflow()
     triggers = workflow["on"]
     assert isinstance(triggers, dict)
-    assert triggers["schedule"] == [
-        {"cron": "35 13 * * 1-5", "timezone": "Asia/Taipei"}
-    ]
+    assert triggers["schedule"] == [{"cron": "0 3 * * 1-5", "timezone": "Asia/Taipei"}]
 
 
 def test_manual_dispatch_exposes_non_forced_boolean_default() -> None:

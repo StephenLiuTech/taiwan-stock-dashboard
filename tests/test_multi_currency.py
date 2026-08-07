@@ -4,17 +4,25 @@ import sqlite3
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from config.settings import Settings
 from domain import Currency, FxRate, Holding, Market, PriceQuote
-from market_data.exceptions import ProviderDataError, ProviderRateLimitError
+from market_data.exceptions import (
+    ProviderAuthenticationError,
+    ProviderDataError,
+    ProviderInformationError,
+    ProviderRateLimitError,
+    ProviderSymbolError,
+)
 from market_data.global_engine import GlobalMarketDataEngine
 from market_data.providers import (
     AlphaVantageFXRateProvider,
     AlphaVantageUSMarketDataProvider,
 )
+from market_data.providers.global_markets import _daily_series
 from pams.application.send_daily_report import DailyEmailPosition, DailyEmailReport
 from pams.application.valuate_portfolio import ValuatePortfolioUseCase
 from pams.delivery.rendering import DailyEmailReportRenderer
@@ -37,6 +45,17 @@ class DocumentTransport:
     def get_document(self, url: str) -> dict[str, object]:
         self.urls.append(url)
         return self.document
+
+
+class SymbolDocumentTransport:
+    def __init__(self, documents: dict[str, list[dict[str, object]]]) -> None:
+        self.documents = documents
+        self.calls: list[str] = []
+
+    def get_document(self, url: str) -> dict[str, object]:
+        symbol = parse_qs(urlsplit(url).query)["symbol"][0]
+        self.calls.append(symbol)
+        return self.documents[symbol].pop(0)
 
 
 def holding(symbol: str, market: Market, currency: Currency) -> Holding:
@@ -334,12 +353,110 @@ def test_fx_provider_uses_latest_eligible_rate() -> None:
     assert result.rate == Decimal("31.42")
 
 
-def test_provider_semantic_error_is_typed() -> None:
+def test_provider_rate_limit_is_classified_without_failing_batch() -> None:
     provider = AlphaVantageUSMarketDataProvider(
-        "secret", DocumentTransport({"Information": "limit"})
+        "secret",
+        DocumentTransport({"Information": "standard API rate limit reached"}),
+        sleeper=lambda _: None,
     )
-    with pytest.raises(ProviderRateLimitError):
-        provider.fetch(("MU",), date(2026, 8, 5))
+    assert provider.fetch(("MU",), date(2026, 8, 5)) == ()
+
+
+def daily_document(close: str = "100", previous: str = "99") -> dict[str, object]:
+    return {
+        "Meta Data": {"2. Symbol": "fixture"},
+        "Time Series (Daily)": {
+            "2026-08-05": {"4. close": close},
+            "2026-08-04": {"4. close": previous},
+        },
+    }
+
+
+def test_valid_payload_wins_over_nonfatal_information_key() -> None:
+    document = daily_document()
+    document["Information"] = "supplementary provider message"
+    assert (
+        _daily_series(document, "Time Series (Daily)")
+        == document["Time Series (Daily)"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("document", "exception"),
+    [
+        ({"Note": "standard API rate limit reached"}, ProviderRateLimitError),
+        ({"Information": "request quota reached"}, ProviderRateLimitError),
+        (
+            {"Information": "invalid API key supplied"},
+            ProviderAuthenticationError,
+        ),
+        ({"Information": "temporary provider notice"}, ProviderInformationError),
+        ({"Error Message": "Invalid API call for symbol"}, ProviderSymbolError),
+    ],
+)
+def test_provider_message_classification(
+    document: dict[str, object], exception: type[ProviderDataError]
+) -> None:
+    with pytest.raises(exception):
+        _daily_series(document, "Time Series (Daily)")
+
+
+def test_sequential_symbols_succeed_and_query_parameters_remain_independent() -> None:
+    transport = SymbolDocumentTransport(
+        {"DRAM": [daily_document("54", "53")], "MU": [daily_document("1140", "1130")]}
+    )
+    sleeps: list[float] = []
+    quotes = AlphaVantageUSMarketDataProvider(
+        "secret", transport, sleeper=sleeps.append
+    ).fetch(("MU", "DRAM"), date(2026, 8, 5))
+    assert [(item.symbol, item.close_price) for item in quotes] == [
+        ("DRAM", Decimal("54")),
+        ("MU", Decimal("1140")),
+    ]
+    assert transport.calls == ["DRAM", "MU"]
+    assert sleeps == [12]
+
+
+def test_one_symbol_failure_does_not_discard_successful_quote() -> None:
+    transport = SymbolDocumentTransport(
+        {
+            "DRAM": [{"Error Message": "Invalid API call for symbol"}],
+            "MU": [daily_document("1140", "1130")],
+        }
+    )
+    quotes = AlphaVantageUSMarketDataProvider(
+        "secret", transport, request_interval_seconds=0, sleeper=lambda _: None
+    ).fetch(("MU", "DRAM"), date(2026, 8, 5))
+    assert [item.symbol for item in quotes] == ["MU"]
+
+
+def test_generic_information_response_is_retried_once_then_succeeds() -> None:
+    sleeps: list[float] = []
+    transport = SymbolDocumentTransport(
+        {
+            "MU": [
+                {"Information": "temporary provider notice"},
+                daily_document("1140", "1130"),
+            ]
+        }
+    )
+    quotes = AlphaVantageUSMarketDataProvider(
+        "secret", transport, sleeper=sleeps.append
+    ).fetch(("MU",), date(2026, 8, 5))
+    assert [item.symbol for item in quotes] == ["MU"]
+    assert transport.calls == ["MU", "MU"]
+    assert sleeps == [12]
+
+
+def test_partial_quote_upsert_is_idempotent(connection: sqlite3.Connection) -> None:
+    repository = SQLitePriceQuoteRepository(connection)
+    value = quote("MU", Market.US, Currency.USD, "1140", "1130", date(2026, 8, 5))
+    repository.upsert_many([value])
+    repository.upsert_many([value])
+    rows = connection.execute(
+        "SELECT COUNT(*) FROM price_quotes WHERE symbol='MU' AND market='US'"
+    ).fetchone()
+    assert rows[0] == 1
 
 
 def test_us_provider_fetches_each_distinct_symbol_once() -> None:
@@ -351,9 +468,9 @@ def test_us_provider_fetches_each_distinct_symbol_once() -> None:
             }
         }
     )
-    AlphaVantageUSMarketDataProvider("secret", transport).fetch(
-        ("MU", "mu", "DRAM"), date(2026, 8, 5)
-    )
+    AlphaVantageUSMarketDataProvider(
+        "secret", transport, request_interval_seconds=0, sleeper=lambda _: None
+    ).fetch(("MU", "mu", "DRAM"), date(2026, 8, 5))
     assert len(transport.urls) == 2
     assert sum("symbol=MU" in url for url in transport.urls) == 1
     assert sum("symbol=DRAM" in url for url in transport.urls) == 1
@@ -376,10 +493,11 @@ def test_alpha_vantage_missing_key_is_clear_and_secret_is_not_logged(
         AlphaVantageUSMarketDataProvider("", DocumentTransport({}))
     secret = "never-log-this-key"
     provider = AlphaVantageUSMarketDataProvider(
-        secret, DocumentTransport({"Information": "rate limit"})
+        secret,
+        DocumentTransport({"Information": "standard API rate limit reached"}),
+        sleeper=lambda _: None,
     )
-    with pytest.raises(ProviderDataError, match="Information"):
-        provider.fetch(("MU",), date(2026, 8, 5))
+    assert provider.fetch(("MU",), date(2026, 8, 5)) == ()
     assert secret not in caplog.text
 
 

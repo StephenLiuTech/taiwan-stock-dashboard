@@ -842,3 +842,8 @@ one request for each distinct US symbol and one USD/TWD request. A transient or
 quota failure retains eligible persisted US quotes and FX rates; without an
 eligible persisted value, the affected translated fields remain unavailable
 and Taiwan valuation continues.
+US symbol requests are paced conservatively to avoid provider call-frequency
+envelopes. Response classification distinguishes valid time-series payloads,
+authentication failures, rejected symbols, explicit quota/frequency messages,
+generic provider information, and malformed documents. Each symbol is isolated:
+a valid quote is retained even if another symbol fails.
