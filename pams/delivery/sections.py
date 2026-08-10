@@ -58,7 +58,8 @@ def _table(headers: tuple[tuple[str, bool], ...], rows: list[tuple[Cell, ...]]) 
         for row in rows
     )
     return (
-        '<table style="border-collapse:collapse;width:100%;table-layout:auto">'
+        '<table class="pams-responsive-table" style="border-collapse:collapse;'
+        'width:100%;table-layout:auto">'
         f"<thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
     )
 
@@ -95,7 +96,8 @@ def _dividend_calendar_table(
         for row in rows
     )
     return (
-        '<table style="border-collapse:collapse;width:100%;max-width:100%;'
+        '<table class="pams-responsive-table" style="border-collapse:collapse;'
+        "width:100%;max-width:100%;"
         'table-layout:fixed;font-size:11px">'
         f"<colgroup>{columns}</colgroup>"
         f"<thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
@@ -350,7 +352,8 @@ class DailyReportSectionRenderer:
                 for label, display in rows
             )
             return (
-                '<table role="presentation" style="border-collapse:collapse;width:100%;'
+                '<table role="presentation" class="pams-responsive-table" '
+                'style="border-collapse:collapse;width:100%;'
                 "max-width:100%;table-layout:fixed;border:1px solid #d1d5db;"
                 'background:#ffffff;margin:0 0 12px;font-size:12px">'
                 '<tr><td colspan="2" style="padding:9px;background:#f3f4f6;'
@@ -522,7 +525,8 @@ class DailyReportSectionRenderer:
         )
         return (
             '<h2 style="font-size:18px;margin-top:24px">Currency Exposure</h2>'
-            '<table role="presentation" style="border-collapse:collapse;width:100%;'
+            '<table role="presentation" class="pams-responsive-table" '
+            'style="border-collapse:collapse;width:100%;'
             "max-width:100%;table-layout:fixed;border:1px solid #d1d5db;"
             'background:#ffffff;font-size:12px">'
             '<tr><td colspan="2" style="padding:9px;background:#f3f4f6;'
