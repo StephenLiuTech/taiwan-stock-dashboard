@@ -383,10 +383,21 @@ market ingestion continues to enforce source-date integrity independently.
 Latest and historical official providers share one HTTP transport boundary.
 It fully buffers response bytes before JSON decoding and applies at most four
 attempts to incomplete reads, transient socket failures, and HTTP
-429/500/502/503/504. Parsing, dataset semantics, and source-date validation
+429/500/502/503/504/520. Parsing, dataset semantics, and source-date validation
 occur after that boundary and are never retried as transport failures. All
 retries therefore finish before the Market Data Engine opens its atomic
 persistence transaction.
+
+TWSE and TPEx availability probes are isolated. A transient failure after the
+bounded retry policy produces an unavailable result for only that market and
+retains the other market's verified live date. Automatic ingestion still
+requires both dates and never fabricates a common date. Daily Report delivery
+may instead use the latest non-future persisted aggregate snapshot only when
+its position-snapshot grain covers every active holding exactly once. The
+actual persisted snapshot date remains the report date; stale data is never
+relabeled as the current day. Structural payload errors, source-date failures,
+and other data-integrity errors remain fatal and are not eligible for this
+transport fallback.
 
 Demo-data generation is isolated from production configuration. It creates a
 complete deterministic SQLite database transactionally and never calls live
@@ -440,12 +451,21 @@ Email renderer    Delivery repository claim
 Explicit dates require an exact aggregate snapshot. Automatic delivery reuses
 the idempotent update workflow and loads the exact live-resolved date returned
 by that workflow; it never substitutes `SnapshotRepository.get_latest()`.
-Forced delivery rebuilds that resolved date. Normal delivery reuses its
-snapshot or creates it when absent. `report_deliveries` has one row per report
+Forced delivery rebuilds a live-resolved date when an update is required; a
+complete current-date snapshot or temporary-calendar fallback is not rebuilt
+without verified live availability. Normal delivery reuses its snapshot or
+creates it when absent. `report_deliveries` has one row per report
 type, date, and recipient;
 an atomic `SENDING` claim prevents concurrent duplicate sends. SENT is a normal
 no-op, FAILED is retryable, and dry-run performs neither a claim,
 authentication, nor a network call.
+
+If a complete snapshot already exists for the current date, automatic Daily
+Report delivery does not depend on another live calendar probe merely to render
+and send persisted facts. If live calendar resolution is temporarily
+unavailable and no current-date snapshot exists, delivery may use the latest
+complete non-future snapshot and labels the report with that exact persisted
+date. If no complete persisted valuation exists, delivery fails explicitly.
 
 The V1.0 renderer receives two additional application-prepared facts. Signed
 daily portfolio movement is calculated in the pure `PortfolioService` by

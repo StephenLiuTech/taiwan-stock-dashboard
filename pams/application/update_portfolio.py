@@ -5,7 +5,11 @@ from datetime import date
 from pathlib import Path
 
 from domain import Holding
-from market_calendar import MarketAvailability, MarketCalendar
+from market_calendar import (
+    MarketAvailability,
+    MarketCalendar,
+    MarketCalendarUnavailableError,
+)
 from market_data.engine import MarketDataEngine, MarketDataRefreshResult
 from pams.application.dto import (
     MarketAvailabilitySummary,
@@ -67,6 +71,8 @@ class UpdatePortfolioUseCase:
             availability = _availability_dto(source_availability)
             requested_date = source_availability.commonly_ingestible_date
             sources_synchronized = source_availability.synchronized
+            if requested_date is None:
+                raise MarketCalendarUnavailableError(source_availability)
 
         needs_historical_provider = (
             not automatic

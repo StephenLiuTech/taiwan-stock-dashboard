@@ -8,7 +8,7 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
-from market_data import ProviderDataError
+from market_data import ProviderDataError, TemporaryProviderUnavailableError
 from market_data.transport import UrllibJSONDocumentTransport
 
 
@@ -96,6 +96,32 @@ def test_transient_http_503_is_retried() -> None:
         "date": "20260727"
     }
     assert opener.calls == 2
+
+
+def test_transient_http_520_is_retried_with_bounded_attempts() -> None:
+    opener = SequenceOpener(
+        HTTPError("https://example.test", 520, "temporary", {}, None),
+        document_response(),
+    )
+
+    assert transport(opener).get_document("https://example.test/data") == {
+        "date": "20260727"
+    }
+    assert opener.calls == 2
+
+
+def test_http_520_exhaustion_is_typed_and_never_retries_indefinitely() -> None:
+    opener = SequenceOpener(
+        *(
+            HTTPError("https://example.test", 520, "temporary", {}, None)
+            for _ in range(4)
+        )
+    )
+
+    with pytest.raises(TemporaryProviderUnavailableError, match="4 attempts"):
+        transport(opener).get_document("https://example.test/data")
+
+    assert opener.calls == 4
 
 
 @pytest.mark.parametrize(

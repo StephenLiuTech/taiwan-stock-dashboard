@@ -8,12 +8,14 @@ from market_calendar.providers import (
 from market_calendar.service import (
     MarketAvailability,
     MarketCalendar,
+    MarketCalendarUnavailableError,
     MarketDataNotSynchronizedError,
 )
 
 __all__ = [
     "MarketAvailability",
     "MarketCalendar",
+    "MarketCalendarUnavailableError",
     "MarketDataNotSynchronizedError",
     "MarketDateProvider",
     "OfficialHistoricalMarketDateProvider",

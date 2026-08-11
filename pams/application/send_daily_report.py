@@ -1,5 +1,7 @@
 """Daily portfolio report delivery orchestration."""
 
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -12,6 +14,7 @@ from domain import (
     Market,
     PositionSnapshot,
 )
+from market_calendar import MarketCalendarUnavailableError
 from pams.application.report_sections import BuildReportSectionsUseCase
 from pams.application.update_portfolio import UpdatePortfolioUseCase
 from repositories import (
@@ -22,6 +25,7 @@ from repositories import (
 from services import PortfolioService
 
 REPORT_TYPE = "daily_portfolio"
+_LOGGER = logging.getLogger(__name__)
 
 
 class DailyReportError(RuntimeError):
@@ -174,6 +178,7 @@ class SendDailyReportUseCase:
         recipient: str,
         asset_store: ReportAssetStore | None = None,
         section_builder: BuildReportSectionsUseCase | None = None,
+        today: Callable[[], date] = date.today,
     ) -> None:
         self._update_portfolio = update_portfolio
         self._snapshots = snapshots
@@ -186,6 +191,7 @@ class SendDailyReportUseCase:
         self._recipient = recipient
         self._asset_store = asset_store
         self._section_builder = section_builder
+        self._today = today
 
     def execute(
         self,
@@ -196,14 +202,52 @@ class SendDailyReportUseCase:
     ) -> DailyReportSendResult:
         """Perform one automatic or explicit-date delivery workflow."""
         if requested_date is None:
-            update = self._update_portfolio.execute(dry_run=dry_run, force=force)
-            resolved_date = update.requested_date or update.verified_source_date
-            if resolved_date is None:
-                raise DailyReportSnapshotMissingError(
-                    "automatic market-date resolution returned no report date"
+            today = self._today()
+            latest = self._snapshots.get_latest()
+            if (
+                latest is not None
+                and latest.snapshot_date == today
+                and self._is_complete_snapshot(latest)
+            ):
+                snapshot = latest
+                verified_source_date = latest.snapshot_date
+                _LOGGER.info(
+                    "Using persisted complete snapshot: date=%s "
+                    "source=persisted_daily_snapshot+persisted_position_snapshots",
+                    latest.snapshot_date,
                 )
-            snapshot = self._snapshots.get_by_date(resolved_date)
-            verified_source_date = update.verified_source_date or resolved_date
+            else:
+                try:
+                    update = self._update_portfolio.execute(
+                        dry_run=dry_run, force=force
+                    )
+                    resolved_date = update.requested_date or update.verified_source_date
+                    if resolved_date is None:
+                        raise DailyReportSnapshotMissingError(
+                            "automatic market-date resolution returned no report date"
+                        )
+                    snapshot = self._snapshots.get_by_date(resolved_date)
+                    verified_source_date = update.verified_source_date or resolved_date
+                except MarketCalendarUnavailableError as error:
+                    snapshot = self._safe_persisted_fallback(today)
+                    if snapshot is None:
+                        raise DailyReportSnapshotMissingError(
+                            "live market availability is temporarily unavailable and "
+                            "no complete persisted portfolio snapshot is available"
+                        ) from error
+                    verified_source_date = snapshot.snapshot_date
+                    availability = error.availability
+                    _LOGGER.warning(
+                        "Live market availability unavailable; using safe persisted "
+                        "snapshot: report_date=%s twse_date=%s twse_source=%s "
+                        "tpex_date=%s tpex_source=%s fallback_source=%s",
+                        snapshot.snapshot_date,
+                        availability.twse_date,
+                        availability.twse_source,
+                        availability.tpex_date,
+                        availability.tpex_source,
+                        "persisted_daily_snapshot+persisted_position_snapshots",
+                    )
         elif force:
             update = self._update_portfolio.execute(
                 requested_date, dry_run=dry_run, force=True
@@ -271,6 +315,40 @@ class SendDailyReportUseCase:
         )
         return DailyReportSendResult(
             report_date, self._recipient, rendered.subject, "sent"
+        )
+
+    def _safe_persisted_fallback(self, today: date) -> DailySnapshot | None:
+        snapshot = self._snapshots.get_latest()
+        if (
+            snapshot is None
+            or snapshot.snapshot_date > today
+            or not self._is_complete_snapshot(snapshot)
+        ):
+            return None
+        return snapshot
+
+    def _is_complete_snapshot(self, snapshot: DailySnapshot) -> bool:
+        active_holdings = {
+            holding.id: holding
+            for holding in self._holdings.list_all()
+            if holding.quantity > 0
+        }
+        if not active_holdings:
+            return False
+        positions = self._positions.list_by_date(snapshot.snapshot_date)
+        positions_by_id = {position.holding_id: position for position in positions}
+        return (
+            len(positions) == len(positions_by_id)
+            and positions_by_id.keys() == active_holdings.keys()
+            and all(
+                position.snapshot_date == snapshot.snapshot_date
+                for position in positions
+            )
+            and all(
+                positions_by_id[holding_id].quantity == holding.quantity
+                and positions_by_id[holding_id].average_cost == holding.average_cost
+                for holding_id, holding in active_holdings.items()
+            )
         )
 
     def _build_report(

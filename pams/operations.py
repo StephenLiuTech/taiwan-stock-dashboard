@@ -8,6 +8,7 @@ from pathlib import Path
 
 from database.schema import SCHEMA_VERSION
 from market_calendar import MarketAvailability, MarketCalendar, MarketDateProvider
+from market_data import TemporaryProviderUnavailableError
 from market_data.engine import MarketDataEngine
 from repositories.provider import RepositoryBundle, create_repositories
 
@@ -248,11 +249,24 @@ class VerificationService:
         )
         return VerificationCheck(name, level, f"{count} records")
 
-    @staticmethod
-    def _provider_check(provider: MarketDateProvider) -> VerificationCheck:
+    def _provider_check(self, provider: MarketDateProvider) -> VerificationCheck:
         name = f"{provider.market.value} endpoint"
         try:
             available = provider.latest_available_date()
+        except TemporaryProviderUnavailableError as error:
+            persisted = self._has_persisted_market_data()
+            return VerificationCheck(
+                name,
+                CheckLevel.WARN if persisted else CheckLevel.FAIL,
+                (
+                    f"temporarily unavailable ({type(error).__name__}); "
+                    + (
+                        "persisted market data available"
+                        if persisted
+                        else "no safe persisted market data available"
+                    )
+                ),
+            )
         except Exception as error:
             return VerificationCheck(name, CheckLevel.FAIL, str(error))
         return VerificationCheck(name, CheckLevel.PASS, available.isoformat())
@@ -262,6 +276,27 @@ class VerificationService:
             availability = self.calendar.market_availability()
         except Exception as error:
             return VerificationCheck("Market Calendar", CheckLevel.FAIL, str(error))
+        if availability.commonly_ingestible_date is None:
+            persisted = self._has_persisted_market_data()
+            available_sources = ", ".join(
+                f"{name}={value.isoformat()}"
+                for name, value in (
+                    ("TWSE", availability.twse_date),
+                    ("TPEx", availability.tpex_date),
+                )
+                if value is not None
+            )
+            return VerificationCheck(
+                "Market Calendar",
+                CheckLevel.WARN if persisted else CheckLevel.FAIL,
+                "live source availability incomplete"
+                + (f" ({available_sources})" if available_sources else "")
+                + (
+                    "; persisted market data available"
+                    if persisted
+                    else "; no safe persisted market data available"
+                ),
+            )
         if not availability.synchronized:
             return VerificationCheck(
                 "Market Calendar",
@@ -275,4 +310,22 @@ class VerificationService:
             "Market Calendar",
             CheckLevel.PASS,
             f"commonly ingestible {availability.commonly_ingestible_date.isoformat()}",
+        )
+
+    def _has_persisted_market_data(self) -> bool:
+        if self.repositories is None:
+            return False
+        daily = self.repositories.daily_snapshots.get_latest()
+        if daily is None:
+            return False
+        positions = self.repositories.position_snapshots.list_by_date(
+            daily.snapshot_date
+        )
+        active_ids = {
+            holding.id
+            for holding in self.repositories.holdings.list_all()
+            if holding.quantity > 0
+        }
+        return (
+            bool(active_ids) and {item.holding_id for item in positions} == active_ids
         )

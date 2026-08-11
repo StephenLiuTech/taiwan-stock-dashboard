@@ -8,6 +8,7 @@ import pytest
 from domain import Market
 from market_calendar import (
     MarketCalendar,
+    MarketCalendarUnavailableError,
     OfficialHistoricalMarketDateProvider,
     OfficialMarketDateProvider,
 )
@@ -15,6 +16,7 @@ from market_data import (
     MarketDateUnavailableError,
     ProviderDataError,
     SourceDateError,
+    TemporaryProviderUnavailableError,
 )
 from market_data.transport import JSONRecord
 
@@ -97,6 +99,44 @@ def test_calendar_requires_both_official_markets() -> None:
     calendar = MarketCalendar((date_provider(Market.TWSE, "1150722"),))
     with pytest.raises(ProviderDataError, match="TPEx"):
         calendar.latest_available_trading_date()
+
+
+class AvailabilityProvider:
+    def __init__(
+        self, market: Market, value: date | TemporaryProviderUnavailableError
+    ) -> None:
+        self.market = market
+        self.value = value
+
+    def latest_available_date(self) -> date:
+        if isinstance(self.value, TemporaryProviderUnavailableError):
+            raise self.value
+        return self.value
+
+
+@pytest.mark.parametrize("failed_market", [Market.TWSE, Market.TPEX])
+def test_calendar_preserves_the_successful_source_when_the_other_is_transient(
+    failed_market: Market,
+) -> None:
+    successful_market = Market.TPEX if failed_market is Market.TWSE else Market.TWSE
+    calendar = MarketCalendar(
+        (
+            AvailabilityProvider(
+                failed_market, TemporaryProviderUnavailableError("HTTP 520")
+            ),
+            AvailabilityProvider(successful_market, date(2026, 8, 11)),
+        )
+    )
+
+    availability = calendar.market_availability()
+
+    assert getattr(availability, f"{successful_market.value.lower()}_date") == date(
+        2026, 8, 11
+    )
+    assert getattr(availability, f"{failed_market.value.lower()}_date") is None
+    assert availability.commonly_ingestible_date is None
+    with pytest.raises(MarketCalendarUnavailableError):
+        calendar.latest_commonly_ingestible_date()
 
 
 def test_official_latest_provider_does_not_cache_source_date() -> None:

@@ -13,10 +13,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
-from market_data.exceptions import ProviderDataError
+from market_data.exceptions import ProviderDataError, TemporaryProviderUnavailableError
 
 JSONRecord = Mapping[str, object]
-TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504, 520})
 MAX_HTTP_ATTEMPTS = 4
 _TRANSIENT_ERRNOS = frozenset(
     {
@@ -145,7 +145,7 @@ class _UrllibJSONTransportBase:
                     type(error).__name__,
                 )
                 if attempt == self.attempts:
-                    raise ProviderDataError(
+                    raise TemporaryProviderUnavailableError(
                         f"{self.provider_name} HTTP request failed after "
                         f"{self.attempts} attempts: {type(error).__name__}"
                     ) from error

@@ -22,6 +22,7 @@ from domain import (
     Market,
     PositionSnapshot,
 )
+from market_calendar import MarketAvailability, MarketCalendarUnavailableError
 from market_data import ProviderDataError
 from market_data.transport import UrllibJSONDocumentTransport
 from pams.application import (
@@ -283,6 +284,13 @@ def live_date_case(
             )()
 
     class LiveSnapshots:
+        def get_latest(self) -> DailySnapshot | None:
+            return max(
+                snapshots_by_date.values(),
+                key=lambda item: item.snapshot_date,
+                default=None,
+            )
+
         def get_by_date(self, report_date: date) -> DailySnapshot | None:
             return snapshots_by_date.get(report_date)
 
@@ -405,6 +413,125 @@ def test_failed_live_date_resolution_prevents_report_delivery() -> None:
     with pytest.raises(ProviderDataError, match="live date resolution failed"):
         case.execute()
     assert transport.messages == []
+
+
+def _temporary_calendar_failure(
+    *, twse_date: date | None = None, tpex_date: date | None = None
+) -> MarketCalendarUnavailableError:
+    return MarketCalendarUnavailableError(
+        MarketAvailability(
+            twse_date=twse_date,
+            tpex_date=tpex_date,
+            twse_source="live_provider" if twse_date else "unavailable",
+            tpex_source="live_provider" if tpex_date else "unavailable",
+            twse_error=None if twse_date else "TemporaryProviderUnavailableError",
+            tpex_error=None if tpex_date else "TemporaryProviderUnavailableError",
+        )
+    )
+
+
+def test_complete_same_date_snapshot_sends_without_live_calendar_dependency() -> None:
+    class UnexpectedUpdate:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise AssertionError("live calendar must not be required")
+
+    transport = TransportStub()
+    case = SendDailyReportUseCase(
+        UnexpectedUpdate(),  # type: ignore[arg-type]
+        SnapshotStub(snapshot()),  # type: ignore[arg-type]
+        PositionStub(),  # type: ignore[arg-type]
+        HoldingStub(),  # type: ignore[arg-type]
+        DeliveryStub(),
+        DailyEmailReportRenderer(),
+        transport,
+        "sender@example.com",
+        "recipient@example.com",
+        today=lambda: date(2026, 7, 22),
+    )
+
+    result = case.execute()
+
+    assert result.status == "sent"
+    assert result.report_date == date(2026, 7, 22)
+    assert len(transport.messages) == 1
+
+
+@pytest.mark.parametrize(
+    ("twse_date", "tpex_date"),
+    ((date(2026, 7, 23), None), (None, date(2026, 7, 23))),
+)
+def test_one_transient_source_uses_complete_persisted_snapshot_and_keeps_its_date(
+    twse_date: date | None,
+    tpex_date: date | None,
+) -> None:
+    class FailingUpdate:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise _temporary_calendar_failure(twse_date=twse_date, tpex_date=tpex_date)
+
+    transport = TransportStub()
+    case = SendDailyReportUseCase(
+        FailingUpdate(),  # type: ignore[arg-type]
+        SnapshotStub(snapshot()),  # type: ignore[arg-type]
+        PositionStub(),  # type: ignore[arg-type]
+        HoldingStub(),  # type: ignore[arg-type]
+        DeliveryStub(),
+        DailyEmailReportRenderer(),
+        transport,
+        "sender@example.com",
+        "recipient@example.com",
+        today=lambda: date(2026, 7, 23),
+    )
+
+    result = case.execute()
+
+    assert result.report_date == date(2026, 7, 22)
+    assert "Report date: 2026-07-22" in transport.messages[0].plain_text
+    assert "Report date: 2026-07-23" not in transport.messages[0].plain_text
+
+
+def test_both_transient_sources_use_complete_persisted_snapshot() -> None:
+    class FailingUpdate:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise _temporary_calendar_failure()
+
+    transport = TransportStub()
+    case = SendDailyReportUseCase(
+        FailingUpdate(),  # type: ignore[arg-type]
+        SnapshotStub(snapshot()),  # type: ignore[arg-type]
+        PositionStub(),  # type: ignore[arg-type]
+        HoldingStub(),  # type: ignore[arg-type]
+        DeliveryStub(),
+        DailyEmailReportRenderer(),
+        transport,
+        "sender@example.com",
+        "recipient@example.com",
+        today=lambda: date(2026, 7, 23),
+    )
+
+    assert case.execute().status == "sent"
+    assert len(transport.messages) == 1
+
+
+def test_both_transient_sources_without_safe_snapshot_fail_explicitly() -> None:
+    class FailingUpdate:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise _temporary_calendar_failure()
+
+    case = SendDailyReportUseCase(
+        FailingUpdate(),  # type: ignore[arg-type]
+        SnapshotStub(),  # type: ignore[arg-type]
+        PositionStub(),  # type: ignore[arg-type]
+        HoldingStub(),  # type: ignore[arg-type]
+        DeliveryStub(),
+        DailyEmailReportRenderer(),
+        TransportStub(),
+        "sender@example.com",
+        "recipient@example.com",
+        today=lambda: date(2026, 7, 23),
+    )
+
+    with pytest.raises(DailyReportSnapshotMissingError, match="no complete persisted"):
+        case.execute()
 
 
 def test_scheduled_report_succeeds_after_transient_tpex_read_failure() -> None:

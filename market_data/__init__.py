@@ -23,6 +23,7 @@ from market_data.exceptions import (
     SourceDateMismatchError,
     SuspendedSecurityError,
     SymbolNotFoundError,
+    TemporaryProviderUnavailableError,
 )
 from market_data.normalizer import QuoteNormalizationError, QuoteNormalizer
 from market_data.providers import (
@@ -52,6 +53,7 @@ __all__ = [
     "SourceDateMismatchError",
     "SuspendedSecurityError",
     "SymbolNotFoundError",
+    "TemporaryProviderUnavailableError",
     "TPExProvider",
     "TPExDividendProvider",
     "TPExHistoricalDividendProvider",

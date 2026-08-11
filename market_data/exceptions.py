@@ -13,6 +13,10 @@ class ProviderDataError(MarketDataError):
     """The provider failed or returned structurally invalid data."""
 
 
+class TemporaryProviderUnavailableError(ProviderDataError):
+    """A provider remained unreachable after bounded transient retries."""
+
+
 class ProviderRateLimitError(ProviderDataError):
     """The configured provider rejected a request because its quota was exhausted."""
 
