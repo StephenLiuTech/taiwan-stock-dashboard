@@ -685,6 +685,7 @@ class DailyEmailReportRenderer:
 @media only screen and (max-width:600px) {{
   .pams-report {{ padding:10px !important; }}
   .pams-container {{ width:100% !important; max-width:100% !important; }}
+  .pams-wide-tables {{ width:100% !important; max-width:100% !important; }}
   .pams-desktop-only {{ display:none !important; mso-hide:all !important; }}
   .pams-mobile-only {{ display:block !important; mso-hide:none !important; }}
   table.pams-mobile-only {{ display:table !important; width:100% !important; }}
@@ -712,6 +713,7 @@ class DailyEmailReportRenderer:
 {summary_cards}</table>
 <h2 style="font-size:18px">Portfolio Trend</h2>
 {chart_html}
+<table role="presentation" class="pams-wide-tables" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto"><tr><td style="padding:0;vertical-align:top">
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
 <table class="pams-desktop-only" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto">
 <thead><tr>{headers((("Rank", "5%", "right"), ("Market", "8%", "left"), ("Symbol", "9%", "left"), ("Name", "38%", "left"), ("Quote Date", "12%", "left"), ("Today's P/L", "15%", "right"), ("Today's P/L %", "13%", "right")), font_size="14px")}</tr></thead>
@@ -727,6 +729,7 @@ class DailyEmailReportRenderer:
 <div class="pams-mobile-only" style="width:100%;margin:0 0 24px">
 {mobile_holding_cards}</div>
 {DailyReportSectionRenderer().html(report.sections)}
+</td></tr></table>
 </div></body></html>"""
         section_text = DailyReportSectionRenderer().text(report.sections)
         return RenderedEmail(

@@ -357,6 +357,13 @@ def test_portfolio_summary_renders_expected_annual_dividend_card_and_text() -> N
     assert "Remaining<br><strong>NT$3,000</strong>" in rendered.html
     assert "Expected Annual Dividend" in rendered.plain_text
     assert "Remaining: NT$3,000" in rendered.plain_text
+    width_wrapper = rendered.html.split(
+        '<table role="presentation" class="pams-wide-tables"', maxsplit=1
+    )[1].rsplit("</td></tr></table>\n</div></body>", maxsplit=1)[0]
+    assert ">Today's Contributors</h2>" in width_wrapper
+    assert ">Holdings</h2>" in width_wrapper
+    assert ">Dividend Calendar</h2>" in width_wrapper
+    assert width_wrapper.count('class="pams-responsive-table"') == 2
 
 
 def test_automatic_report_uses_newer_live_date_than_persisted_snapshot() -> None:
@@ -813,10 +820,15 @@ def test_html_contributor_columns_and_readable_alignment_are_preserved() -> None
     assert "width:100%" in contributor_table
     assert "width:100%" in holdings_table
     assert 'width="100%"' in contributor_table
-    between_tables = html.split('<table class="pams-desktop-only"', maxsplit=1)[
-        1
-    ].split('<h2 style="font-size:18px;margin-top:24px">Holdings</h2>', maxsplit=1)[0]
-    assert "</div>" not in between_tables
+    width_reference = (
+        '<table role="presentation" class="pams-wide-tables" width="100%" '
+        'style="border-collapse:collapse;width:100%;table-layout:auto">'
+    )
+    wrapper_start = html.index(width_reference)
+    contributors_start = html.index(">Today's Contributors</h2>")
+    holdings_start = html.index(">Holdings</h2>")
+    assert wrapper_start < contributors_start < holdings_start
+    assert "white-space:nowrap" in html[holdings_start:]
 
 
 def test_html_table_numbers_follow_display_precision_rules() -> None:
