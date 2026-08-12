@@ -99,6 +99,21 @@ def _ranked_contributors(
     )
 
 
+def _ordered_holdings(
+    positions: tuple[DailyEmailPosition, ...],
+) -> list[DailyEmailPosition]:
+    """Order holdings by Decimal unrealized P/L with unavailable values last."""
+    return sorted(
+        positions,
+        key=lambda item: (
+            item.unrealized_pnl is None,
+            -item.unrealized_pnl if item.unrealized_pnl is not None else Decimal("0"),
+            item.market.value,
+            item.symbol,
+        ),
+    )
+
+
 def _contributor_text(positions: tuple[DailyEmailPosition, ...]) -> list[str]:
     lines = [
         "Rank | Market | Symbol | Name | Quote Date | Today's P/L | Today's P/L % | Share of net daily P/L"
@@ -326,6 +341,7 @@ class DailyEmailReportRenderer:
         """Return deterministic plain text, HTML, subject, and inline chart."""
         subject = f"PAMS Daily Portfolio Report - {report.report_date}"
         contributors = _ranked_contributors(report.positions)
+        ordered_holdings = _ordered_holdings(report.positions)
         taiwan_market_value = sum(
             (
                 item.market_value
@@ -414,7 +430,7 @@ class DailyEmailReportRenderer:
                     _money(item.market_value),
                 )
             )
-            for item in report.positions
+            for item in ordered_holdings
         )
 
         contributor_rows = "".join(
@@ -549,7 +565,7 @@ class DailyEmailReportRenderer:
                 padding="10px 6px",
             )
             + "</tr>"
-            for item in report.positions
+            for item in ordered_holdings
         )
         mobile_holding_cards = "".join(
             '<table role="presentation" class="pams-mobile-holding-card" '
@@ -597,7 +613,7 @@ class DailyEmailReportRenderer:
                 second_color=_tone(item.unrealized_return),
             )
             + "</table>"
-            for item in report.positions
+            for item in ordered_holdings
         )
 
         def headers(

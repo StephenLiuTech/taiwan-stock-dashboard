@@ -1,6 +1,7 @@
 """Responsive HTML regression tests for the daily portfolio report."""
 
 import re
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -118,6 +119,74 @@ def test_mobile_holdings_render_seven_readable_cards_with_matching_values(
         assert html.count(value) >= 3
     assert "Micron Technology Inc" in mobile
     assert "&middot; FX 31.42" in mobile
+
+
+def test_desktop_and_mobile_holdings_share_unrealized_pnl_order(
+    multi_market_mobile_report: DailyEmailReport,
+) -> None:
+    values = {
+        "0050": Decimal("154250"),
+        "2027": Decimal("-990"),
+        "2330": Decimal("89175"),
+        "3293": Decimal("125468"),
+        "8299": Decimal("-115118"),
+        "MU": Decimal("-17446"),
+        "DRAM": Decimal("-46350"),
+    }
+    report = replace(
+        multi_market_mobile_report,
+        positions=tuple(
+            replace(position, unrealized_pnl=values[position.symbol])
+            for position in reversed(multi_market_mobile_report.positions)
+        ),
+    )
+
+    html = DailyEmailReportRenderer().render(report).html
+    holdings_section = html.split(">Holdings</h2>", 1)[1]
+    desktop = holdings_section.split('<table class="pams-desktop-only"', 1)[1].split(
+        "</table>", 1
+    )[0]
+    mobile = holdings_section.split('<div class="pams-mobile-only"', 1)[1].split(
+        "</div>", 1
+    )[0]
+    expected = ("0050", "3293", "2330", "2027", "MU", "DRAM", "8299")
+
+    assert tuple(sorted(expected, key=desktop.index)) == expected
+    assert (
+        tuple(sorted(expected, key=lambda symbol: mobile.index(f">{symbol}</strong>")))
+        == expected
+    )
+
+
+def test_holdings_order_ties_by_market_then_symbol_and_places_unavailable_last(
+    multi_market_mobile_report: DailyEmailReport,
+) -> None:
+    report = replace(
+        multi_market_mobile_report,
+        positions=tuple(
+            replace(
+                position,
+                unrealized_pnl=(None if position.symbol == "MU" else Decimal("100")),
+            )
+            for position in reversed(multi_market_mobile_report.positions)
+        ),
+    )
+
+    html = DailyEmailReportRenderer().render(report).html
+    holdings_section = html.split(">Holdings</h2>", 1)[1]
+    desktop = holdings_section.split('<table class="pams-desktop-only"', 1)[1].split(
+        "</table>", 1
+    )[0]
+    mobile = holdings_section.split('<div class="pams-mobile-only"', 1)[1].split(
+        "</div>", 1
+    )[0]
+    expected = ("3293", "8299", "0050", "2027", "2330", "DRAM", "MU")
+
+    assert tuple(sorted(expected, key=desktop.index)) == expected
+    assert (
+        tuple(sorted(expected, key=lambda symbol: mobile.index(f">{symbol}</strong>")))
+        == expected
+    )
 
 
 def test_responsive_css_preserves_flow_and_avoids_overlap_constructs(
