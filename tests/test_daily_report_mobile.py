@@ -64,7 +64,7 @@ def multi_market_mobile_report() -> DailyEmailReport:
     )
 
 
-def test_desktop_holdings_retains_all_fourteen_columns(
+def test_desktop_holdings_retains_reduced_twelve_columns(
     multi_market_mobile_report: DailyEmailReport,
 ) -> None:
     html = DailyEmailReportRenderer().render(multi_market_mobile_report).html
@@ -81,13 +81,13 @@ def test_desktop_holdings_retains_all_fourteen_columns(
         "Close",
         "Quote Date",
         "FX",
-        "Today&#x27;s P/L",
-        "Today&#x27;s P/L %",
         "Unrealized P/L",
         "Return %",
         "Market Value",
     )
-    assert sum(holdings.count(f">{label}</th>") for label in labels) == 14
+    assert sum(holdings.count(f">{label}</th>") for label in labels) == 12
+    assert ">Today&#x27;s P/L</th>" not in holdings
+    assert ">Today&#x27;s P/L %</th>" not in holdings
 
 
 def test_mobile_contributors_use_the_simplified_four_columns(
@@ -106,6 +106,44 @@ def test_mobile_contributors_use_the_simplified_four_columns(
     assert "white-space:nowrap" in mobile
 
 
+def test_contributor_order_uses_daily_pnl_then_market_symbol_with_missing_last(
+    multi_market_mobile_report: DailyEmailReport,
+) -> None:
+    values = {
+        "0050": Decimal("100"),
+        "2027": Decimal("0"),
+        "2330": Decimal("100"),
+        "3293": Decimal("100"),
+        "8299": Decimal("-25"),
+        "DRAM": Decimal("-100"),
+        "MU": None,
+    }
+    report = replace(
+        multi_market_mobile_report,
+        positions=tuple(
+            replace(position, daily_profit_loss=values[position.symbol])
+            for position in reversed(multi_market_mobile_report.positions)
+        ),
+    )
+
+    rendered = DailyEmailReportRenderer().render(report)
+    contributors = rendered.html.split(">Today's Contributors</h2>", 1)[1]
+    desktop = contributors.split('<table class="pams-desktop-only"', 1)[1].split(
+        "</table>", 1
+    )[0]
+    mobile = contributors.split('<table class="pams-mobile-only"', 1)[1].split(
+        "</table>", 1
+    )[0]
+    plain = rendered.plain_text.split("Today's Contributors\n", 1)[1].split(
+        "\n\nHoldings", 1
+    )[0]
+    expected = ("3293", "0050", "2330", "2027", "8299", "DRAM", "MU")
+
+    assert tuple(sorted(expected, key=desktop.index)) == expected
+    assert tuple(sorted(expected, key=mobile.index)) == expected
+    assert tuple(sorted(expected, key=plain.index)) == expected
+
+
 def test_mobile_holdings_render_seven_readable_cards_with_matching_values(
     multi_market_mobile_report: DailyEmailReport,
 ) -> None:
@@ -114,11 +152,12 @@ def test_mobile_holdings_render_seven_readable_cards_with_matching_values(
     assert mobile.count('class="pams-mobile-holding-card"') == 7
     for position in multi_market_mobile_report.positions:
         assert f"<strong>{position.symbol}</strong>" in mobile
-        value = f"+NT${position.daily_profit_loss:,.0f}"
-        # The same calculated value is rendered in desktop and mobile presentations.
-        assert html.count(value) >= 3
+        assert "Unrealized P/L" in mobile
     assert "Micron Technology Inc" in mobile
     assert "&middot; FX 31.42" in mobile
+    assert "Today's P/L" not in mobile
+    assert "Unrealized P/L" in mobile
+    assert "Return %" in mobile
 
 
 def test_desktop_and_mobile_holdings_share_unrealized_pnl_order(
@@ -201,7 +240,7 @@ def test_responsive_css_preserves_flow_and_avoids_overlap_constructs(
     assert "position:fixed" not in html.replace(" ", "").lower()
     assert re.search(r"(?<!line-)height:\s*\d+(?:px|em|rem)", html) is None
     assert re.search(r"margin(?:-\w+)?:\s*-", html) is None
-    note = html.index("Ranked by absolute daily P/L")
+    note = html.index("Ranked by Today's P/L from highest to lowest.")
     holdings_heading = html.index(">Holdings</h2>")
     assert note < holdings_heading
     assert "margin:10px 0 24px" in html[note - 150 : note]

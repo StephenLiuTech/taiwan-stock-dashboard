@@ -684,16 +684,12 @@ def test_position_daily_contributions_cover_positive_negative_and_zero() -> None
     contributors = html.split(">Today's Contributors</h2>", maxsplit=1)[1].split(
         "</table>", maxsplit=1
     )[0]
-    holdings = html.split(">Holdings</h2>", maxsplit=1)[1].split(
-        "</table>", maxsplit=1
-    )[0]
-    for section in (contributors, holdings):
-        assert 'color:#b91c1c;font-weight:600">+NT$25</td>' in section
-        assert 'color:#15803d;font-weight:600">-NT$10</td>' in section
-        assert 'color:#6b7280;font-weight:600">NT$0</td>' in section
+    assert 'color:#b91c1c;font-weight:600">+NT$25</td>' in contributors
+    assert 'color:#15803d;font-weight:600">-NT$10</td>' in contributors
+    assert 'color:#6b7280;font-weight:600">NT$0</td>' in contributors
 
 
-def test_contributors_are_ranked_by_absolute_portfolio_impact() -> None:
+def test_contributors_are_ranked_by_daily_profit_loss_descending() -> None:
     impact_positions = [
         positions()[0].model_copy(update={"daily_value_change": Decimal("5")}),
         positions()[1].model_copy(update={"daily_value_change": Decimal("-50")}),
@@ -706,21 +702,25 @@ def test_contributors_are_ranked_by_absolute_portfolio_impact() -> None:
         "Today's Contributors\n", maxsplit=1
     )[1]
     contributor_rows = contributor_section.split("\n")
-    assert contributor_rows[1].startswith("1 | TWSE | 8299 | Phison | N/A | -NT$50")
-    assert contributor_rows[2].startswith("2 | TWSE | 2330 | TSMC | N/A | +NT$5")
+    assert contributor_rows[1].startswith("1 | TWSE | 2330 | TSMC | N/A | +NT$5")
+    assert contributor_rows[2].startswith("2 | TWSE | 8299 | Phison | N/A | -NT$50")
 
 
-def test_holdings_include_daily_pnl_columns_and_conditional_formatting() -> None:
+def test_holdings_omit_daily_pnl_columns_but_keep_unrealized_fields() -> None:
     case, _, _, transport = use_case(value=snapshot())
 
     case.execute(date(2026, 7, 22))
 
     message = transport.messages[0]
-    assert "Today's P/L | Today's P/L %" in message.plain_text
-    assert ">Today&#x27;s P/L</th>" in message.html
-    assert ">Today&#x27;s P/L %</th>" in message.html
-    assert 'color:#b91c1c;font-weight:600">+NT$20</td>' in message.html
-    assert 'color:#15803d;font-weight:600">-NT$10</td>' in message.html
+    plain_holdings = message.plain_text.split("Holdings\n", 1)[1]
+    html_holdings = message.html.split(">Holdings</h2>", 1)[1]
+    assert "Today's P/L" not in plain_holdings.split("\n", 1)[0]
+    assert "Unrealized P/L" in plain_holdings.split("\n", 1)[0]
+    assert "Return %" in plain_holdings.split("\n", 1)[0]
+    assert ">Today&#x27;s P/L</th>" not in html_holdings
+    assert ">Today&#x27;s P/L %</th>" not in html_holdings
+    assert ">Unrealized P/L</th>" in html_holdings
+    assert ">Return %</th>" in html_holdings
 
 
 def test_html_holdings_uses_compact_non_scrolling_column_set() -> None:
@@ -738,8 +738,6 @@ def test_html_holdings_uses_compact_non_scrolling_column_set() -> None:
         "Quantity",
         "Average Cost",
         "Close",
-        "Today&#x27;s P/L",
-        "Today&#x27;s P/L %",
         "Unrealized P/L",
         "Return %",
         "Market Value",
@@ -753,8 +751,7 @@ def test_html_holdings_uses_compact_non_scrolling_column_set() -> None:
     assert ">2</td>" in holdings
     assert ">NT$400</td>" in holdings
     assert ">NT$500</td>" in holdings
-    assert "+NT$20</td>" in holdings
-    assert "+NT$20.00</td>" not in holdings
+    assert "+NT$20</td>" not in holdings
     assert "NT$1,000</td>" in holdings
     assert "NT$1,000.00</td>" not in holdings
     assert "table-layout:auto" in holdings
@@ -762,8 +759,6 @@ def test_html_holdings_uses_compact_non_scrolling_column_set() -> None:
         "Quantity",
         "Average Cost",
         "Close",
-        "Today&#x27;s P/L",
-        "Today&#x27;s P/L %",
         "Unrealized P/L",
         "Return %",
         "Market Value",
@@ -797,7 +792,7 @@ def test_html_contributor_columns_and_readable_alignment_are_preserved() -> None
     assert "word-break:keep-all" in contributors
     assert "+NT$20</td>" in contributors
     assert "+NT$20.00</td>" not in contributors
-    assert "Ranked by absolute daily P/L" in html
+    assert "Ranked by Today's P/L from highest to lowest." in html
     assert re.search(r'<th style="[^"]*text-align:right[^"]*">Rank</th>', contributors)
 
 
@@ -826,7 +821,6 @@ def test_html_table_numbers_follow_display_precision_rules() -> None:
     assert ">6,100</td>" in holdings
     assert ">NT$97.6</td>" in holdings
     assert ">NT$44.45</td>" in holdings
-    assert "+NT$37,500</td>" in holdings
     assert "+NT$105,970</td>" in holdings
     assert "NT$622,200</td>" in holdings
     assert "+NT$37,500</td>" in contributors

@@ -86,14 +86,17 @@ def _history_text(history: tuple[DailyEmailHistoryPoint, ...]) -> list[str]:
 def _ranked_contributors(
     positions: tuple[DailyEmailPosition, ...],
 ) -> list[DailyEmailPosition]:
+    """Order contributors by raw Decimal daily P/L with unavailable last."""
     return sorted(
         positions,
         key=lambda item: (
-            -(
-                abs(item.daily_profit_loss)
+            item.daily_profit_loss is None,
+            (
+                -item.daily_profit_loss
                 if item.daily_profit_loss is not None
-                else Decimal("-1")
+                else Decimal("0")
             ),
+            item.market.value,
             item.symbol,
         ),
     )
@@ -403,8 +406,7 @@ class DailyEmailReportRenderer:
             "Holdings",
             (
                 "Market | Symbol | Name | Currency | Quantity | Average Cost | Close | "
-                "Quote Date | FX | Today's P/L | Today's P/L % | Unrealized P/L | "
-                "Return % | Market Value"
+                "Quote Date | FX | Unrealized P/L | Return % | Market Value"
             ),
         ]
         text_lines.extend(
@@ -423,8 +425,6 @@ class DailyEmailReportRenderer:
                         if item.market is Market.US
                         else "—"
                     ),
-                    _money(item.daily_profit_loss, signed=True),
-                    _percent(item.daily_profit_loss_percentage, signed=True),
                     _money(item.unrealized_pnl, signed=True),
                     _percent(item.unrealized_return, signed=True),
                     _money(item.market_value),
@@ -531,20 +531,6 @@ class DailyEmailReportRenderer:
                 padding="10px 6px",
             )
             + _cell(
-                _whole_money(item.daily_profit_loss, signed=True),
-                color=_tone(item.daily_profit_loss),
-                align="right",
-                width="11%",
-                padding="10px 6px",
-            )
-            + _cell(
-                _percent(item.daily_profit_loss_percentage, signed=True),
-                color=_tone(item.daily_profit_loss),
-                align="right",
-                width="9%",
-                padding="10px 6px",
-            )
-            + _cell(
                 _whole_money(item.unrealized_pnl, signed=True),
                 color=_tone(item.unrealized_pnl),
                 align="right",
@@ -596,14 +582,6 @@ class DailyEmailReportRenderer:
                 _native_money(item.close_price, item.native_currency),
             )
             + _mobile_metric_row("Market Value", _whole_money(item.market_value))
-            + _mobile_metric_row(
-                "Today's P/L",
-                _whole_money(item.daily_profit_loss, signed=True),
-                "Today's P/L %",
-                _percent(item.daily_profit_loss_percentage, signed=True),
-                first_color=_tone(item.daily_profit_loss),
-                second_color=_tone(item.daily_profit_loss),
-            )
             + _mobile_metric_row(
                 "Unrealized P/L",
                 _whole_money(item.unrealized_pnl, signed=True),
@@ -752,11 +730,11 @@ class DailyEmailReportRenderer:
 <table class="pams-mobile-only" style="border-collapse:collapse;width:100%;table-layout:fixed">
 <thead><tr>{headers((("Rank", "12%", "right"), ("Symbol", "24%", "left"), ("Today's P/L", "34%", "right"), ("Today's P/L %", "30%", "right")), font_size="12px")}</tr></thead>
 <tbody>{mobile_contributor_rows}</tbody></table>
-<p style="font-size:12px;line-height:1.5;margin:10px 0 24px;color:{NEUTRAL_COLOR}">Ranked by absolute daily P/L
-impact. Share is unavailable when total portfolio daily P/L is zero.</p>
+<p style="font-size:12px;line-height:1.5;margin:10px 0 24px;color:{NEUTRAL_COLOR}">Ranked by Today's P/L from highest to lowest.
+Share is unavailable when total portfolio daily P/L is zero.</p>
 <h2 style="font-size:18px;margin-top:24px">Holdings</h2>
 <table class="pams-desktop-only" style="border-collapse:collapse;width:100%;table-layout:auto">
-<thead><tr>{headers((("Market", "6%", "left"), ("Symbol", "7%", "left"), ("Name", None, "left"), ("Currency", "7%", "left"), ("Quantity", "7%", "right"), ("Average Cost", "9%", "right"), ("Close", "7%", "right"), ("Quote Date", "9%", "right"), ("FX", "6%", "right"), ("Today's P/L", "9%", "right"), ("Today's P/L %", "7%", "right"), ("Unrealized P/L", "9%", "right"), ("Return %", "6%", "right"), ("Market Value", "9%", "right")), font_size="13px")}</tr></thead>
+<thead><tr>{headers((("Market", "6%", "left"), ("Symbol", "7%", "left"), ("Name", None, "left"), ("Currency", "7%", "left"), ("Quantity", "7%", "right"), ("Average Cost", "9%", "right"), ("Close", "7%", "right"), ("Quote Date", "9%", "right"), ("FX", "6%", "right"), ("Unrealized P/L", "9%", "right"), ("Return %", "6%", "right"), ("Market Value", "9%", "right")), font_size="13px")}</tr></thead>
 <tbody>{rows}</tbody></table>
 <div class="pams-mobile-only" style="width:100%;margin:0 0 24px">
 {mobile_holding_cards}</div>
