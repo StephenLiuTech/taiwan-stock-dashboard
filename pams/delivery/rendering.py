@@ -118,9 +118,7 @@ def _ordered_holdings(
 
 
 def _contributor_text(positions: tuple[DailyEmailPosition, ...]) -> list[str]:
-    lines = [
-        "Rank | Market | Symbol | Name | Quote Date | Today's P/L | Today's P/L % | Share of net daily P/L"
-    ]
+    lines = ["Rank | Market | Symbol | Name | Quote Date | Today's P/L | Today's P/L %"]
     lines.extend(
         " | ".join(
             (
@@ -131,7 +129,6 @@ def _contributor_text(positions: tuple[DailyEmailPosition, ...]) -> list[str]:
                 str(item.quote_date or "N/A"),
                 _money(item.daily_profit_loss, signed=True),
                 _percent(item.daily_profit_loss_percentage, signed=True),
-                _percent(item.daily_profit_loss_share, signed=True),
             )
         )
         for rank, item in enumerate(_ranked_contributors(positions), start=1)
@@ -438,19 +435,19 @@ class DailyEmailReportRenderer:
             + _cell(
                 str(rank),
                 align="right",
-                width="7%",
+                width="5%",
                 font_size="14px",
                 padding="11px 6px",
             )
             + _cell(item.market.value, width="8%", font_size="14px")
-            + _cell(item.symbol, width="11%", font_size="14px")
-            + _cell(item.name, name=True, font_size="14px")
-            + _cell(str(item.quote_date or "N/A"), width="13%", font_size="14px")
+            + _cell(item.symbol, width="9%", font_size="14px")
+            + _cell(item.name, width="38%", name=True, font_size="14px")
+            + _cell(str(item.quote_date or "N/A"), width="12%", font_size="14px")
             + _cell(
                 _whole_money(item.daily_profit_loss, signed=True),
                 color=_tone(item.daily_profit_loss),
                 align="right",
-                width="19%",
+                width="15%",
                 font_size="14px",
                 padding="11px 6px",
             )
@@ -458,15 +455,7 @@ class DailyEmailReportRenderer:
                 _percent(item.daily_profit_loss_percentage, signed=True),
                 color=_tone(item.daily_profit_loss),
                 align="right",
-                width="17%",
-                font_size="14px",
-                padding="11px 6px",
-            )
-            + _cell(
-                _percent(item.daily_profit_loss_share, signed=True),
-                color=_tone(item.daily_profit_loss),
-                align="right",
-                width="20%",
+                width="13%",
                 font_size="14px",
                 padding="11px 6px",
             )
@@ -725,13 +714,12 @@ class DailyEmailReportRenderer:
 {chart_html}
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
 <table class="pams-desktop-only" style="border-collapse:collapse;width:100%;table-layout:auto">
-<thead><tr>{headers((("Rank", "5%", "right"), ("Market", "8%", "left"), ("Symbol", "10%", "left"), ("Name", None, "left"), ("Quote Date", "13%", "left"), ("Today's P/L", "15%", "right"), ("Today's P/L %", "13%", "right"), ("Share of Net P/L", "16%", "right")), font_size="14px")}</tr></thead>
+<thead><tr>{headers((("Rank", "5%", "right"), ("Market", "8%", "left"), ("Symbol", "9%", "left"), ("Name", "38%", "left"), ("Quote Date", "12%", "left"), ("Today's P/L", "15%", "right"), ("Today's P/L %", "13%", "right")), font_size="14px")}</tr></thead>
 <tbody>{contributor_rows}</tbody></table>
 <table class="pams-mobile-only" style="border-collapse:collapse;width:100%;table-layout:fixed">
 <thead><tr>{headers((("Rank", "12%", "right"), ("Symbol", "24%", "left"), ("Today's P/L", "34%", "right"), ("Today's P/L %", "30%", "right")), font_size="12px")}</tr></thead>
 <tbody>{mobile_contributor_rows}</tbody></table>
-<p style="font-size:12px;line-height:1.5;margin:10px 0 24px;color:{NEUTRAL_COLOR}">Ranked by Today's P/L from highest to lowest.
-Share is unavailable when total portfolio daily P/L is zero.</p>
+<p style="font-size:12px;line-height:1.5;margin:10px 0 24px;color:{NEUTRAL_COLOR}">Ranked by Today's P/L from highest to lowest.</p>
 <h2 style="font-size:18px;margin-top:24px">Holdings</h2>
 <table class="pams-desktop-only" style="border-collapse:collapse;width:100%;table-layout:auto">
 <thead><tr>{headers((("Market", "6%", "left"), ("Symbol", "7%", "left"), ("Name", None, "left"), ("Currency", "7%", "left"), ("Quantity", "7%", "right"), ("Average Cost", "9%", "right"), ("Close", "7%", "right"), ("Quote Date", "9%", "right"), ("FX", "6%", "right"), ("Unrealized P/L", "9%", "right"), ("Return %", "6%", "right"), ("Market Value", "9%", "right")), font_size="13px")}</tr></thead>

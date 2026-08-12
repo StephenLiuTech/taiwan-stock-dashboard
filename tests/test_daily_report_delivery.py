@@ -604,7 +604,8 @@ def test_html_and_plain_text_contain_correct_persisted_figures() -> None:
     assert "TSMC" in message.plain_text
     assert "<html>" in message.html
     assert "Today's Contributors" in message.html
-    assert "Share of Net P/L" in message.html
+    assert "Share of Net P/L" not in message.html
+    assert "Share of net daily P/L" not in message.plain_text
     assert message.html.index("Portfolio Summary") < message.html.index(
         "Portfolio Trend"
     )
@@ -779,21 +780,38 @@ def test_html_contributor_columns_and_readable_alignment_are_preserved() -> None
     )[0]
     for label in (
         "Rank",
+        "Market",
         "Symbol",
         "Name",
+        "Quote Date",
         "Today&#x27;s P/L",
         "Today&#x27;s P/L %",
-        "Share of Net P/L",
     ):
         assert f">{label}</th>" in contributors
-    assert "Share of net daily P/L" not in contributors
+    assert "Share of Net P/L" not in contributors
     assert "font-size:14px" in contributors
     assert "text-align:right" in contributors
     assert "word-break:keep-all" in contributors
+    assert re.search(
+        r'<th style="[^"]*text-align:left[^"]*width:38%">Name</th>', contributors
+    )
     assert "+NT$20</td>" in contributors
     assert "+NT$20.00</td>" not in contributors
     assert "Ranked by Today's P/L from highest to lowest." in html
     assert re.search(r'<th style="[^"]*text-align:right[^"]*">Rank</th>', contributors)
+
+    contributor_table = html.split('<table class="pams-desktop-only"', maxsplit=1)[
+        1
+    ].split(">", maxsplit=1)[0]
+    holdings_table = (
+        html.split(
+            '<h2 style="font-size:18px;margin-top:24px">Holdings</h2>', maxsplit=1
+        )[1]
+        .split('<table class="pams-desktop-only"', maxsplit=1)[1]
+        .split(">", maxsplit=1)[0]
+    )
+    assert "width:100%" in contributor_table
+    assert "width:100%" in holdings_table
 
 
 def test_html_table_numbers_follow_display_precision_rules() -> None:
