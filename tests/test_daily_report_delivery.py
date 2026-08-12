@@ -812,6 +812,11 @@ def test_html_contributor_columns_and_readable_alignment_are_preserved() -> None
     )
     assert "width:100%" in contributor_table
     assert "width:100%" in holdings_table
+    assert 'width="100%"' in contributor_table
+    between_tables = html.split('<table class="pams-desktop-only"', maxsplit=1)[
+        1
+    ].split('<h2 style="font-size:18px;margin-top:24px">Holdings</h2>', maxsplit=1)[0]
+    assert "</div>" not in between_tables
 
 
 def test_html_table_numbers_follow_display_precision_rules() -> None:

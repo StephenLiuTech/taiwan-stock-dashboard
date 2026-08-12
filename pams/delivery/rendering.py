@@ -713,7 +713,7 @@ class DailyEmailReportRenderer:
 <h2 style="font-size:18px">Portfolio Trend</h2>
 {chart_html}
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
-<table class="pams-desktop-only" style="border-collapse:collapse;width:100%;table-layout:auto">
+<table class="pams-desktop-only" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto">
 <thead><tr>{headers((("Rank", "5%", "right"), ("Market", "8%", "left"), ("Symbol", "9%", "left"), ("Name", "38%", "left"), ("Quote Date", "12%", "left"), ("Today's P/L", "15%", "right"), ("Today's P/L %", "13%", "right")), font_size="14px")}</tr></thead>
 <tbody>{contributor_rows}</tbody></table>
 <table class="pams-mobile-only" style="border-collapse:collapse;width:100%;table-layout:fixed">
