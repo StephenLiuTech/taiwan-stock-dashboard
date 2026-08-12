@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 
 from domain import Market
+from market_data.providers.current_tpex import CurrentTPExProvider
 from market_data.transport import JSONRecord, JSONTransport, UrllibJSONTransport
 
 
@@ -22,17 +23,5 @@ class TWSEProvider:
         return self.transport.get_records(self.endpoint)
 
 
-class TPExProvider:
-    """Fetch the latest official TPEx mainboard daily close report."""
-
-    market = Market.TPEX
-    source = "TPEX_MAINBOARD_DAILY_CLOSE"
-    endpoint = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
-
-    def __init__(self, transport: JSONTransport | None = None) -> None:
-        self.transport = transport or UrllibJSONTransport(
-            provider_name=self.market.value
-        )
-
-    def fetch(self) -> Sequence[JSONRecord]:
-        return self.transport.get_records(self.endpoint)
+class TPExProvider(CurrentTPExProvider):
+    """Backward-compatible name for the official current TPEx close provider."""

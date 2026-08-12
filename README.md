@@ -356,9 +356,10 @@ date available from both markets:
 min(TWSE latest date, TPEx latest date)
 ```
 
-When the dates match, PAMS uses the latest providers. When publication is
-staggered, it uses the existing date-bound historical providers for the common
-date:
+TWSE resolves its newest official historical publication. TPEx resolves its
+latest official `tpex_mainboard_daily_close_quotes` OpenAPI publication. When
+publication is staggered, PAMS uses the existing date-bound historical
+providers for the common date:
 
 ```bash
 python -m pams update
@@ -372,12 +373,15 @@ never relabels prices.
 Official HTTP reads use one bounded retry policy shared by latest and
 historical providers. PAMS completely reads the response bytes before decoding
 JSON and retries only incomplete reads, transient connection failures, and
-HTTP 429/500/502/503/504. The default is four total attempts with exponential
+HTTP 429/500/502/503/504/520. The default is four total attempts with exponential
 backoff and jitter. Configure `PAMS_MARKET_HTTP_TIMEOUT_SECONDS` and
 `PAMS_MARKET_HTTP_ATTEMPTS` (maximum 4) when needed. Complete malformed or
 semantically invalid datasets and source-date mismatches are not retried.
 
-Manual mode uses official historical date-query providers:
+Manual prior-date mode uses official historical date-query providers. For the
+local current date, TPEx first uses its official structured OpenAPI completed-
+close feed and falls back to `dailyQuotes` only when that endpoint actually
+contains the same requested date:
 
 ```bash
 python -m pams update --date 2026-07-22
@@ -674,13 +678,11 @@ python -m pams daily-report send --force
 
 Automatic mode runs the existing idempotent market update and then uses the
 latest live commonly ingestible TWSE/TPEx date. Production date resolution
-queries the official date-bound endpoints newest-first, so it does not fall
-back to the latest persisted snapshot when a newer official dataset exists.
-Only an explicit official "no data for this date" response advances the probe
-backward; provider or source-date failures stop delivery. The update workflow
-then reuses or creates the snapshot for that exact resolved date. Explicit
-mode requires the exact requested snapshot and never falls back to another
-date.
+queries official live publications and never ignores a newer trustworthy
+dataset. A complete current-date persisted snapshot can be delivered without
+another live probe. After a transient source outage, the report may use only a
+complete non-future persisted aggregate and position snapshot, always labeled
+with its actual date. Structural or source-date failures remain strict.
 
 `pams status` labels persisted quote/snapshot dates separately from the latest
 live TWSE date, live TPEx date, and live commonly ingestible date.

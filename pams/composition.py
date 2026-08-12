@@ -39,6 +39,8 @@ from market_data.global_engine import GlobalMarketDataEngine
 from market_data.providers import (
     AlphaVantageFXRateProvider,
     AlphaVantageUSMarketDataProvider,
+    CurrentTPExProvider,
+    DateAwareTPExProvider,
     HistoricalTPExProvider,
     HistoricalTWSEProvider,
     MarketDataProvider,
@@ -489,6 +491,25 @@ def _compose(
                 ),
             )
 
+        def current_tpex(*, expected_date: date | None = None) -> CurrentTPExProvider:
+            required_symbols = frozenset(
+                holding.symbol
+                for holding in holdings.list_all()
+                if holding.market is Market.TPEX and holding.quantity > 0
+            )
+            return CurrentTPExProvider(
+                latest_transport(Market.TPEX),
+                expected_date=expected_date,
+                required_symbols=required_symbols,
+            )
+
+        def date_aware_tpex(trade_date: date) -> DateAwareTPExProvider:
+            return DateAwareTPExProvider(
+                trade_date,
+                current_tpex(expected_date=trade_date),
+                historical_tpex(trade_date),
+            )
+
         market_providers = providers or (
             TWSEProvider(latest_transport(Market.TWSE)),
             TPExProvider(latest_transport(Market.TPEX)),
@@ -581,7 +602,7 @@ def _compose(
         if using_default_providers:
             date_providers = (
                 OfficialHistoricalMarketDateProvider(Market.TWSE, historical_twse),
-                OfficialHistoricalMarketDateProvider(Market.TPEX, historical_tpex),
+                OfficialMarketDateProvider(current_tpex()),
             )
         else:
             date_providers = tuple(
@@ -637,7 +658,7 @@ def _compose(
                 MarketDataEngine(
                     (
                         historical_twse(trade_date),
-                        historical_tpex(trade_date),
+                        date_aware_tpex(trade_date),
                     ),
                     holdings,
                     liabilities,

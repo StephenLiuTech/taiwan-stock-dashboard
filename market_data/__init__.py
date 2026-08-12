@@ -27,6 +27,8 @@ from market_data.exceptions import (
 )
 from market_data.normalizer import QuoteNormalizationError, QuoteNormalizer
 from market_data.providers import (
+    CurrentTPExProvider,
+    DateAwareTPExProvider,
     HistoricalTPExProvider,
     HistoricalTWSEProvider,
     TPExProvider,
@@ -35,6 +37,8 @@ from market_data.providers import (
 
 __all__ = [
     "HistoricalTPExProvider",
+    "CurrentTPExProvider",
+    "DateAwareTPExProvider",
     "HistoricalTWSEProvider",
     "CompositeDividendSource",
     "MarketDataEngine",

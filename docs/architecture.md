@@ -223,6 +223,24 @@ match the requested date. The engine rejects wrong dates, mixed dates,
 ambiguous freshness, missing requested symbols, suspended/no-trade securities,
 provider failures, and duplicate snapshots. Prices are never relabeled.
 
+TPEx same-day and historical publications have separate adapters. The current
+adapter uses TPEx's official OpenAPI
+`/openapi/v1/tpex_mainboard_daily_close_quotes`, whose structured rows expose
+the publication date, security code/name, close, and signed change. For the
+local current date, date-aware ingestion tries that completed-close publication
+first and accepts it only when it is non-empty, single-date, exactly dated, and
+contains every active TPEx holding. The explicit-date `dailyQuotes` adapter
+remains authoritative for prior dates and is the same-day fallback only when it
+actually returns that exact date. A stale OpenAPI publication or an empty
+same-day historical response therefore leaves TPEx unavailable rather than
+relabeling the prior session.
+
+Automatic calendar resolution uses the current TPEx OpenAPI publication date,
+while TWSE retains official newest-date discovery. Their minimum remains the
+common ingestible date. The OpenAPI feed can itself publish after market close
+with an operational delay; until its `Date` advances and the required rows are
+present, PAMS deliberately remains on the prior common date.
+
 `MarketDataEngine.preview()` performs the same retrieval, verification,
 normalization, completeness, and valuation path without persistence.
 

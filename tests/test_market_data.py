@@ -70,8 +70,15 @@ def test_twse_provider_uses_official_endpoint() -> None:
 
 
 def test_tpex_provider_uses_official_endpoint() -> None:
-    transport = StaticTransport([{"SecuritiesCompanyCode": "8299"}])
-    assert TPExProvider(transport).fetch() == [{"SecuritiesCompanyCode": "8299"}]
+    record = {
+        "Date": "1150812",
+        "SecuritiesCompanyCode": "8299",
+        "CompanyName": "Phison",
+        "Close": "2120.00",
+        "Change": "+30.00",
+    }
+    transport = StaticTransport([record])
+    assert TPExProvider(transport).fetch() == [record]
     assert transport.requested_url == TPExProvider.endpoint
 
 
