@@ -64,18 +64,24 @@ class GlobalMarketDataEngine:
         us_holdings = [item for item in holdings if item.market is Market.US]
         if not us_holdings:
             return False
-        quotes_complete = all(
+        eligible_us_quotes = [
             self.unit_of_work.price_quotes.get_latest_on_or_before(
                 item.symbol, item.market.value, trade_date
             )
-            is not None
             for item in us_holdings
+        ]
+        quotes_complete = all(item is not None for item in eligible_us_quotes)
+        persisted_fx = self.fx_rates.get_latest_on_or_before(
+            Currency.USD.value, Currency.TWD.value, trade_date
+        )
+        latest_us_quote_date = max(
+            (item.trade_date for item in eligible_us_quotes if item is not None),
+            default=None,
         )
         fx_complete = (
-            self.fx_rates.get_latest_on_or_before(
-                Currency.USD.value, Currency.TWD.value, trade_date
-            )
-            is not None
+            persisted_fx is not None
+            and latest_us_quote_date is not None
+            and persisted_fx.rate_date >= latest_us_quote_date
         )
         covered_ids = {
             item.holding_id
@@ -264,9 +270,7 @@ class GlobalMarketDataEngine:
                 is None
             ):
                 _LOGGER.info("Missing USD/TWD rate detected; fetching FX")
-            fx_rate = self._resolve_fx(
-                trade_date, prefer_persisted=reuse_persisted_taiwan
-            )
+            fx_rate = self._resolve_fx(trade_date)
         except ProviderDataError as error:
             _LOGGER.warning(
                 "US holdings remain untranslated: error=%s", type(error).__name__
@@ -346,14 +350,10 @@ class GlobalMarketDataEngine:
             fx_rate,
         )
 
-    def _resolve_fx(
-        self, report_date: date, *, prefer_persisted: bool = False
-    ) -> FxRate:
+    def _resolve_fx(self, report_date: date) -> FxRate:
         persisted = self.fx_rates.get_latest_on_or_before(
             Currency.USD.value, Currency.TWD.value, report_date
         )
-        if prefer_persisted and persisted is not None:
-            return persisted
         if self.fx_provider is not None:
             try:
                 return self.fx_provider.fetch(Currency.USD, Currency.TWD, report_date)

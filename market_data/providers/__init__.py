@@ -10,6 +10,7 @@ from market_data.providers.current_tpex import (
 )
 from market_data.providers.global_markets import (
     AlphaVantageFXRateProvider,
+    AlphaVantageRequestPacer,
     AlphaVantageUSMarketDataProvider,
     FXRateProvider,
     USMarketDataProvider,
@@ -35,6 +36,7 @@ __all__ = [
     "DateAwareTPExProvider",
     "HistoricalTWSEProvider",
     "AlphaVantageFXRateProvider",
+    "AlphaVantageRequestPacer",
     "AlphaVantageUSMarketDataProvider",
     "FXRateProvider",
     "MarketDataProvider",

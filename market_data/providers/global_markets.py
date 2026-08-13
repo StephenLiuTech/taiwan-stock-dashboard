@@ -39,6 +39,27 @@ class FXRateProvider(Protocol):
     def fetch(self, base: Currency, quote: Currency, report_date: date) -> FxRate: ...
 
 
+class AlphaVantageRequestPacer:
+    """Apply one bounded interval between calls sharing an Alpha Vantage key."""
+
+    def __init__(
+        self,
+        interval_seconds: float = 12,
+        *,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
+        if interval_seconds < 0:
+            raise ValueError("Request interval must not be negative")
+        self.interval_seconds = interval_seconds
+        self._sleeper = sleeper
+        self._requested = False
+
+    def wait(self) -> None:
+        if self._requested and self.interval_seconds:
+            self._sleeper(self.interval_seconds)
+        self._requested = True
+
+
 def _decimal(value: object, label: str) -> Decimal:
     try:
         parsed = Decimal(str(value).strip())
@@ -111,6 +132,7 @@ class AlphaVantageUSMarketDataProvider:
         information_attempts: int = 2,
         request_interval_seconds: float = 12,
         sleeper: Callable[[float], None] = time.sleep,
+        pacer: AlphaVantageRequestPacer | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("Alpha Vantage API key is required")
@@ -121,17 +143,17 @@ class AlphaVantageUSMarketDataProvider:
         self._api_key = api_key
         self._transport = transport
         self._information_attempts = information_attempts
-        self._request_interval_seconds = request_interval_seconds
         self._sleeper = sleeper
+        self._pacer = pacer or AlphaVantageRequestPacer(
+            request_interval_seconds, sleeper=sleeper
+        )
 
     def fetch(
         self, symbols: tuple[str, ...], report_date: date
     ) -> tuple[PriceQuote, ...]:
         quotes: list[PriceQuote] = []
         distinct_symbols = sorted({item.strip().upper() for item in symbols})
-        for index, symbol in enumerate(distinct_symbols):
-            if index and self._request_interval_seconds:
-                self._sleeper(self._request_interval_seconds)
+        for symbol in distinct_symbols:
             try:
                 series = self._fetch_series(symbol)
                 quotes.append(self._quote(symbol, series, report_date))
@@ -147,6 +169,7 @@ class AlphaVantageUSMarketDataProvider:
     def _fetch_series(self, symbol: str) -> Mapping[str, object]:
         url = f"{self.endpoint}?{urlencode({'function': 'TIME_SERIES_DAILY', 'symbol': symbol, 'outputsize': 'compact', 'apikey': self._api_key})}"
         for attempt in range(1, self._information_attempts + 1):
+            self._pacer.wait()
             document = self._transport.get_document(url)
             try:
                 return _daily_series(document, "Time Series (Daily)")
@@ -161,7 +184,6 @@ class AlphaVantageUSMarketDataProvider:
                     attempt,
                     self._information_attempts,
                 )
-                self._sleeper(self._request_interval_seconds or 1)
         raise AssertionError("unreachable")
 
     def _quote(
@@ -195,16 +217,48 @@ class AlphaVantageFXRateProvider:
     source = "Alpha Vantage FX_DAILY"
     endpoint = "https://www.alphavantage.co/query"
 
-    def __init__(self, api_key: str, transport: JSONDocumentTransport) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        transport: JSONDocumentTransport,
+        *,
+        information_attempts: int = 2,
+        request_interval_seconds: float = 12,
+        sleeper: Callable[[float], None] = time.sleep,
+        pacer: AlphaVantageRequestPacer | None = None,
+    ) -> None:
         if not api_key.strip():
             raise ValueError("Alpha Vantage API key is required")
+        if information_attempts < 1:
+            raise ValueError("Information attempts must be positive")
         self._api_key = api_key
         self._transport = transport
+        self._information_attempts = information_attempts
+        self._pacer = pacer or AlphaVantageRequestPacer(
+            request_interval_seconds, sleeper=sleeper
+        )
 
     def fetch(self, base: Currency, quote: Currency, report_date: date) -> FxRate:
         url = f"{self.endpoint}?{urlencode({'function': 'FX_DAILY', 'from_symbol': base.value, 'to_symbol': quote.value, 'outputsize': 'compact', 'apikey': self._api_key})}"
-        document = self._transport.get_document(url)
-        series = _daily_series(document, "Time Series FX (Daily)")
+        for attempt in range(1, self._information_attempts + 1):
+            self._pacer.wait()
+            document = self._transport.get_document(url)
+            try:
+                series = _daily_series(document, "Time Series FX (Daily)")
+                break
+            except ProviderInformationError as error:
+                if attempt == self._information_attempts:
+                    raise
+                _LOGGER.warning(
+                    "Retryable FX provider response: provider=%s attempt=%d/%d "
+                    "category=%s",
+                    self.source,
+                    attempt,
+                    self._information_attempts,
+                    type(error).__name__,
+                )
+        else:
+            raise AssertionError("unreachable")
         eligible = _eligible_dates(series, report_date)
         if not eligible:
             raise ProviderDataError("No eligible Alpha Vantage FX rate")

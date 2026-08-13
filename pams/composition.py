@@ -38,6 +38,7 @@ from market_data.engine import MarketDataEngine
 from market_data.global_engine import GlobalMarketDataEngine
 from market_data.providers import (
     AlphaVantageFXRateProvider,
+    AlphaVantageRequestPacer,
     AlphaVantageUSMarketDataProvider,
     CurrentTPExProvider,
     DateAwareTPExProvider,
@@ -547,13 +548,18 @@ def _compose(
                 attempts=settings.market_http_attempts,
                 provider_name="Alpha Vantage",
             )
+            alpha_pacer = AlphaVantageRequestPacer()
             us_provider = (
-                AlphaVantageUSMarketDataProvider(alpha_key, document_transport)
+                AlphaVantageUSMarketDataProvider(
+                    alpha_key, document_transport, pacer=alpha_pacer
+                )
                 if settings.us_market_data_provider == "alphavantage" and alpha_key
                 else None
             )
             fx_provider = (
-                AlphaVantageFXRateProvider(alpha_key, document_transport)
+                AlphaVantageFXRateProvider(
+                    alpha_key, document_transport, pacer=alpha_pacer
+                )
                 if settings.fx_provider == "alphavantage" and alpha_key
                 else None
             )

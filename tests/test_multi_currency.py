@@ -20,6 +20,7 @@ from market_data.exceptions import (
 from market_data.global_engine import GlobalMarketDataEngine
 from market_data.providers import (
     AlphaVantageFXRateProvider,
+    AlphaVantageRequestPacer,
     AlphaVantageUSMarketDataProvider,
 )
 from market_data.providers.global_markets import _daily_series
@@ -56,6 +57,17 @@ class SymbolDocumentTransport:
         symbol = parse_qs(urlsplit(url).query)["symbol"][0]
         self.calls.append(symbol)
         return self.documents[symbol].pop(0)
+
+
+class FunctionDocumentTransport:
+    def __init__(self, documents: dict[str, list[dict[str, object]]]) -> None:
+        self.documents = documents
+        self.calls: list[dict[str, list[str]]] = []
+
+    def get_document(self, url: str) -> dict[str, object]:
+        query = parse_qs(urlsplit(url).query)
+        self.calls.append(query)
+        return self.documents[query["function"][0]].pop(0)
 
 
 def holding(symbol: str, market: Market, currency: Currency) -> Holding:
@@ -319,6 +331,45 @@ def test_missing_fx_or_position_coverage_requires_enrichment() -> None:
     assert completeness_engine([us], quotes, fx, set()).requires_enrichment(report_date)
 
 
+def test_fx_older_than_latest_us_quote_requires_enrichment() -> None:
+    report_date = date(2026, 8, 12)
+    us = holding("MU", Market.US, Currency.USD)
+    stale = FxRate(
+        base_currency=Currency.USD,
+        quote_currency=Currency.TWD,
+        rate_date=date(2026, 8, 6),
+        rate=Decimal("32.235"),
+        source="fixture",
+    )
+    engine = completeness_engine(
+        [us],
+        {"MU": quote("MU", Market.US, Currency.USD, "100", "99", report_date)},
+        stale,
+        {us.id},
+    )
+    assert engine.requires_enrichment(report_date)
+
+
+def test_non_future_fx_matching_latest_us_quote_is_complete() -> None:
+    valuation_date = date(2026, 8, 13)
+    source_date = date(2026, 8, 12)
+    us = holding("MU", Market.US, Currency.USD)
+    fx = FxRate(
+        base_currency=Currency.USD,
+        quote_currency=Currency.TWD,
+        rate_date=source_date,
+        rate=Decimal("32.21700"),
+        source="fixture",
+    )
+    engine = completeness_engine(
+        [us],
+        {"MU": quote("MU", Market.US, Currency.USD, "100", "99", source_date)},
+        fx,
+        {us.id},
+    )
+    assert engine.requires_enrichment(valuation_date) is False
+
+
 def test_us_provider_uses_latest_two_completed_sessions() -> None:
     transport = DocumentTransport(
         {
@@ -351,6 +402,166 @@ def test_fx_provider_uses_latest_eligible_rate() -> None:
     )
     assert result.rate_date == date(2026, 8, 4)
     assert result.rate == Decimal("31.42")
+
+
+def test_fx_provider_accepts_valid_series_with_information() -> None:
+    document = {
+        "Meta Data": {"5. Last Refreshed": "2026-08-12"},
+        "Information": "supplementary provider message",
+        "Time Series FX (Daily)": {
+            "2026-08-12": {"4. close": "32.21700"},
+            "2026-08-11": {"4. close": "32.22900"},
+        },
+    }
+    result = AlphaVantageFXRateProvider("secret", DocumentTransport(document)).fetch(
+        Currency.USD, Currency.TWD, date(2026, 8, 12)
+    )
+    assert result.rate_date == date(2026, 8, 12)
+    assert result.rate == Decimal("32.21700")
+
+
+def test_fx_information_response_is_paced_and_retried() -> None:
+    sleeps: list[float] = []
+    transport = FunctionDocumentTransport(
+        {
+            "FX_DAILY": [
+                {"Information": "temporary provider notice"},
+                {"Time Series FX (Daily)": {"2026-08-12": {"4. close": "32.21700"}}},
+            ]
+        }
+    )
+    result = AlphaVantageFXRateProvider(
+        "secret", transport, sleeper=sleeps.append
+    ).fetch(Currency.USD, Currency.TWD, date(2026, 8, 12))
+    assert result.rate == Decimal("32.21700")
+    assert sleeps == [12]
+
+
+def test_explicit_fx_quota_response_is_not_retried() -> None:
+    transport = DocumentTransport({"Note": "standard API request quota reached"})
+    provider = AlphaVantageFXRateProvider("secret", transport, sleeper=lambda _: None)
+    with pytest.raises(ProviderRateLimitError):
+        provider.fetch(Currency.USD, Currency.TWD, date(2026, 8, 12))
+    assert len(transport.urls) == 1
+
+
+@pytest.mark.parametrize(
+    ("document", "exception"),
+    [
+        ({"Note": "standard API request quota reached"}, ProviderRateLimitError),
+        ({"Information": "temporary provider notice"}, ProviderInformationError),
+        (
+            {"Information": "invalid API key supplied"},
+            ProviderAuthenticationError,
+        ),
+        ({"unexpected": "complete but malformed"}, ProviderDataError),
+    ],
+)
+def test_fx_provider_response_classification(
+    document: dict[str, object], exception: type[ProviderDataError]
+) -> None:
+    provider = AlphaVantageFXRateProvider(
+        "secret",
+        DocumentTransport(document),
+        information_attempts=1,
+        request_interval_seconds=0,
+    )
+    with pytest.raises(exception):
+        provider.fetch(Currency.USD, Currency.TWD, date(2026, 8, 12))
+
+
+def test_us_quotes_and_fx_share_request_pacing() -> None:
+    sleeps: list[float] = []
+    transport = FunctionDocumentTransport(
+        {
+            "TIME_SERIES_DAILY": [daily_document("1140", "1130")],
+            "FX_DAILY": [
+                {"Time Series FX (Daily)": {"2026-08-05": {"4. close": "31.42"}}}
+            ],
+        }
+    )
+    pacer = AlphaVantageRequestPacer(12, sleeper=sleeps.append)
+    AlphaVantageUSMarketDataProvider("secret", transport, pacer=pacer).fetch(
+        ("MU",), date(2026, 8, 5)
+    )
+    result = AlphaVantageFXRateProvider("secret", transport, pacer=pacer).fetch(
+        Currency.USD, Currency.TWD, date(2026, 8, 5)
+    )
+    assert result.rate == Decimal("31.42")
+    assert [call["function"][0] for call in transport.calls] == [
+        "TIME_SERIES_DAILY",
+        "FX_DAILY",
+    ]
+    assert sleeps == [12]
+
+
+def test_fx_success_is_independent_of_us_quote_failure() -> None:
+    us = AlphaVantageUSMarketDataProvider(
+        "secret",
+        SymbolDocumentTransport(
+            {"MU": [{"Error Message": "Invalid API call for symbol"}]}
+        ),
+        request_interval_seconds=0,
+    )
+    fx = AlphaVantageFXRateProvider(
+        "secret",
+        DocumentTransport(
+            {"Time Series FX (Daily)": {"2026-08-12": {"4. close": "32.21700"}}}
+        ),
+        request_interval_seconds=0,
+    )
+    assert us.fetch(("MU",), date(2026, 8, 12)) == ()
+    assert fx.fetch(Currency.USD, Currency.TWD, date(2026, 8, 12)).rate == Decimal(
+        "32.21700"
+    )
+
+
+def test_us_quote_success_is_independent_of_fx_failure() -> None:
+    us = AlphaVantageUSMarketDataProvider(
+        "secret",
+        DocumentTransport(daily_document("1140", "1130")),
+        request_interval_seconds=0,
+    )
+    fx = AlphaVantageFXRateProvider(
+        "secret",
+        DocumentTransport({"Information": "temporary provider notice"}),
+        information_attempts=1,
+        request_interval_seconds=0,
+    )
+    quotes = us.fetch(("MU",), date(2026, 8, 5))
+    with pytest.raises(ProviderInformationError):
+        fx.fetch(Currency.USD, Currency.TWD, date(2026, 8, 5))
+    assert [item.symbol for item in quotes] == ["MU"]
+
+
+def test_fx_upsert_preserves_history_and_is_idempotent(
+    connection: sqlite3.Connection,
+) -> None:
+    repository = SQLiteFxRateRepository(connection)
+    old = FxRate(
+        base_currency=Currency.USD,
+        quote_currency=Currency.TWD,
+        rate_date=date(2026, 8, 6),
+        rate=Decimal("32.235"),
+        source="fixture",
+    )
+    current = FxRate(
+        base_currency=Currency.USD,
+        quote_currency=Currency.TWD,
+        rate_date=date(2026, 8, 12),
+        rate=Decimal("32.21700"),
+        source="fixture",
+    )
+    repository.upsert(old)
+    repository.upsert(current)
+    repository.upsert(current)
+    rows = connection.execute(
+        "SELECT rate_date, rate FROM fx_rates ORDER BY rate_date"
+    ).fetchall()
+    assert [(row[0], Decimal(row[1])) for row in rows] == [
+        ("2026-08-06", Decimal("32.235")),
+        ("2026-08-12", Decimal("32.21700")),
+    ]
 
 
 def test_provider_rate_limit_is_classified_without_failing_batch() -> None:
