@@ -287,33 +287,6 @@ def _summary_card(label: str, value: str, *, color: str = "#111827") -> str:
     )
 
 
-def _mobile_metric_row(
-    first_label: str,
-    first_value: str,
-    second_label: str | None = None,
-    second_value: str | None = None,
-    *,
-    first_color: str = "#111827",
-    second_color: str = "#111827",
-) -> str:
-    """Render one conservative two-column mobile holding metric row."""
-    cells = (
-        '<td style="width:50%;padding:9px;border:1px solid #e5e7eb;'
-        'vertical-align:top"><span style="font-size:11px;color:#6b7280">'
-        f'{escape(first_label)}</span><br><strong style="color:{first_color};'
-        f'white-space:nowrap">{escape(first_value)}</strong></td>'
-    )
-    if second_label is None or second_value is None:
-        return f'<tr>{cells}<td style="width:50%;border:1px solid #e5e7eb"></td></tr>'
-    cells += (
-        '<td style="width:50%;padding:9px;border:1px solid #e5e7eb;'
-        'vertical-align:top"><span style="font-size:11px;color:#6b7280">'
-        f'{escape(second_label)}</span><br><strong style="color:{second_color};'
-        f'white-space:nowrap">{escape(second_value)}</strong></td>'
-    )
-    return f"<tr>{cells}</tr>"
-
-
 def _expected_dividend_card(estimated: Decimal, received: Decimal) -> str:
     remaining = estimated - received
     return (
@@ -462,27 +435,6 @@ class DailyEmailReportRenderer:
             + "</tr>"
             for rank, item in enumerate(contributors, start=1)
         )
-        mobile_contributor_rows = "".join(
-            "<tr>"
-            + _cell(str(rank), align="right", width="12%", padding="11px 6px")
-            + _cell(item.symbol, width="24%", padding="11px 6px")
-            + _cell(
-                _whole_money(item.daily_profit_loss, signed=True),
-                color=_tone(item.daily_profit_loss),
-                align="right",
-                width="34%",
-                padding="11px 6px",
-            )
-            + _cell(
-                _percent(item.daily_profit_loss_percentage, signed=True),
-                color=_tone(item.daily_profit_loss),
-                align="right",
-                width="30%",
-                padding="11px 6px",
-            )
-            + "</tr>"
-            for rank, item in enumerate(contributors, start=1)
-        )
         rows = "".join(
             "<tr>"
             + _cell(item.market.value, width="7%", padding="10px 6px")
@@ -540,46 +492,6 @@ class DailyEmailReportRenderer:
                 padding="10px 6px",
             )
             + "</tr>"
-            for item in ordered_holdings
-        )
-        mobile_holding_cards = "".join(
-            '<table role="presentation" class="pams-mobile-holding-card" '
-            'style="border-collapse:collapse;width:100%;margin:0 0 14px;'
-            'border:1px solid #d1d5db">'
-            '<tr><td colspan="2" style="padding:10px;background:#f3f4f6;'
-            'font-size:16px;line-height:1.4"><strong>'
-            + escape(item.symbol)
-            + "</strong> &nbsp;"
-            + escape(item.name)
-            + '<br><span style="font-size:12px;color:#4b5563">'
-            + escape(item.market.value)
-            + (
-                " &middot; USD"
-                + (
-                    " &middot; FX " + escape(_compact_number(item.fx_rate))
-                    if item.fx_rate is not None
-                    else ""
-                )
-                if item.market is Market.US
-                else ""
-            )
-            + "</span></td></tr>"
-            + _mobile_metric_row(
-                "Quantity",
-                f"{item.quantity:,.0f}",
-                "Close",
-                _native_money(item.close_price, item.native_currency),
-            )
-            + _mobile_metric_row("Market Value", _whole_money(item.market_value))
-            + _mobile_metric_row(
-                "Unrealized P/L",
-                _whole_money(item.unrealized_pnl, signed=True),
-                "Return %",
-                _percent(item.unrealized_return, signed=True),
-                first_color=_tone(item.unrealized_pnl),
-                second_color=_tone(item.unrealized_return),
-            )
-            + "</table>"
             for item in ordered_holdings
         )
 
@@ -681,14 +593,11 @@ class DailyEmailReportRenderer:
 <head>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-.pams-mobile-only {{ display:none; mso-hide:all; }}
 @media only screen and (max-width:600px) {{
   .pams-report {{ padding:10px !important; }}
   .pams-container {{ width:100% !important; max-width:100% !important; }}
-  .pams-wide-tables {{ width:100% !important; max-width:100% !important; }}
-  .pams-desktop-only {{ display:none !important; mso-hide:all !important; }}
-  .pams-mobile-only {{ display:block !important; mso-hide:none !important; }}
-  table.pams-mobile-only {{ display:table !important; width:100% !important; }}
+  .pams-wide-tables {{ width:760px !important; min-width:760px !important;
+    max-width:none !important; }}
   .pams-summary-card {{ display:block !important; width:100% !important;
     box-sizing:border-box !important; }}
   .pams-responsive-table {{ width:100% !important; table-layout:fixed !important;
@@ -715,19 +624,14 @@ class DailyEmailReportRenderer:
 {chart_html}
 <table role="presentation" class="pams-wide-tables" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto"><tr><td style="padding:0;vertical-align:top">
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
-<table class="pams-desktop-only" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto">
+<table class="pams-canonical-report-table" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto">
 <thead><tr>{headers((("Rank", "5%", "right"), ("Market", "8%", "left"), ("Symbol", "9%", "left"), ("Name", "38%", "left"), ("Quote Date", "12%", "left"), ("Today's P/L", "15%", "right"), ("Today's P/L %", "13%", "right")), font_size="14px")}</tr></thead>
 <tbody>{contributor_rows}</tbody></table>
-<table class="pams-mobile-only" style="border-collapse:collapse;width:100%;table-layout:fixed">
-<thead><tr>{headers((("Rank", "12%", "right"), ("Symbol", "24%", "left"), ("Today's P/L", "34%", "right"), ("Today's P/L %", "30%", "right")), font_size="12px")}</tr></thead>
-<tbody>{mobile_contributor_rows}</tbody></table>
 <p style="font-size:12px;line-height:1.5;margin:10px 0 24px;color:{NEUTRAL_COLOR}">Ranked by Today's P/L from highest to lowest.</p>
 <h2 style="font-size:18px;margin-top:24px">Holdings</h2>
-<table class="pams-desktop-only" style="border-collapse:collapse;width:100%;table-layout:auto">
+<table class="pams-canonical-report-table" style="border-collapse:collapse;width:100%;table-layout:auto">
 <thead><tr>{headers((("Market", "6%", "left"), ("Symbol", "7%", "left"), ("Name", None, "left"), ("Currency", "7%", "left"), ("Quantity", "7%", "right"), ("Average Cost", "9%", "right"), ("Close", "7%", "right"), ("Quote Date", "9%", "right"), ("FX", "6%", "right"), ("Unrealized P/L", "9%", "right"), ("Return %", "6%", "right"), ("Market Value", "9%", "right")), font_size="13px")}</tr></thead>
 <tbody>{rows}</tbody></table>
-<div class="pams-mobile-only" style="width:100%;margin:0 0 24px">
-{mobile_holding_cards}</div>
 {DailyReportSectionRenderer().html(report.sections)}
 </td></tr></table>
 </div></body></html>"""

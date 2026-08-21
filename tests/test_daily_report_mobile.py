@@ -68,9 +68,11 @@ def test_desktop_holdings_retains_reduced_twelve_columns(
     multi_market_mobile_report: DailyEmailReport,
 ) -> None:
     html = DailyEmailReportRenderer().render(multi_market_mobile_report).html
-    holdings = html.split('<table class="pams-desktop-only"', 2)[2].split(
-        "</table>", 1
-    )[0]
+    holdings = (
+        html.split(">Holdings</h2>", 1)[1]
+        .split('<table class="pams-canonical-report-table"', 1)[1]
+        .split("</table>", 1)[0]
+    )
     labels = (
         "Market",
         "Symbol",
@@ -90,20 +92,26 @@ def test_desktop_holdings_retains_reduced_twelve_columns(
     assert ">Today&#x27;s P/L %</th>" not in holdings
 
 
-def test_mobile_contributors_use_the_simplified_four_columns(
+def test_contributors_use_one_canonical_complete_table(
     multi_market_mobile_report: DailyEmailReport,
 ) -> None:
     html = DailyEmailReportRenderer().render(multi_market_mobile_report).html
-    mobile = html.split('<table class="pams-mobile-only"', 1)[1].split("</table>", 1)[0]
+    section = html.split(">Today's Contributors</h2>", 1)[1].split(">Holdings</h2>", 1)[
+        0
+    ]
+    assert section.count('class="pams-canonical-report-table"') == 1
     assert all(
-        f">{label}</th>" in mobile
-        for label in ("Rank", "Symbol", "Today&#x27;s P/L", "Today&#x27;s P/L %")
+        f">{label}</th>" in section
+        for label in (
+            "Rank",
+            "Market",
+            "Symbol",
+            "Name",
+            "Quote Date",
+            "Today&#x27;s P/L",
+            "Today&#x27;s P/L %",
+        )
     )
-    assert all(
-        f">{label}</th>" not in mobile
-        for label in ("Market", "Name", "Quote Date", "Share of Net P/L")
-    )
-    assert "white-space:nowrap" in mobile
 
 
 def test_contributor_order_uses_daily_pnl_then_market_symbol_with_missing_last(
@@ -128,39 +136,38 @@ def test_contributor_order_uses_daily_pnl_then_market_symbol_with_missing_last(
 
     rendered = DailyEmailReportRenderer().render(report)
     contributors = rendered.html.split(">Today's Contributors</h2>", 1)[1]
-    desktop = contributors.split('<table class="pams-desktop-only"', 1)[1].split(
-        "</table>", 1
-    )[0]
-    mobile = contributors.split('<table class="pams-mobile-only"', 1)[1].split(
-        "</table>", 1
-    )[0]
+    canonical = contributors.split('<table class="pams-canonical-report-table"', 1)[
+        1
+    ].split("</table>", 1)[0]
     plain = rendered.plain_text.split("Today's Contributors\n", 1)[1].split(
         "\n\nHoldings", 1
     )[0]
     expected = ("3293", "0050", "2330", "2027", "8299", "DRAM", "MU")
 
-    assert tuple(sorted(expected, key=desktop.index)) == expected
-    assert tuple(sorted(expected, key=mobile.index)) == expected
+    assert tuple(sorted(expected, key=canonical.index)) == expected
     assert tuple(sorted(expected, key=plain.index)) == expected
 
 
-def test_mobile_holdings_render_seven_readable_cards_with_matching_values(
+def test_holdings_use_one_canonical_complete_table_without_mobile_cards(
     multi_market_mobile_report: DailyEmailReport,
 ) -> None:
     html = DailyEmailReportRenderer().render(multi_market_mobile_report).html
-    mobile = html.split('<div class="pams-mobile-only"', 1)[1].split("</div>", 1)[0]
-    assert mobile.count('class="pams-mobile-holding-card"') == 7
+    holdings = (
+        html.split(">Holdings</h2>", 1)[1]
+        .split('<table class="pams-canonical-report-table"', 1)[1]
+        .split("</table>", 1)[0]
+    )
+    assert "pams-mobile-holding-card" not in html
+    assert "pams-mobile-only" not in html
     for position in multi_market_mobile_report.positions:
-        assert f"<strong>{position.symbol}</strong>" in mobile
-        assert "Unrealized P/L" in mobile
-    assert "Micron Technology Inc" in mobile
-    assert "&middot; FX 31.42" in mobile
-    assert "Today's P/L" not in mobile
-    assert "Unrealized P/L" in mobile
-    assert "Return %" in mobile
+        assert f">{position.symbol}</td>" in holdings
+    assert "Micron Technology Inc" in holdings
+    assert "Unrealized P/L" in holdings
+    assert "Return %" in holdings
+    assert "Market Value" in holdings
 
 
-def test_desktop_and_mobile_holdings_share_unrealized_pnl_order(
+def test_canonical_holdings_use_unrealized_pnl_order(
     multi_market_mobile_report: DailyEmailReport,
 ) -> None:
     values = {
@@ -182,19 +189,12 @@ def test_desktop_and_mobile_holdings_share_unrealized_pnl_order(
 
     html = DailyEmailReportRenderer().render(report).html
     holdings_section = html.split(">Holdings</h2>", 1)[1]
-    desktop = holdings_section.split('<table class="pams-desktop-only"', 1)[1].split(
-        "</table>", 1
-    )[0]
-    mobile = holdings_section.split('<div class="pams-mobile-only"', 1)[1].split(
-        "</div>", 1
-    )[0]
+    canonical = holdings_section.split('<table class="pams-canonical-report-table"', 1)[
+        1
+    ].split("</table>", 1)[0]
     expected = ("0050", "3293", "2330", "2027", "MU", "DRAM", "8299")
 
-    assert tuple(sorted(expected, key=desktop.index)) == expected
-    assert (
-        tuple(sorted(expected, key=lambda symbol: mobile.index(f">{symbol}</strong>")))
-        == expected
-    )
+    assert tuple(sorted(expected, key=canonical.index)) == expected
 
 
 def test_holdings_order_ties_by_market_then_symbol_and_places_unavailable_last(
@@ -213,19 +213,12 @@ def test_holdings_order_ties_by_market_then_symbol_and_places_unavailable_last(
 
     html = DailyEmailReportRenderer().render(report).html
     holdings_section = html.split(">Holdings</h2>", 1)[1]
-    desktop = holdings_section.split('<table class="pams-desktop-only"', 1)[1].split(
-        "</table>", 1
-    )[0]
-    mobile = holdings_section.split('<div class="pams-mobile-only"', 1)[1].split(
-        "</div>", 1
-    )[0]
+    canonical = holdings_section.split('<table class="pams-canonical-report-table"', 1)[
+        1
+    ].split("</table>", 1)[0]
     expected = ("3293", "8299", "0050", "2027", "2330", "DRAM", "MU")
 
-    assert tuple(sorted(expected, key=desktop.index)) == expected
-    assert (
-        tuple(sorted(expected, key=lambda symbol: mobile.index(f">{symbol}</strong>")))
-        == expected
-    )
+    assert tuple(sorted(expected, key=canonical.index)) == expected
 
 
 def test_responsive_css_preserves_flow_and_avoids_overlap_constructs(
@@ -233,8 +226,12 @@ def test_responsive_css_preserves_flow_and_avoids_overlap_constructs(
 ) -> None:
     html = DailyEmailReportRenderer().render(multi_market_mobile_report).html
     assert "@media only screen and (max-width:600px)" in html
-    assert ".pams-desktop-only" in html
-    assert ".pams-mobile-only" in html
+    assert ".pams-desktop-only" not in html
+    assert ".pams-mobile-only" not in html
+    assert "pams-mobile-holding-card" not in html
+    assert "display:none" not in html.replace(" ", "").lower()
+    assert "mso-hide" not in html.lower()
+    assert "min-width:760px" in html
     assert ".pams-responsive-table" in html
     assert "position:absolute" not in html.replace(" ", "").lower()
     assert "position:fixed" not in html.replace(" ", "").lower()

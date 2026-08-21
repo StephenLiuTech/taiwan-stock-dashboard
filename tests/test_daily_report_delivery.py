@@ -807,14 +807,14 @@ def test_html_contributor_columns_and_readable_alignment_are_preserved() -> None
     assert "Ranked by Today's P/L from highest to lowest." in html
     assert re.search(r'<th style="[^"]*text-align:right[^"]*">Rank</th>', contributors)
 
-    contributor_table = html.split('<table class="pams-desktop-only"', maxsplit=1)[
-        1
-    ].split(">", maxsplit=1)[0]
+    contributor_table = html.split(
+        '<table class="pams-canonical-report-table"', maxsplit=1
+    )[1].split(">", maxsplit=1)[0]
     holdings_table = (
         html.split(
             '<h2 style="font-size:18px;margin-top:24px">Holdings</h2>', maxsplit=1
         )[1]
-        .split('<table class="pams-desktop-only"', maxsplit=1)[1]
+        .split('<table class="pams-canonical-report-table"', maxsplit=1)[1]
         .split(">", maxsplit=1)[0]
     )
     assert "width:100%" in contributor_table
