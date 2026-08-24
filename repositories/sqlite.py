@@ -155,12 +155,16 @@ class SQLiteTransactionRepository:
 
     def upsert(self, transaction: Transaction) -> None:
         self.connection.execute(
-            """INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO transactions (
+            id, symbol, market, transaction_type, trade_date, settlement_date,
+            quantity, price, fees, taxes, currency, notes, created_at, financing_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET symbol=excluded.symbol, market=excluded.market,
             transaction_type=excluded.transaction_type, trade_date=excluded.trade_date,
             settlement_date=excluded.settlement_date, quantity=excluded.quantity,
             price=excluded.price, fees=excluded.fees, taxes=excluded.taxes,
-            currency=excluded.currency, notes=excluded.notes""",
+            currency=excluded.currency, notes=excluded.notes,
+            financing_type=excluded.financing_type""",
             (
                 transaction.id,
                 transaction.symbol,
@@ -175,6 +179,11 @@ class SQLiteTransactionRepository:
                 transaction.currency.value,
                 transaction.notes,
                 datetime.now().isoformat(),
+                (
+                    transaction.financing_type.value
+                    if transaction.financing_type is not None
+                    else None
+                ),
             ),
         )
         if self.auto_commit:
@@ -182,7 +191,10 @@ class SQLiteTransactionRepository:
 
     def add(self, transaction: Transaction) -> None:
         self.connection.execute(
-            "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            """INSERT INTO transactions (
+            id, symbol, market, transaction_type, trade_date, settlement_date,
+            quantity, price, fees, taxes, currency, notes, created_at, financing_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 transaction.id,
                 transaction.symbol,
@@ -197,6 +209,11 @@ class SQLiteTransactionRepository:
                 transaction.currency.value,
                 transaction.notes,
                 datetime.now().isoformat(),
+                (
+                    transaction.financing_type.value
+                    if transaction.financing_type is not None
+                    else None
+                ),
             ),
         )
         if self.auto_commit:
@@ -415,12 +432,18 @@ class SQLiteLiabilityRepository:
 
     def upsert(self, liability: Liability) -> None:
         self.connection.execute(
-            """INSERT INTO liabilities VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO liabilities (
+            id, liability_type, principal, annual_interest_rate, currency,
+            start_date, maturity_date, collateral_description, notes, created_at,
+            financed_symbol, financed_quantity
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET liability_type=excluded.liability_type,
             principal=excluded.principal, annual_interest_rate=excluded.annual_interest_rate,
             currency=excluded.currency, start_date=excluded.start_date,
             maturity_date=excluded.maturity_date,
-            collateral_description=excluded.collateral_description, notes=excluded.notes""",
+            collateral_description=excluded.collateral_description,
+            financed_symbol=excluded.financed_symbol,
+            financed_quantity=excluded.financed_quantity, notes=excluded.notes""",
             (
                 liability.id,
                 liability.liability_type.value,
@@ -440,6 +463,12 @@ class SQLiteLiabilityRepository:
                 liability.collateral_description,
                 liability.notes,
                 datetime.now().isoformat(),
+                liability.financed_symbol,
+                (
+                    str(liability.financed_quantity)
+                    if liability.financed_quantity is not None
+                    else None
+                ),
             ),
         )
         if self.auto_commit:
@@ -457,6 +486,8 @@ class SQLiteLiabilityRepository:
         values["principal"] = _decimal(values["principal"])
         if values["annual_interest_rate"] is not None:
             values["annual_interest_rate"] = _decimal(values["annual_interest_rate"])
+        if values.get("financed_quantity") is not None:
+            values["financed_quantity"] = _decimal(values["financed_quantity"])
         if values["start_date"]:
             values["start_date"] = date.fromisoformat(values["start_date"])
         if values["maturity_date"]:

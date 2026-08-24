@@ -163,3 +163,5 @@ notifications are not part of v1.0.0.
 - Non-persisted expected-payment cash indicator and annual dividend summary
 - Multi-market foundation: TWSE/TPEX plus opt-in US/USD valuation, persisted
   USD/TWD rates, and combined TWD reporting (in progress)
+- First-class atomic Taiwan margin BUY entry with explicit financing provenance,
+  configured Decimal funding ratio, holding rebuild, and liability update

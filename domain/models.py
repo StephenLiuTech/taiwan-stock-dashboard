@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from domain.enums import (
     Currency,
     DividendStatus,
+    FinancingType,
     HoldingType,
     LiabilityType,
     Market,
@@ -82,6 +83,7 @@ class Transaction(SymbolModel):
     fees: NonNegativeDecimal = Decimal("0")
     taxes: NonNegativeDecimal = Decimal("0")
     currency: Currency
+    financing_type: FinancingType | None = None
     notes: str | None = None
 
     @model_validator(mode="after")
@@ -89,6 +91,21 @@ class Transaction(SymbolModel):
         """Ensure settlement is not earlier than the trade."""
         if self.settlement_date < self.trade_date:
             raise ValueError("settlement_date cannot precede trade_date")
+        if self.financing_type is FinancingType.MARGIN:
+            if self.transaction_type is not TransactionType.BUY:
+                raise ValueError(
+                    "margin financing is supported only for BUY transactions"
+                )
+            if self.market not in (Market.TWSE, Market.TPEX):
+                raise ValueError(
+                    "margin financing is supported only for Taiwan markets"
+                )
+            if self.currency is not Currency.TWD:
+                raise ValueError("margin financing requires TWD currency")
+            if self.quantity <= 0 or self.price <= 0:
+                raise ValueError(
+                    "margin financing requires positive quantity and price"
+                )
         return self
 
 
@@ -163,6 +180,8 @@ class Liability(DomainModel):
     start_date: date | None = None
     maturity_date: date | None = None
     collateral_description: str | None = None
+    financed_symbol: str | None = None
+    financed_quantity: NonNegativeDecimal | None = None
     notes: str | None = None
 
     @model_validator(mode="after")

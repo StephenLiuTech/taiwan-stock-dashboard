@@ -10,6 +10,7 @@ import pytest
 
 import pams.composition
 from config import get_settings
+from database.schema import SCHEMA_VERSION
 from domain import Market
 from market_data.transport import JSONRecord
 from pams.application import AddTransactionCommand
@@ -424,7 +425,7 @@ def test_operational_status_reports_database_state(tmp_path: Path) -> None:
         assert status.latest_position_snapshot == date(2026, 7, 22)
         assert status.holdings_count == 5
         assert status.liabilities_count == 2
-        assert status.schema_version == 7
+        assert status.schema_version == SCHEMA_VERSION
         assert status.database_size_bytes > 0
 
 

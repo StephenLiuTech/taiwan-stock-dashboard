@@ -19,6 +19,15 @@ def test_settings_have_safe_local_defaults() -> None:
     assert settings.microsoft_token_cache.as_posix() == "data/msal_token_cache.json"
     assert settings.market_http_timeout_seconds == 15
     assert settings.market_http_attempts == 4
+    assert settings.margin_self_funding_ratio == Decimal("0.40")
+
+
+@pytest.mark.parametrize("ratio", ["0", "1", "1.01"])
+def test_margin_self_funding_ratio_must_be_strictly_between_zero_and_one(
+    ratio: str,
+) -> None:
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, margin_self_funding_ratio=ratio)
 
 
 def test_settings_load_prefixed_environment(monkeypatch: pytest.MonkeyPatch) -> None:

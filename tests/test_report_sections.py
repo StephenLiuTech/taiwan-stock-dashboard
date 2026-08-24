@@ -277,6 +277,23 @@ def test_financing_section_parses_metadata_without_changing_principal_totals() -
     assert result.margin_financing.position_symbol == "2027"
     assert result.margin_financing.position_quantity == Decimal("24000")
     assert result.margin_financing.updated == date(2026, 8, 5)
+
+
+def test_financing_section_prefers_structured_margin_position() -> None:
+    liabilities = financing_liabilities()
+    liabilities[0] = liabilities[0].model_copy(
+        update={
+            "financed_symbol": "2027",
+            "financed_quantity": Decimal("30000"),
+            "collateral_description": "legacy text that is not parseable",
+        }
+    )
+    result = ReportSectionService.financing(
+        liabilities, Decimal("4000000"), Decimal("2407000"), Decimal("0.39825")
+    )
+    assert result is not None and result.margin_financing is not None
+    assert result.margin_financing.position_symbol == "2027"
+    assert result.margin_financing.position_quantity == Decimal("30000")
     assert result.stock_pledge is not None
     assert result.stock_pledge.repayment_total == Decimal("1024368")
     assert result.stock_pledge.collateral_market_value == Decimal("1969200")

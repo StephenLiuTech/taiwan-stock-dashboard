@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY, symbol TEXT NOT NULL, market TEXT NOT NULL,
     transaction_type TEXT NOT NULL, trade_date TEXT NOT NULL,
     settlement_date TEXT NOT NULL, quantity TEXT NOT NULL, price TEXT NOT NULL,
-    fees TEXT NOT NULL, taxes TEXT NOT NULL, currency TEXT NOT NULL, notes TEXT,
+    fees TEXT NOT NULL, taxes TEXT NOT NULL, currency TEXT NOT NULL,
+    financing_type TEXT CHECK (financing_type IS NULL OR financing_type = 'margin'),
+    notes TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_transactions_symbol_date ON transactions(symbol, trade_date);
@@ -51,7 +53,8 @@ CREATE INDEX IF NOT EXISTS ix_dividend_events_payment_date
 CREATE TABLE IF NOT EXISTS liabilities (
     id TEXT PRIMARY KEY, liability_type TEXT NOT NULL, principal TEXT NOT NULL,
     annual_interest_rate TEXT, currency TEXT NOT NULL, start_date TEXT,
-    maturity_date TEXT, collateral_description TEXT, notes TEXT, created_at TEXT NOT NULL
+    maturity_date TEXT, collateral_description TEXT, financed_symbol TEXT,
+    financed_quantity TEXT, notes TEXT, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS price_quotes (
     symbol TEXT NOT NULL, market TEXT NOT NULL, trade_date TEXT NOT NULL,
@@ -136,6 +139,7 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
         ):
             _migrate_multi_currency_schema(connection)
     connection.executescript(INITIAL_SCHEMA)
+    _migrate_margin_financing_schema(connection)
     for version in range(1, SCHEMA_VERSION + 1):
         connection.execute(
             """INSERT OR IGNORE INTO schema_version(version, applied_at)
@@ -143,6 +147,22 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             (version,),
         )
     connection.commit()
+
+
+def _migrate_margin_financing_schema(connection: sqlite3.Connection) -> None:
+    """Add nullable structured margin fields without rewriting existing records."""
+    transaction_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(transactions)")
+    }
+    if "financing_type" not in transaction_columns:
+        connection.execute("ALTER TABLE transactions ADD COLUMN financing_type TEXT")
+    liability_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(liabilities)")
+    }
+    if "financed_symbol" not in liability_columns:
+        connection.execute("ALTER TABLE liabilities ADD COLUMN financed_symbol TEXT")
+    if "financed_quantity" not in liability_columns:
+        connection.execute("ALTER TABLE liabilities ADD COLUMN financed_quantity TEXT")
 
 
 def _migrate_multi_currency_schema(connection: sqlite3.Connection) -> None:

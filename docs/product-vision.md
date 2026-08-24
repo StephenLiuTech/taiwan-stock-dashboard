@@ -185,6 +185,11 @@ Financial events include:
 - Interest
 - Transfer
 
+Financing provenance is part of the transaction event when a Taiwan purchase
+uses margin. The transaction remains the reproducible source of the holding,
+while the same atomic application operation updates the corresponding debt and
+financed-position state. Financing is never inferred solely from free text.
+
 Future features should model events rather than hard-code asset behavior.
 
 PAMS follows the broker portfolio cost convention. Trading fees and taxes are

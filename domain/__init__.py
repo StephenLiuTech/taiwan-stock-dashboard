@@ -4,6 +4,7 @@ from domain.analytics import DailyPortfolioReturn, PortfolioAnalytics
 from domain.enums import (
     Currency,
     DividendStatus,
+    FinancingType,
     HoldingType,
     LiabilityType,
     Market,
@@ -78,6 +79,7 @@ __all__ = [
     "DividendEvent",
     "DividendStatus",
     "FxRate",
+    "FinancingType",
     "Holding",
     "HoldingType",
     "HoldingValuation",

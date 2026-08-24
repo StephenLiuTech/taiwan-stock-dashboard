@@ -2,7 +2,10 @@
 
 from dataclasses import dataclass
 
-from repositories.holding_rebuild_uow import SQLiteHoldingRebuildUnitOfWork
+from repositories.holding_rebuild_uow import (
+    SQLiteHoldingRebuildUnitOfWork,
+    SQLiteMarginTransactionUnitOfWork,
+)
 from repositories.interfaces import (
     DividendEventRepository,
     DividendRepository,
@@ -10,6 +13,7 @@ from repositories.interfaces import (
     HoldingRebuildUnitOfWork,
     HoldingRepository,
     LiabilityRepository,
+    MarginTransactionUnitOfWork,
     MarketDataUnitOfWork,
     PositionSnapshotRepository,
     PriceQuoteRepository,
@@ -34,6 +38,7 @@ from repositories.postgresql import (
 )
 from repositories.postgresql_uow import (
     PostgreSQLHoldingRebuildUnitOfWork,
+    PostgreSQLMarginTransactionUnitOfWork,
     PostgreSQLMarketDataUnitOfWork,
 )
 from repositories.sqlite import (
@@ -68,6 +73,7 @@ class RepositoryBundle:
     watchlist: WatchlistRepository
     market_data_uow: MarketDataUnitOfWork
     holding_rebuild_uow: HoldingRebuildUnitOfWork
+    margin_transaction_uow: MarginTransactionUnitOfWork
 
 
 def create_repositories(backend: str, connection: object) -> RepositoryBundle:
@@ -87,6 +93,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             SQLiteWatchlistRepository(connection),
             SQLiteMarketDataUnitOfWork(connection),
             SQLiteHoldingRebuildUnitOfWork(connection),
+            SQLiteMarginTransactionUnitOfWork(connection),
         )
     if backend == "postgresql":
         return RepositoryBundle(
@@ -103,5 +110,6 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             PostgreSQLWatchlistRepository(connection),
             PostgreSQLMarketDataUnitOfWork(connection),
             PostgreSQLHoldingRebuildUnitOfWork(connection),
+            PostgreSQLMarginTransactionUnitOfWork(connection),
         )
     raise ValueError(f"Unsupported database backend: {backend}")

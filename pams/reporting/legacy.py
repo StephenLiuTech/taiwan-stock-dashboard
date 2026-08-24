@@ -392,18 +392,34 @@ def format_holding_detail(result: HoldingsQueryResult) -> str:
 
 def format_transaction_record(record: TransactionRecord) -> str:
     """Render confirmation for one recorded transaction."""
-    return "\n".join(
-        [
-            "PAMS Transaction Added",
-            f"ID: {record.id}",
-            f"Symbol: {record.symbol}",
-            f"Market: {record.market}",
-            f"Type: {record.transaction_type}",
-            f"Trade date: {record.trade_date}",
-            f"Quantity: {record.quantity}",
-            f"Price: {record.price}",
-        ]
-    )
+    lines = [
+        "PAMS Transaction Added",
+        f"ID: {record.id}",
+        f"Symbol: {record.symbol}",
+        f"Market: {record.market}",
+        f"Type: {record.transaction_type}",
+        f"Trade date: {record.trade_date}",
+        f"Quantity: {record.quantity}",
+        f"Price: {record.price}",
+    ]
+    if record.financing_type == "margin":
+        lines.extend(
+            [
+                "Financing: Margin",
+                "",
+                f"Gross purchase value: NT${record.gross_purchase_value:,.0f}",
+                f"Self-funded amount: NT${record.self_funded_amount:,.0f}",
+                f"Financed principal: NT${record.financed_principal:,.0f}",
+                "",
+                "Updated holding:",
+                f"{record.symbol}: {record.updated_holding_quantity:,.0f} shares",
+                "",
+                "Updated margin financing:",
+                f"Position: {record.updated_margin_quantity:,.0f} shares",
+                f"Principal: NT${record.updated_margin_principal:,.0f}",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def format_transaction_list(result: TransactionList, *, json_output: bool) -> str:

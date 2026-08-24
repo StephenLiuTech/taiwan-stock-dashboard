@@ -178,6 +178,11 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--fees", type=parse_decimal, default=Decimal("0"))
     add.add_argument("--taxes", type=parse_decimal, default=Decimal("0"))
     add.add_argument("--currency", default="TWD", choices=("TWD", "USD"))
+    add.add_argument(
+        "--financing",
+        choices=("margin",),
+        help="finance a Taiwan BUY using the configured margin ratio",
+    )
     add.add_argument("--notes")
     add.add_argument("--database", type=Path)
     add.add_argument("--verbose", action="store_true")
@@ -527,7 +532,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     record = application.add_transaction.execute(
                         AddTransactionCommand(
                             symbol=arguments.symbol,
-                            market=("TPEx" if arguments.market == "TPEX" else "TWSE"),
+                            market={
+                                "TWSE": "TWSE",
+                                "TPEX": "TPEx",
+                                "US": "US",
+                            }[arguments.market],
                             transaction_type=arguments.type,
                             trade_date=arguments.trade_date,
                             settlement_date=(
@@ -540,6 +549,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             currency=arguments.currency,
                             transaction_id=arguments.transaction_id,
                             notes=arguments.notes,
+                            financing_type=arguments.financing,
                         )
                     )
                     print(format_transaction_record(record))

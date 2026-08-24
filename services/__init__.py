@@ -7,6 +7,11 @@ from services.analytics_engine import (
     EmptySnapshotHistoryError,
 )
 from services.bootstrap import BootstrapService
+from services.margin_financing import (
+    MarginFinancingError,
+    MarginFinancingResult,
+    MarginFinancingService,
+)
 from services.multi_currency_valuation import (
     MultiCurrencyValuationEngine,
     MultiCurrencyValuationError,
@@ -32,6 +37,9 @@ __all__ = [
     "DuplicateSnapshotDateError",
     "EmptySnapshotHistoryError",
     "MissingPriceQuoteError",
+    "MarginFinancingError",
+    "MarginFinancingResult",
+    "MarginFinancingService",
     "HoldingProjectionMetadata",
     "InvalidTransactionHistoryError",
     "OversellError",

@@ -53,3 +53,8 @@ rate_date, source)`, makes holding identity unique by `(symbol, market)`, and
 adds market, native currency, quote date, FX rate, and FX date to each position
 snapshot. Existing Taiwan rows migrate as TWD/FX 1 without rewriting aggregate
 snapshot values.
+
+Schema version 8 adds nullable `transactions.financing_type` and structured
+`liabilities.financed_symbol` / `financed_quantity` fields. Existing cash
+transactions and liabilities remain valid with null values. Margin entry writes
+these fields through the same transaction as its holding and principal update.

@@ -127,7 +127,18 @@ class ReportSectionService:
             None,
         )
         margin_reference = (
-            _margin_reference(margin.collateral_description) if margin else (None, None)
+            (
+                margin.financed_symbol,
+                margin.financed_quantity,
+            )
+            if margin
+            and margin.financed_symbol is not None
+            and margin.financed_quantity is not None
+            else (
+                _margin_reference(margin.collateral_description)
+                if margin
+                else (None, None)
+            )
         )
         margin_section = (
             MarginFinancingSection(

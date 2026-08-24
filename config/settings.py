@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     us_market_data_provider: Literal["disabled", "alphavantage"] = "disabled"
     fx_provider: Literal["disabled", "alphavantage"] = "disabled"
     alpha_vantage_api_key: SecretStr | None = None
+    margin_self_funding_ratio: Decimal = Field(default=Decimal("0.40"), gt=0, lt=1)
     email_transport: Literal["microsoft_graph", "resend", "smtp"] = "resend"
     resend_api_key: SecretStr | None = None
     supabase_url: str | None = None

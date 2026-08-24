@@ -154,6 +154,27 @@ and taxes reduce realized profit. BUY fees, SELL fees, and taxes remain
 immutable ledger expenses and are reported separately; they never enter
 holding cost, unrealized profit or loss, or holding return.
 
+### Margin-financed transaction boundary
+
+```text
+CLI transaction add --financing margin
+        ↓
+AddTransactionUseCase
+        ↓
+MarginFinancingService (Decimal rules)
+        ↓ one Unit of Work
+Transaction + rebuilt Holding + margin Liability
+```
+
+Margin financing is an explicit nullable transaction classification, not a
+note convention. Schema version 8 also stores the financed symbol and quantity
+on the margin liability. The pure domain service applies the configured
+self-funding ratio to `quantity × price`; fees and taxes retain their existing
+expense semantics and never enter financed principal. The application workflow
+rejects duplicates before writing and commits transaction, holding projection,
+and liability together. Existing descriptive liability metadata remains
+read-compatible during migration and accrued-interest notes are preserved.
+
 The one-time bootstrap importer has a read-only preview and an explicit apply
 boundary. Apply replaces only the reconciled 2026 ledger, writes deterministic
 statement and synthetic transaction IDs, rebuilds holdings, and performs a

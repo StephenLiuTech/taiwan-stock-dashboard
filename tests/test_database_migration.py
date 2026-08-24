@@ -8,6 +8,7 @@ import pytest
 
 import pams.application.migrate_database
 from database import initialize_database, initialize_schema
+from database.schema import SCHEMA_VERSION
 from pams.application import DatabaseMigrationError, MigrateDatabaseUseCase
 
 
@@ -69,7 +70,10 @@ def migration_connections(
     initialize_schema(source)
     initialize_schema(destination)
     source.execute(
-        """INSERT INTO liabilities
+        """INSERT INTO liabilities (
+        id, liability_type, principal, annual_interest_rate, currency,
+        start_date, maturity_date, collateral_description, notes, created_at
+        )
         VALUES ('liability-1', 'other', '100', NULL, 'TWD',
                 NULL, NULL, NULL, NULL, '2026-07-27T00:00:00')"""
     )
@@ -110,7 +114,7 @@ def test_migration_copies_and_validates_every_table(
     ).execute()
     counts = dict(result.rows_copied)
     assert counts["liabilities"] == 1
-    assert counts["schema_version"] == 7
+    assert counts["schema_version"] == SCHEMA_VERSION
     assert destination.execute("SELECT COUNT(*) FROM liabilities").fetchone()[0] == 1
 
 

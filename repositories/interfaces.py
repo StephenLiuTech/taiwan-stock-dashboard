@@ -183,6 +183,16 @@ class HoldingRebuildUnitOfWork(Protocol):
     def transaction(self) -> AbstractContextManager[None]: ...
 
 
+class MarginTransactionUnitOfWork(Protocol):
+    """Atomic persistence boundary for a margin BUY and its projections."""
+
+    holdings: HoldingRepository
+    transactions: TransactionRepository
+    liabilities: LiabilityRepository
+
+    def transaction(self) -> AbstractContextManager[None]: ...
+
+
 class BootstrapImportUnitOfWork(Protocol):
     """Atomic full-ledger replacement and holding rebuild boundary."""
 

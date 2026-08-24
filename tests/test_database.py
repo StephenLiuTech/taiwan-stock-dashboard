@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from database import initialize_database, initialize_schema
+from database.schema import SCHEMA_VERSION
 
 SCHEMA_6_FIXTURE = """
 CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -97,9 +98,17 @@ def test_schema_initialization_creates_market_data_version(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-    assert version[0] == 7
+        transaction_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(transactions)")
+        }
+        liability_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(liabilities)")
+        }
+    assert version[0] == SCHEMA_VERSION
     assert "watchlist" in tables
     assert "dividend_events" in tables
+    assert "financing_type" in transaction_columns
+    assert {"financed_symbol", "financed_quantity"} <= liability_columns
     assert {
         "price_quotes",
         "daily_snapshots",
@@ -114,7 +123,8 @@ def test_schema_6_to_7_preserves_realistic_taiwan_data() -> None:
     connection.executescript(SCHEMA_6_FIXTURE)
     initialize_schema(connection)
     assert (
-        connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 7
+        connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+        == SCHEMA_VERSION
     )
     holdings = connection.execute(
         "SELECT symbol, market, currency, quantity, average_cost FROM holdings ORDER BY symbol"

@@ -120,7 +120,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY, symbol TEXT NOT NULL, market TEXT NOT NULL,
     transaction_type TEXT NOT NULL, trade_date TEXT NOT NULL,
     settlement_date TEXT NOT NULL, quantity TEXT NOT NULL, price TEXT NOT NULL,
-    fees TEXT NOT NULL, taxes TEXT NOT NULL, currency TEXT NOT NULL, notes TEXT,
+    fees TEXT NOT NULL, taxes TEXT NOT NULL, currency TEXT NOT NULL,
+    financing_type TEXT CHECK (financing_type IS NULL OR financing_type = 'margin'),
+    notes TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_transactions_symbol_date ON transactions(symbol, trade_date);
@@ -148,7 +150,8 @@ CREATE INDEX IF NOT EXISTS ix_dividend_events_payment_date
 CREATE TABLE IF NOT EXISTS liabilities (
     id TEXT PRIMARY KEY, liability_type TEXT NOT NULL, principal TEXT NOT NULL,
     annual_interest_rate TEXT, currency TEXT NOT NULL, start_date TEXT,
-    maturity_date TEXT, collateral_description TEXT, notes TEXT, created_at TEXT NOT NULL
+    maturity_date TEXT, collateral_description TEXT, financed_symbol TEXT,
+    financed_quantity TEXT, notes TEXT, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS price_quotes (
     symbol TEXT NOT NULL, market TEXT NOT NULL, trade_date TEXT NOT NULL,
@@ -206,10 +209,44 @@ CREATE TABLE IF NOT EXISTS watchlist (
 
 
 def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
-    """Create all PostgreSQL tables and record every applied schema version."""
-    for statement in POSTGRESQL_SCHEMA.split(";"):
-        if statement.strip():
-            connection.execute(statement)
+    """Create or transactionally upgrade PostgreSQL to the current schema."""
+    try:
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"""
+        )
+        row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
+        current_version = int(row[0]) if row and row[0] is not None else 0
+        if current_version > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"database schema version {current_version} is newer than "
+                f"supported version {SCHEMA_VERSION}"
+            )
+
+        if current_version == 0 or current_version < 7:
+            for statement in POSTGRESQL_SCHEMA.split(";"):
+                if statement.strip():
+                    connection.execute(statement)
+        if 0 < current_version < 7:
+            _migrate_postgresql_to_v7(connection)
+        if current_version == 7:
+            _migrate_postgresql_v7_to_v8(connection)
+
+        for version in range(current_version + 1, SCHEMA_VERSION + 1):
+            connection.execute(
+                """INSERT INTO schema_version(version, applied_at)
+                VALUES (?, CURRENT_TIMESTAMP)
+                ON CONFLICT(version) DO NOTHING""",
+                (version,),
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+
+def _migrate_postgresql_to_v7(connection: PostgreSQLConnection) -> None:
+    """Apply the legacy multi-market delta for databases older than v7."""
     connection.execute(
         "ALTER TABLE holdings DROP CONSTRAINT IF EXISTS holdings_symbol_key"
     )
@@ -235,11 +272,17 @@ def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
         fx_rate = COALESCE(p.fx_rate, '1')
         FROM holdings h WHERE h.id = p.holding_id"""
     )
-    for version in range(1, SCHEMA_VERSION + 1):
-        connection.execute(
-            """INSERT INTO schema_version(version, applied_at)
-            VALUES (?, CURRENT_TIMESTAMP)
-            ON CONFLICT(version) DO NOTHING""",
-            (version,),
-        )
-    connection.commit()
+
+
+def _migrate_postgresql_v7_to_v8(connection: PostgreSQLConnection) -> None:
+    """Add nullable margin provenance fields without rewriting business rows."""
+    connection.execute(
+        """ALTER TABLE transactions ADD COLUMN IF NOT EXISTS financing_type TEXT
+        CHECK (financing_type IS NULL OR financing_type = 'margin')"""
+    )
+    connection.execute(
+        "ALTER TABLE liabilities ADD COLUMN IF NOT EXISTS financed_symbol TEXT"
+    )
+    connection.execute(
+        "ALTER TABLE liabilities ADD COLUMN IF NOT EXISTS financed_quantity TEXT"
+    )

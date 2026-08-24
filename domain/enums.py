@@ -32,6 +32,12 @@ class TransactionType(StrEnum):
     SELL = "sell"
 
 
+class FinancingType(StrEnum):
+    """Explicit transaction financing classifications."""
+
+    MARGIN = "margin"
+
+
 class DividendStatus(StrEnum):
     """Dividend lifecycle states."""
 

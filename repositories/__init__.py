@@ -1,6 +1,9 @@
 """Repository contracts and SQLite implementations."""
 
-from repositories.holding_rebuild_uow import SQLiteHoldingRebuildUnitOfWork
+from repositories.holding_rebuild_uow import (
+    SQLiteHoldingRebuildUnitOfWork,
+    SQLiteMarginTransactionUnitOfWork,
+)
 from repositories.interfaces import (
     DividendEventRepository,
     DividendRepository,
@@ -9,6 +12,7 @@ from repositories.interfaces import (
     HoldingRebuildUnitOfWork,
     HoldingRepository,
     LiabilityRepository,
+    MarginTransactionUnitOfWork,
     MarketDataUnitOfWork,
     PositionSnapshotRepository,
     PriceQuoteRepository,
@@ -34,6 +38,7 @@ from repositories.postgresql import (
 )
 from repositories.postgresql_uow import (
     PostgreSQLHoldingRebuildUnitOfWork,
+    PostgreSQLMarginTransactionUnitOfWork,
     PostgreSQLMarketDataUnitOfWork,
 )
 from repositories.sqlite import (
@@ -59,6 +64,7 @@ __all__ = [
     "HoldingRebuildUnitOfWork",
     "LiabilityRepository",
     "MarketDataUnitOfWork",
+    "MarginTransactionUnitOfWork",
     "PositionSnapshotRepository",
     "PostgreSQLDividendRepository",
     "PostgreSQLDividendEventRepository",
@@ -67,6 +73,7 @@ __all__ = [
     "PostgreSQLHoldingRebuildUnitOfWork",
     "PostgreSQLLiabilityRepository",
     "PostgreSQLMarketDataUnitOfWork",
+    "PostgreSQLMarginTransactionUnitOfWork",
     "PostgreSQLPositionSnapshotRepository",
     "PostgreSQLPriceQuoteRepository",
     "PostgreSQLReportDeliveryRepository",
@@ -82,6 +89,7 @@ __all__ = [
     "SQLiteHoldingRebuildUnitOfWork",
     "SQLiteLiabilityRepository",
     "SQLiteMarketDataUnitOfWork",
+    "SQLiteMarginTransactionUnitOfWork",
     "SQLitePositionSnapshotRepository",
     "SQLitePriceQuoteRepository",
     "SQLiteReportDeliveryRepository",

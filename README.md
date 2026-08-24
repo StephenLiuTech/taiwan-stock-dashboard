@@ -404,6 +404,10 @@ python -m pams transaction add --id tx-001 --symbol 2330 --market TWSE \
   --type buy --trade-date 2026-07-01 \
   --quantity 100 --price 1800 --fees 20 --taxes 0 --currency TWD
 
+python -m pams transaction add --symbol 2027 --market TWSE --type buy \
+  --trade-date 2026-08-21 --quantity 2000 --price 50 --currency TWD \
+  --financing margin
+
 python -m pams transaction list --symbol 2330 --json
 python -m pams holdings list
 python -m pams holdings show 2330
@@ -412,6 +416,13 @@ python -m pams holdings show 2330 --as-of 2026-07-31
 python -m pams holdings rebuild
 python -m pams holdings rebuild --apply --allow-unmatched
 ```
+
+`--financing margin` records one explicitly classified Taiwan margin BUY. PAMS
+uses `PAMS_MARGIN_SELF_FUNDING_RATIO` (default `0.40`) and derives the financed
+ratio as `1 - self_funding_ratio`. Gross value excludes fees and taxes. The
+transaction, rebuilt holding, structured margin-financed quantity, and margin
+principal update commit atomically. Normal transactions are unchanged. Margin
+SELLs, US transactions, non-TWD transactions, and invalid ratios are rejected.
 
 `--settlement-date` is optional and defaults to `--trade-date`. Explicit
 settlement dates remain compatible when the record needs one:

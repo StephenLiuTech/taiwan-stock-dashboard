@@ -66,6 +66,7 @@ class FakeAddUseCase:
 
     def execute(self, command: AddTransactionCommand) -> TransactionRecord:
         self.command = command
+        margin = command.financing_type == "margin"
         return TransactionRecord(
             id=command.transaction_id or "generated",
             symbol=command.symbol,
@@ -79,6 +80,13 @@ class FakeAddUseCase:
             taxes=command.taxes,
             currency=command.currency,
             notes=command.notes,
+            financing_type=command.financing_type,
+            gross_purchase_value=Decimal("100000") if margin else None,
+            self_funded_amount=Decimal("40000") if margin else None,
+            financed_principal=Decimal("60000") if margin else None,
+            updated_holding_quantity=Decimal("38000") if margin else None,
+            updated_margin_quantity=Decimal("30000") if margin else None,
+            updated_margin_principal=Decimal("767000") if margin else None,
         )
 
 
@@ -263,6 +271,53 @@ def test_transaction_add_help_documents_settlement_default(
 
     assert raised.value.code == 0
     assert "settlement date (defaults to trade date)" in capsys.readouterr().out
+
+
+def test_cli_margin_transaction_passes_classification_and_renders_summary(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, add_use_case, _ = install_composition(monkeypatch)
+    exit_code = main(
+        [
+            "transaction",
+            "add",
+            "--symbol",
+            "2027",
+            "--market",
+            "TWSE",
+            "--type",
+            "buy",
+            "--trade-date",
+            "2026-08-21",
+            "--quantity",
+            "2000",
+            "--price",
+            "50",
+            "--financing",
+            "margin",
+        ]
+    )
+    assert exit_code == ExitCode.SUCCESS
+    assert add_use_case.command.financing_type == "margin"
+    output = capsys.readouterr().out
+    assert "Financing: Margin" in output
+    assert "Gross purchase value: NT$100,000" in output
+    assert "Self-funded amount: NT$40,000" in output
+    assert "Financed principal: NT$60,000" in output
+    assert "2027: 38,000 shares" in output
+    assert "Position: 30,000 shares" in output
+    assert "Principal: NT$767,000" in output
+
+
+def test_transaction_add_help_documents_margin_option(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        build_parser().parse_args(["transaction", "add", "--help"])
+    assert raised.value.code == 0
+    output = capsys.readouterr().out
+    assert "--financing {margin}" in output
+    assert "configured margin ratio" in output
 
 
 def test_cli_holdings_list_and_show_route_to_query_use_case(

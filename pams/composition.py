@@ -708,7 +708,11 @@ def _compose(
             apply_rebuilt_holdings=ApplyRebuiltHoldingsUseCase(
                 repositories.holding_rebuild_uow, holding_metadata
             ),
-            add_transaction=AddTransactionUseCase(transaction_repository),
+            add_transaction=AddTransactionUseCase(
+                transaction_repository,
+                repositories.margin_transaction_uow,
+                settings.margin_self_funding_ratio,
+            ),
             list_transactions=ListTransactionsUseCase(transaction_repository),
             query_holdings=QueryHoldingsUseCase(
                 transaction_repository,

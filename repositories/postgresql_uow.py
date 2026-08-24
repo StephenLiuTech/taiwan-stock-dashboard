@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from repositories.postgresql import (
     PostgreSQLFxRateRepository,
     PostgreSQLHoldingRepository,
+    PostgreSQLLiabilityRepository,
     PostgreSQLPositionSnapshotRepository,
     PostgreSQLPriceQuoteRepository,
     PostgreSQLSnapshotRepository,
@@ -49,6 +50,28 @@ class PostgreSQLHoldingRebuildUnitOfWork:
         self.transactions = PostgreSQLTransactionRepository(
             connection, auto_commit=False
         )
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        try:
+            yield
+        except Exception:
+            self.connection.rollback()
+            raise
+        else:
+            self.connection.commit()
+
+
+class PostgreSQLMarginTransactionUnitOfWork:
+    """Atomically persist a margin transaction, holding, and liability."""
+
+    def __init__(self, connection: object) -> None:
+        self.connection = connection
+        self.holdings = PostgreSQLHoldingRepository(connection, auto_commit=False)
+        self.transactions = PostgreSQLTransactionRepository(
+            connection, auto_commit=False
+        )
+        self.liabilities = PostgreSQLLiabilityRepository(connection, auto_commit=False)
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
