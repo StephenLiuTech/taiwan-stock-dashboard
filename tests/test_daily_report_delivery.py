@@ -1042,12 +1042,12 @@ def test_one_snapshot_uses_clear_chart_fallback_without_attachment() -> None:
     assert message.inline_images == ()
 
 
-def test_first_delivery_sends_and_duplicate_is_successful_no_op() -> None:
+def test_repeated_delivery_sends_the_same_report_date_again() -> None:
     delivery = DeliveryStub()
     case, _, _, transport = use_case(value=snapshot(), delivery=delivery)
     assert case.execute(date(2026, 7, 22)).status == "sent"
-    assert case.execute(date(2026, 7, 22)).status == "already_sent"
-    assert len(transport.messages) == 1
+    assert case.execute(date(2026, 7, 22)).status == "sent"
+    assert len(transport.messages) == 2
 
 
 def test_force_resends_a_sent_report() -> None:

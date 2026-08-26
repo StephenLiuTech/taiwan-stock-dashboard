@@ -271,12 +271,8 @@ class SendDailyReportUseCase:
             return DailyReportSendResult(
                 report_date, self._recipient, rendered.subject, "dry_run"
             )
-        if not force and not self._deliveries.claim(
-            REPORT_TYPE, report_date, self._recipient
-        ):
-            return DailyReportSendResult(
-                report_date, self._recipient, rendered.subject, "already_sent"
-            )
+        if not force:
+            self._deliveries.claim(REPORT_TYPE, report_date, self._recipient)
         try:
             if self._asset_store is not None and rendered.inline_images:
                 chart = rendered.inline_images[0]
