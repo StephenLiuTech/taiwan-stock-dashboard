@@ -431,6 +431,22 @@ Forced update rebuilds holdings from the complete current transaction ledger
 and atomically replaces that date's quotes, aggregate snapshot, and position
 snapshots. The regular Market Data Engine duplicate guard remains active.
 
+### Historical FX backfill
+
+Historical foreign-currency cash flows require an authentic persisted rate on
+or before their effective date. Preview and apply an inclusive bounded range:
+
+```bash
+python -m pams fx backfill --pair USD/TWD --from 2026-06-26 --to 2026-08-04 --dry-run
+python -m pams fx backfill --pair USD/TWD --from 2026-06-26 --to 2026-08-04 --apply
+```
+
+The Alpha Vantage adapter makes one compact `FX_DAILY` request when it covers
+the requested range and one bounded full-series fallback only when necessary.
+Only actual provider observations inside the range are considered. Apply runs
+in one database transaction and inserts missing dates without updating an
+existing value or its fetch provenance. Repeating the same apply is a no-op.
+
 ### Transactions and holdings
 
 ```bash
@@ -894,3 +910,5 @@ envelopes. Response classification distinguishes valid time-series payloads,
 authentication failures, rejected symbols, explicit quota/frequency messages,
 generic provider information, and malformed documents. Each symbol is isolated:
 a valid quote is retained even if another symbol fails.
+Historical FX backfill is a separate explicit Application workflow; it does
+not create portfolio snapshots or synthesize rates for weekends and holidays.

@@ -648,6 +648,27 @@ quote/rate/snapshot boundary.
 similar identifiers are listing or execution venues, not portfolio identity.
 Holding and quote identity remains `(symbol, market)`; venue metadata may be
 added later without changing that identity if a reliable provider supplies it.
+
+### Historical FX backfill
+
+```text
+CLI fx backfill
+       ↓
+BackfillFxRatesUseCase
+       ↓
+AlphaVantageFXRateProvider.fetch_between
+       ↓
+FxRateRepository.insert_if_absent
+```
+
+The provider filters one daily series to an inclusive requested range, using a
+compact response when it covers the start and one bounded full-series fallback
+otherwise. It returns only real provider dates and Decimal closes. The
+application compares persisted pair/date observations and applies missing rows
+inside the existing market-data transaction boundary. Insert conflicts do
+nothing, so historical values and `fetched_at` provenance are immutable under
+backfill and repeated runs are idempotent. No weekend or holiday row is
+synthesized, and no rate after the requested end date is returned.
 ## Annual investment P/L (schema v9)
 
 `TransactionEngine` emits an immutable `RealizedSale` for every SELL, including

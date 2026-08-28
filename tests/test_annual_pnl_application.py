@@ -12,6 +12,7 @@ from domain import (
     AnnualPnlSnapshot,
     Currency,
     DailySnapshot,
+    FxRate,
     Market,
     Transaction,
     TransactionType,
@@ -24,6 +25,7 @@ from pams.application.send_daily_report import (
 from pams.cli import main
 from pams.delivery import DailyEmailReportRenderer
 from repositories.provider import create_repositories
+from services import AnnualPnlFxUnavailableError
 
 
 def transaction(identifier: str, side: TransactionType, day: date) -> Transaction:
@@ -90,6 +92,94 @@ def test_use_case_persists_one_immutable_snapshot_per_date(tmp_path: Path) -> No
     assert first.other_cost_ytd == Decimal("2")
     assert first.total_pnl_ytd == Decimal("216")
     assert len(repositories.annual_pnl_snapshots.list_for_year(2026)) == 1
+
+
+def test_use_case_resolves_weekend_usd_cost_with_prior_persisted_fx(
+    tmp_path: Path,
+) -> None:
+    connection = database(tmp_path / "weekend-fx.db")
+    repositories = create_repositories("sqlite", connection)
+    repositories.transactions.add(
+        Transaction(
+            id="mu-buy",
+            symbol="MU",
+            market=Market.US,
+            transaction_type=TransactionType.BUY,
+            trade_date=date(2026, 6, 27),
+            settlement_date=date(2026, 6, 29),
+            quantity=Decimal("2"),
+            price=Decimal("1139.12"),
+            fees=Decimal("1.82"),
+            taxes=Decimal("0"),
+            currency=Currency.USD,
+        )
+    )
+    repositories.fx_rates.upsert(
+        FxRate(
+            base_currency=Currency.USD,
+            quote_currency=Currency.TWD,
+            rate_date=date(2026, 6, 26),
+            rate=Decimal("32.125"),
+            source="fixture",
+        )
+    )
+    use_case = AnnualPnlUseCase(
+        repositories.transactions,
+        repositories.daily_snapshots,
+        repositories.annual_pnl_snapshots,
+        repositories.dividend_events,
+        repositories.investment_cost_events,
+        repositories.fx_rates,
+    )
+
+    result = use_case.ensure(
+        date(2026, 6, 27), unrealized_pnl=Decimal("0"), persist=False
+    )
+
+    assert result.other_cost_ytd == Decimal("58.46750")
+
+
+def test_use_case_fails_when_only_future_fx_is_persisted(tmp_path: Path) -> None:
+    connection = database(tmp_path / "future-fx.db")
+    repositories = create_repositories("sqlite", connection)
+    repositories.transactions.add(
+        Transaction(
+            id="mu-buy",
+            symbol="MU",
+            market=Market.US,
+            transaction_type=TransactionType.BUY,
+            trade_date=date(2026, 6, 27),
+            settlement_date=date(2026, 6, 29),
+            quantity=Decimal("2"),
+            price=Decimal("1139.12"),
+            fees=Decimal("1.82"),
+            taxes=Decimal("0"),
+            currency=Currency.USD,
+        )
+    )
+    repositories.fx_rates.upsert(
+        FxRate(
+            base_currency=Currency.USD,
+            quote_currency=Currency.TWD,
+            rate_date=date(2026, 6, 29),
+            rate=Decimal("32.250"),
+            source="fixture",
+        )
+    )
+    use_case = AnnualPnlUseCase(
+        repositories.transactions,
+        repositories.daily_snapshots,
+        repositories.annual_pnl_snapshots,
+        repositories.dividend_events,
+        repositories.investment_cost_events,
+        repositories.fx_rates,
+    )
+
+    with pytest.raises(
+        AnnualPnlFxUnavailableError,
+        match="historical USD/TWD FX is unavailable for 2026-06-27",
+    ):
+        use_case.ensure(date(2026, 6, 27), unrealized_pnl=Decimal("0"), persist=False)
 
 
 def test_repository_rejects_overwriting_historical_snapshot(tmp_path: Path) -> None:

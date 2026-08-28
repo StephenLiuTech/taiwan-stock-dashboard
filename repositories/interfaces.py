@@ -126,6 +126,14 @@ class FxRateRepository(Protocol):
     """Persistence operations for native/reporting currency rates."""
 
     def upsert(self, rate: FxRate) -> None: ...
+    def insert_if_absent(self, rate: FxRate) -> bool: ...
+    def list_between(
+        self,
+        base_currency: str,
+        quote_currency: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[FxRate]: ...
     def get_latest_on_or_before(
         self,
         base_currency: str,

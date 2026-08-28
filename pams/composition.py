@@ -59,6 +59,7 @@ from pams.application import (
     AnnualPnlUseCase,
     ApplyRebuiltHoldingsUseCase,
     AuthorizeMicrosoftEmailUseCase,
+    BackfillFxRatesUseCase,
     BootstrapImportUseCase,
     BuildReportSectionsUseCase,
     DemoDataUseCase,
@@ -148,6 +149,56 @@ def compose_database_migration() -> MigrateDatabaseUseCase:
     if not settings.migration_source_url:
         raise ValueError("PAMS_MIGRATION_SOURCE_URL is required for database migration")
     return MigrateDatabaseUseCase(settings.migration_source_url, settings.database_url)
+
+
+@contextmanager
+def compose_fx_backfill(
+    database_override: Path | None = None,
+    *,
+    verbose: bool = False,
+) -> Iterator[BackfillFxRatesUseCase]:
+    """Compose bounded historical FX ingestion without portfolio workflows."""
+    settings = get_settings()
+    configure_logging(
+        "DEBUG" if verbose else settings.log_level,
+        load_logging_config().format,
+    )
+    if settings.fx_provider != "alphavantage":
+        raise ValueError(
+            "PAMS_FX_PROVIDER must be alphavantage for historical FX backfill"
+        )
+    alpha_key = (
+        settings.alpha_vantage_api_key.get_secret_value()
+        if settings.alpha_vantage_api_key is not None
+        else None
+    )
+    if not alpha_key:
+        raise ValueError("PAMS_ALPHA_VANTAGE_API_KEY is required for FX backfill")
+    database_url = database_url_for_override(database_override, settings.database_url)
+    if (
+        database_url.startswith("sqlite:///")
+        and not resolve_sqlite_path(database_url).exists()
+    ):
+        raise ValueError(
+            f"Database does not exist: {resolve_sqlite_path(database_url)}"
+        )
+    database = open_database(database_url)
+    try:
+        repositories = create_repositories(database.backend, database.connection)
+        transport = UrllibJSONDocumentTransport(
+            timeout_seconds=settings.market_http_timeout_seconds,
+            attempts=settings.market_http_attempts,
+            provider_name="Alpha Vantage",
+        )
+        provider = AlphaVantageFXRateProvider(alpha_key, transport)
+        yield BackfillFxRatesUseCase(
+            provider,
+            repositories.fx_rates,
+            repositories.market_data_uow,
+            database.display_url,
+        )
+    finally:
+        database.connection.close()
 
 
 @contextmanager

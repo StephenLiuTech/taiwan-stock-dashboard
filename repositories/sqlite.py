@@ -800,6 +800,46 @@ class SQLiteFxRateRepository:
         if self.auto_commit:
             self.connection.commit()
 
+    def insert_if_absent(self, rate: FxRate) -> bool:
+        """Insert one observation without modifying an existing source row."""
+        cursor = self.connection.execute(
+            """INSERT INTO fx_rates VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(base_currency, quote_currency, rate_date, source)
+            DO NOTHING""",
+            (
+                rate.base_currency.value,
+                rate.quote_currency.value,
+                rate.rate_date.isoformat(),
+                str(rate.rate),
+                rate.source,
+                rate.fetched_at.isoformat(),
+            ),
+        )
+        if self.auto_commit:
+            self.connection.commit()
+        return cursor.rowcount == 1
+
+    def list_between(
+        self,
+        base_currency: str,
+        quote_currency: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[FxRate]:
+        rows = self.connection.execute(
+            """SELECT * FROM fx_rates
+            WHERE base_currency = ? AND quote_currency = ?
+              AND rate_date BETWEEN ? AND ?
+            ORDER BY rate_date, source""",
+            (
+                base_currency,
+                quote_currency,
+                start_date.isoformat(),
+                end_date.isoformat(),
+            ),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
     def get_latest_on_or_before(
         self,
         base_currency: str,
@@ -814,6 +854,10 @@ class SQLiteFxRateRepository:
         ).fetchone()
         if row is None:
             return None
+        return self._from_row(row)
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> FxRate:
         values = dict(row)
         values["rate_date"] = date.fromisoformat(values["rate_date"])
         values["rate"] = _decimal(values["rate"])

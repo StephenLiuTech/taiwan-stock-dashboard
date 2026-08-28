@@ -8,6 +8,7 @@ from pams.application.annual_pnl import (
 )
 from pams.application.apply_rebuilt_holdings import ApplyRebuiltHoldingsUseCase
 from pams.application.authorize_email import AuthorizeMicrosoftEmailUseCase
+from pams.application.backfill_fx import BackfillFxRatesUseCase, FxBackfillResult
 from pams.application.bootstrap_import import (
     BootstrapHoldingReconciliation,
     BootstrapImportError,
@@ -120,6 +121,7 @@ __all__ = [
     "AnnualPnlUseCase",
     "ApplyRebuiltHoldingsUseCase",
     "AuthorizeMicrosoftEmailUseCase",
+    "BackfillFxRatesUseCase",
     "BootstrapHoldingReconciliation",
     "BootstrapImportError",
     "BootstrapImportPreview",
@@ -141,6 +143,7 @@ __all__ = [
     "DuplicateTransactionError",
     "EmptyTransactionHistoryError",
     "HoldingChangeAction",
+    "FxBackfillResult",
     "HoldingChangeItem",
     "HoldingChangePlan",
     "HoldingOverview",

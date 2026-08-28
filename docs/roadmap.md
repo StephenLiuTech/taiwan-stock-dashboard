@@ -136,6 +136,7 @@ notifications are not part of v1.0.0.
 - Explicit `investment_cost_events`; no liability-note inference
 - Calendar-year flow reset with historical years retained
 - Historical non-future FX conversion for foreign-currency flows
+- Bounded, insert-only historical USD/TWD provider backfill
 - `pnl realized`, `pnl summary`, and `pnl history` CLI queries
 - Portfolio Trend total, realized, unrealized, and dividend YTD series
 

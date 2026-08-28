@@ -14,7 +14,7 @@ from config import get_settings
 from config.yaml_loader import ConfigurationError
 from core.constants import PROJECT_ROOT
 from database.provider import redact_database_url
-from domain import Market
+from domain import Currency, Market
 from market_data import (
     ProviderDataError,
     SourceDateError,
@@ -54,6 +54,7 @@ from pams.composition import (
     compose_database_migration,
     compose_demo_data,
     compose_email_authorization,
+    compose_fx_backfill,
     compose_ledger_operations,
     compose_operations,
     selected_email_transport,
@@ -112,6 +113,20 @@ def parse_decimal(value: str) -> Decimal:
         raise argparse.ArgumentTypeError("value must be a decimal number") from error
 
 
+def parse_currency_pair(value: str) -> tuple[Currency, Currency]:
+    """Parse one slash-delimited ISO currency pair."""
+    parts = value.strip().upper().split("/")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError("currency pair must use BASE/QUOTE")
+    try:
+        base, quote = (Currency(item) for item in parts)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("unsupported currency pair") from error
+    if base is quote:
+        raise argparse.ArgumentTypeError("currency pair currencies must differ")
+    return base, quote
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the PAMS command parser without side effects."""
     parser = argparse.ArgumentParser(prog="pams")
@@ -135,6 +150,23 @@ def build_parser() -> argparse.ArgumentParser:
         "migrate", help="migrate configured SQLite data to PostgreSQL"
     )
     migrate.add_argument("--verbose", action="store_true")
+    fx = commands.add_parser("fx", help="manage persisted foreign-exchange rates")
+    fx_commands = fx.add_subparsers(dest="fx_command", required=True)
+    fx_backfill = fx_commands.add_parser(
+        "backfill", help="fetch a bounded range of historical daily FX rates"
+    )
+    fx_backfill.add_argument("--pair", required=True, type=parse_currency_pair)
+    fx_backfill.add_argument(
+        "--from", dest="start_date", required=True, type=parse_iso_date
+    )
+    fx_backfill.add_argument(
+        "--to", dest="end_date", required=True, type=parse_iso_date
+    )
+    fx_mode = fx_backfill.add_mutually_exclusive_group(required=True)
+    fx_mode.add_argument("--dry-run", action="store_true")
+    fx_mode.add_argument("--apply", action="store_true")
+    fx_backfill.add_argument("--database", type=Path)
+    fx_backfill.add_argument("--verbose", action="store_true")
     holdings = commands.add_parser("holdings", help="manage projected holdings")
     holding_commands = holdings.add_subparsers(dest="holdings_command", required=True)
     rebuild = holding_commands.add_parser(
@@ -411,6 +443,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             authorization = compose_email_authorization()
             authorization.execute(_show_device_authorization_prompt)
             print("Microsoft email authorization complete; token cache updated.")
+            return int(ExitCode.SUCCESS)
+        if arguments.command == "fx":
+            with compose_fx_backfill(
+                arguments.database, verbose=arguments.verbose
+            ) as use_case:
+                result = use_case.execute(
+                    *arguments.pair,
+                    arguments.start_date,
+                    arguments.end_date,
+                    apply=arguments.apply,
+                )
+            print(_format_fx_backfill(result))
             return int(ExitCode.SUCCESS)
         if (
             arguments.command == "transaction"
@@ -780,6 +824,31 @@ def _format_dividends(items: tuple[object, ...]) -> str:
             f"{values['source']}"
         )
     lines.append(f"Count: {len(items)}")
+    return "\n".join(lines)
+
+
+def _format_fx_backfill(result: object) -> str:
+    """Render provider observations and insert-only persistence counts."""
+    from pams.application import FxBackfillResult
+
+    assert isinstance(result, FxBackfillResult)
+    pair = f"{result.base_currency.value}/{result.quote_currency.value}"
+    lines = [
+        "PAMS Historical FX Backfill",
+        f"Database: {result.database}",
+        f"Pair: {pair}",
+        f"Range: {result.start_date} to {result.end_date}",
+        f"Provider observations: {len(result.observations)}",
+    ]
+    lines.extend(f"  {item.rate_date}: {item.rate}" for item in result.observations)
+    lines.extend(
+        (
+            f"Existing dates: {len(result.existing_dates)}",
+            f"Missing dates: {len(result.missing_dates)}",
+            f"Inserted: {result.inserted}",
+            f"Result: {'applied' if result.applied else 'dry-run; no database writes'}",
+        )
+    )
     return "\n".join(lines)
 
 

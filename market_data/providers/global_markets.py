@@ -38,6 +38,14 @@ class FXRateProvider(Protocol):
 
     def fetch(self, base: Currency, quote: Currency, report_date: date) -> FxRate: ...
 
+    def fetch_between(
+        self,
+        base: Currency,
+        quote: Currency,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[FxRate, ...]: ...
+
 
 class AlphaVantageRequestPacer:
     """Apply one bounded interval between calls sharing an Alpha Vantage key."""
@@ -239,13 +247,43 @@ class AlphaVantageFXRateProvider:
         )
 
     def fetch(self, base: Currency, quote: Currency, report_date: date) -> FxRate:
-        url = f"{self.endpoint}?{urlencode({'function': 'FX_DAILY', 'from_symbol': base.value, 'to_symbol': quote.value, 'outputsize': 'compact', 'apikey': self._api_key})}"
+        series = self._fetch_series(base, quote, outputsize="compact")
+        eligible = _eligible_dates(series, report_date)
+        if not eligible:
+            raise ProviderDataError("No eligible Alpha Vantage FX rate")
+        return self._rate(base, quote, eligible[0], series)
+
+    def fetch_between(
+        self,
+        base: Currency,
+        quote: Currency,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[FxRate, ...]:
+        """Return actual daily observations in one inclusive bounded range."""
+        if start_date > end_date:
+            raise ValueError("FX backfill start date follows end date")
+        series = self._fetch_series(base, quote, outputsize="compact")
+        available = _eligible_dates(series, end_date)
+        if not available or min(available) > start_date:
+            series = self._fetch_series(base, quote, outputsize="full")
+            available = _eligible_dates(series, end_date)
+        selected = sorted(item for item in available if start_date <= item <= end_date)
+        return tuple(self._rate(base, quote, item, series) for item in selected)
+
+    def _fetch_series(
+        self,
+        base: Currency,
+        quote: Currency,
+        *,
+        outputsize: str,
+    ) -> Mapping[str, object]:
+        url = f"{self.endpoint}?{urlencode({'function': 'FX_DAILY', 'from_symbol': base.value, 'to_symbol': quote.value, 'outputsize': outputsize, 'apikey': self._api_key})}"
         for attempt in range(1, self._information_attempts + 1):
             self._pacer.wait()
             document = self._transport.get_document(url)
             try:
-                series = _daily_series(document, "Time Series FX (Daily)")
-                break
+                return _daily_series(document, "Time Series FX (Daily)")
             except ProviderInformationError as error:
                 if attempt == self._information_attempts:
                     raise
@@ -257,12 +295,15 @@ class AlphaVantageFXRateProvider:
                     self._information_attempts,
                     type(error).__name__,
                 )
-        else:
-            raise AssertionError("unreachable")
-        eligible = _eligible_dates(series, report_date)
-        if not eligible:
-            raise ProviderDataError("No eligible Alpha Vantage FX rate")
-        rate_date = eligible[0]
+        raise AssertionError("unreachable")
+
+    def _rate(
+        self,
+        base: Currency,
+        quote: Currency,
+        rate_date: date,
+        series: Mapping[str, object],
+    ) -> FxRate:
         row = series[rate_date.isoformat()]
         if not isinstance(row, Mapping):
             raise ProviderDataError("Alpha Vantage FX row is malformed")

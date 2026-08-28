@@ -321,3 +321,6 @@ derived facts, and explicit dated cost events are the only source of historical
 financing costs. PAMS does not fabricate cash-flow history from liability
 descriptions. Foreign-currency flows retain dated FX provenance and never use a
 future conversion rate.
+Missing historical coverage is repaired only through an explicit bounded
+provider backfill. Existing observations are preserved and market-closure
+dates are never filled with fabricated rates.

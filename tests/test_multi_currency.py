@@ -133,6 +133,76 @@ def test_fx_repository_never_returns_future_rate(
     assert selected.rate == Decimal("30")
 
 
+@pytest.mark.parametrize(
+    ("cutoff", "prior_date"),
+    (
+        (date(2026, 6, 27), date(2026, 6, 26)),  # Saturday
+        (date(2026, 7, 4), date(2026, 7, 3)),  # Market holiday
+    ),
+)
+def test_fx_repository_uses_prior_available_rate_for_non_trading_day(
+    connection: sqlite3.Connection,
+    cutoff: date,
+    prior_date: date,
+) -> None:
+    repository = SQLiteFxRateRepository(connection)
+    repository.upsert(
+        FxRate(
+            base_currency=Currency.USD,
+            quote_currency=Currency.TWD,
+            rate_date=prior_date,
+            rate=Decimal("32.125"),
+            source="fixture",
+        )
+    )
+
+    selected = repository.get_latest_on_or_before("USD", "TWD", cutoff)
+
+    assert selected is not None
+    assert selected.rate_date == prior_date
+    assert selected.rate == Decimal("32.125")
+
+
+def test_fx_repository_prefers_exact_date_rate(connection: sqlite3.Connection) -> None:
+    repository = SQLiteFxRateRepository(connection)
+    for rate_date, value in (
+        (date(2026, 6, 26), "32.125"),
+        (date(2026, 6, 27), "32.250"),
+    ):
+        repository.upsert(
+            FxRate(
+                base_currency=Currency.USD,
+                quote_currency=Currency.TWD,
+                rate_date=rate_date,
+                rate=Decimal(value),
+                source="fixture",
+            )
+        )
+
+    selected = repository.get_latest_on_or_before("USD", "TWD", date(2026, 6, 27))
+
+    assert selected is not None
+    assert selected.rate_date == date(2026, 6, 27)
+    assert selected.rate == Decimal("32.250")
+
+
+def test_fx_repository_does_not_use_future_rate_when_no_prior_rate_exists(
+    connection: sqlite3.Connection,
+) -> None:
+    repository = SQLiteFxRateRepository(connection)
+    repository.upsert(
+        FxRate(
+            base_currency=Currency.USD,
+            quote_currency=Currency.TWD,
+            rate_date=date(2026, 6, 29),
+            rate=Decimal("32.250"),
+            source="fixture",
+        )
+    )
+
+    assert repository.get_latest_on_or_before("USD", "TWD", date(2026, 6, 27)) is None
+
+
 @pytest.mark.parametrize("value", ["0", "-1"])
 def test_fx_rate_rejects_non_positive_values(value: str) -> None:
     with pytest.raises(ValueError):
