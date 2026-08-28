@@ -6,6 +6,7 @@ from typing import Protocol
 
 from domain import (
     AnnualPnlSnapshot,
+    CorporateAction,
     DailySnapshot,
     Dividend,
     DividendEvent,
@@ -60,6 +61,20 @@ class TransactionRepository(Protocol):
     def add(self, transaction: Transaction) -> None: ...
     def upsert(self, transaction: Transaction) -> None: ...
     def delete(self, transaction_id: str) -> None: ...
+
+
+class CorporateActionRepository(Protocol):
+    """Persistence for replayable non-cash quantity conversions."""
+
+    def list_all(self) -> list[CorporateAction]: ...
+    def list_filtered(
+        self,
+        *,
+        symbol: str | None = None,
+        end_date: date | None = None,
+    ) -> list[CorporateAction]: ...
+    def get_by_id(self, action_id: str) -> CorporateAction | None: ...
+    def add(self, action: CorporateAction) -> None: ...
 
 
 class DividendRepository(Protocol):

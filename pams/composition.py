@@ -54,6 +54,7 @@ from market_data.transport import (
     UrllibTextFormTransport,
 )
 from pams.application import (
+    AddCorporateActionUseCase,
     AddTransactionUseCase,
     AnalyzePortfolioUseCase,
     AnnualPnlUseCase,
@@ -108,6 +109,7 @@ class ApplicationContext:
     portfolio_history: PortfolioHistoryUseCase | None = None
     apply_rebuilt_holdings: ApplyRebuiltHoldingsUseCase | None = None
     add_transaction: AddTransactionUseCase | None = None
+    add_corporate_action: AddCorporateActionUseCase | None = None
     list_transactions: ListTransactionsUseCase | None = None
     query_holdings: QueryHoldingsUseCase | None = None
     valuate_portfolio: ValuatePortfolioUseCase | None = None
@@ -366,6 +368,10 @@ def compose_daily_report(
                     risk_market_warning=settings.risk_market_warning_pct / 100,
                 ),
                 liabilities=context.repositories.liabilities,
+                corporate_actions=context.repositories.corporate_actions,
+                transaction_engine=TransactionEngine(
+                    context.repositories.corporate_actions.list_all()
+                ),
             ),
             annual_pnl=context.annual_pnl,
             annual_snapshots=context.repositories.annual_pnl_snapshots,
@@ -697,7 +703,9 @@ def _compose(
         position_snapshots = repositories.position_snapshots
         quotes = repositories.price_quotes
         transaction_repository = repositories.transactions
-        transaction_engine = TransactionEngine()
+        transaction_engine = TransactionEngine(
+            repositories.corporate_actions.list_all()
+        )
         annual_pnl = AnnualPnlUseCase(
             transaction_repository,
             snapshots,
@@ -706,6 +714,7 @@ def _compose(
             repositories.investment_cost_events,
             repositories.fx_rates,
             transaction_engine=transaction_engine,
+            corporate_actions=repositories.corporate_actions,
         )
         valuate_portfolio = ValuatePortfolioUseCase(
             holdings,
@@ -771,12 +780,20 @@ def _compose(
             verify_system=VerifySystemUseCase(verification_service),
             portfolio_history=PortfolioHistoryUseCase(snapshots),
             apply_rebuilt_holdings=ApplyRebuiltHoldingsUseCase(
-                repositories.holding_rebuild_uow, holding_metadata
+                repositories.holding_rebuild_uow,
+                holding_metadata,
+                transaction_engine,
             ),
             add_transaction=AddTransactionUseCase(
                 transaction_repository,
                 repositories.margin_transaction_uow,
                 settings.margin_self_funding_ratio,
+                transaction_engine,
+            ),
+            add_corporate_action=AddCorporateActionUseCase(
+                repositories.corporate_actions,
+                transaction_repository,
+                transaction_engine,
             ),
             list_transactions=ListTransactionsUseCase(transaction_repository),
             query_holdings=QueryHoldingsUseCase(
@@ -784,6 +801,7 @@ def _compose(
                 holdings,
                 quotes,
                 transaction_engine,
+                corporate_actions=repositories.corporate_actions,
             ),
             valuate_portfolio=valuate_portfolio,
             analyze_portfolio=AnalyzePortfolioUseCase(

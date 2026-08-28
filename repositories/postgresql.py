@@ -2,6 +2,7 @@
 
 from repositories.sqlite import (
     SQLiteAnnualPnlSnapshotRepository,
+    SQLiteCorporateActionRepository,
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
     SQLiteFxRateRepository,
@@ -15,6 +16,10 @@ from repositories.sqlite import (
     SQLiteTransactionRepository,
     SQLiteWatchlistRepository,
 )
+
+
+class PostgreSQLCorporateActionRepository(SQLiteCorporateActionRepository):
+    """Persist replayable corporate actions in PostgreSQL."""
 
 
 class PostgreSQLAnnualPnlSnapshotRepository(SQLiteAnnualPnlSnapshotRepository):

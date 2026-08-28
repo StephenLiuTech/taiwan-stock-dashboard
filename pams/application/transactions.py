@@ -65,11 +65,12 @@ class AddTransactionUseCase:
         transactions: TransactionRepository,
         margin_unit_of_work: MarginTransactionUnitOfWork | None = None,
         margin_self_funding_ratio: Decimal = Decimal("0.40"),
+        transaction_engine: TransactionEngine | None = None,
     ) -> None:
         self.transactions = transactions
         self.margin_unit_of_work = margin_unit_of_work
         self.margin_service = MarginFinancingService(margin_self_funding_ratio)
-        self.transaction_engine = TransactionEngine()
+        self.transaction_engine = transaction_engine or TransactionEngine()
 
     def execute(self, command: AddTransactionCommand) -> TransactionRecord:
         market = Market(command.market)

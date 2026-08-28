@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from domain import (
     AnnualPnlSnapshot,
+    CorporateAction,
     DailySnapshot,
     Dividend,
     DividendEvent,
@@ -187,6 +188,72 @@ class SQLiteHoldingRepository:
         values["created_at"] = datetime.fromisoformat(values["created_at"])
         values["updated_at"] = datetime.fromisoformat(values["updated_at"])
         return Holding.model_validate(values)
+
+
+class SQLiteCorporateActionRepository:
+    """Persist corporate actions without interpreting their accounting."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def list_all(self) -> list[CorporateAction]:
+        return self.list_filtered()
+
+    def list_filtered(
+        self,
+        *,
+        symbol: str | None = None,
+        end_date: date | None = None,
+    ) -> list[CorporateAction]:
+        clauses: list[str] = []
+        parameters: list[str] = []
+        if symbol is not None:
+            clauses.append("symbol = ?")
+            parameters.append(symbol.strip().upper())
+        if end_date is not None:
+            clauses.append("effective_date <= ?")
+            parameters.append(end_date.isoformat())
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self.connection.execute(
+            f"SELECT * FROM corporate_actions{where} " "ORDER BY effective_date, id",
+            parameters,
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def get_by_id(self, action_id: str) -> CorporateAction | None:
+        row = self.connection.execute(
+            "SELECT * FROM corporate_actions WHERE id = ?", (action_id,)
+        ).fetchone()
+        return self._from_row(row) if row else None
+
+    def add(self, action: CorporateAction) -> None:
+        self.connection.execute(
+            """INSERT INTO corporate_actions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                action.id,
+                action.symbol,
+                action.market.value,
+                action.effective_date.isoformat(),
+                str(action.quantity_multiplier),
+                action.source,
+                action.reference,
+                action.notes,
+                action.created_at.isoformat(),
+            ),
+        )
+        if self.auto_commit:
+            self.connection.commit()
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> CorporateAction:
+        values = dict(row)
+        values["effective_date"] = date.fromisoformat(values["effective_date"])
+        values["quantity_multiplier"] = _decimal(values["quantity_multiplier"])
+        values["created_at"] = datetime.fromisoformat(values["created_at"])
+        return CorporateAction.model_validate(values)
 
 
 class SQLiteTransactionRepository:

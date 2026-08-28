@@ -8,6 +8,7 @@ from repositories.holding_rebuild_uow import (
 )
 from repositories.interfaces import (
     AnnualPnlSnapshotRepository,
+    CorporateActionRepository,
     DividendEventRepository,
     DividendRepository,
     FxRateRepository,
@@ -27,6 +28,7 @@ from repositories.interfaces import (
 from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
 from repositories.postgresql import (
     PostgreSQLAnnualPnlSnapshotRepository,
+    PostgreSQLCorporateActionRepository,
     PostgreSQLDividendEventRepository,
     PostgreSQLDividendRepository,
     PostgreSQLFxRateRepository,
@@ -47,6 +49,7 @@ from repositories.postgresql_uow import (
 )
 from repositories.sqlite import (
     SQLiteAnnualPnlSnapshotRepository,
+    SQLiteCorporateActionRepository,
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
     SQLiteFxRateRepository,
@@ -68,6 +71,7 @@ class RepositoryBundle:
 
     holdings: HoldingRepository
     transactions: TransactionRepository
+    corporate_actions: CorporateActionRepository
     dividends: DividendRepository
     dividend_events: DividendEventRepository
     fx_rates: FxRateRepository
@@ -90,6 +94,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
         return RepositoryBundle(
             SQLiteHoldingRepository(connection),
             SQLiteTransactionRepository(connection),
+            SQLiteCorporateActionRepository(connection),
             SQLiteDividendRepository(connection),
             SQLiteDividendEventRepository(connection),
             SQLiteFxRateRepository(connection),
@@ -109,6 +114,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
         return RepositoryBundle(
             PostgreSQLHoldingRepository(connection),
             PostgreSQLTransactionRepository(connection),
+            PostgreSQLCorporateActionRepository(connection),
             PostgreSQLDividendRepository(connection),
             PostgreSQLDividendEventRepository(connection),
             PostgreSQLFxRateRepository(connection),

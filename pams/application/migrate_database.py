@@ -9,6 +9,7 @@ MIGRATION_TABLES = (
     "holdings",
     "liabilities",
     "transactions",
+    "corporate_actions",
     "dividends",
     "dividend_events",
     "price_quotes",

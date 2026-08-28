@@ -11,6 +11,7 @@ from pams.application.exceptions import (
     ValuationRepositoryError,
 )
 from repositories.interfaces import (
+    CorporateActionRepository,
     HoldingRepository,
     PriceQuoteRepository,
     TransactionRepository,
@@ -28,12 +29,14 @@ class QueryHoldingsUseCase:
         quotes: PriceQuoteRepository,
         transaction_engine: TransactionEngine | None = None,
         valuation_engine: ValuationEngine | None = None,
+        corporate_actions: CorporateActionRepository | None = None,
     ) -> None:
         self.transactions = transactions
         self.holdings = holdings
         self.quotes = quotes
         self.transaction_engine = transaction_engine or TransactionEngine()
         self.valuation_engine = valuation_engine or ValuationEngine()
+        self.corporate_actions = corporate_actions
 
     def execute(
         self, symbol: str | None = None, as_of_date: date | None = None
@@ -46,13 +49,22 @@ class QueryHoldingsUseCase:
                 else self.transactions.list_all()
             )
             persisted_holdings = self.holdings.list_all()
+            actions = (
+                self.corporate_actions.list_filtered(end_date=as_of_date)
+                if self.corporate_actions is not None and as_of_date is not None
+                else (
+                    self.corporate_actions.list_all()
+                    if self.corporate_actions is not None
+                    else None
+                )
+            )
         except Exception as error:
             raise ValuationRepositoryError(
                 "Unable to load transaction-derived holdings"
             ) from error
         try:
             projected = self.transaction_engine.project_transaction_holdings(
-                transactions, persisted_holdings
+                transactions, persisted_holdings, actions
             )
         except TransactionEngineError as error:
             raise InvalidHoldingHistoryError(str(error)) from error

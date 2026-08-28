@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -28,6 +28,14 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_transactions_symbol_date ON transactions(symbol, trade_date);
+CREATE TABLE IF NOT EXISTS corporate_actions (
+    id TEXT PRIMARY KEY, symbol TEXT NOT NULL, market TEXT NOT NULL,
+    effective_date TEXT NOT NULL, quantity_multiplier TEXT NOT NULL,
+    source TEXT NOT NULL, reference TEXT, notes TEXT, created_at TEXT NOT NULL,
+    UNIQUE(symbol, market, effective_date, source, reference)
+);
+CREATE INDEX IF NOT EXISTS ix_corporate_actions_symbol_date
+    ON corporate_actions(symbol, market, effective_date);
 CREATE TABLE IF NOT EXISTS dividends (
     id TEXT PRIMARY KEY, symbol TEXT NOT NULL, market TEXT NOT NULL,
     ex_dividend_date TEXT NOT NULL, payment_date TEXT, amount_per_share TEXT NOT NULL,

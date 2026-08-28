@@ -18,6 +18,7 @@ from domain.ledger import (
     TransactionPosition,
 )
 from domain.models import (
+    CorporateAction,
     DailyPortfolioPerformance,
     DailyPositionPerformance,
     DailySnapshot,
@@ -65,6 +66,7 @@ from domain.report_sections import (
 from domain.valuation import HoldingValuation, PortfolioValuation
 
 __all__ = [
+    "CorporateAction",
     "Currency",
     "AllocationItem",
     "CollateralHoldingReference",

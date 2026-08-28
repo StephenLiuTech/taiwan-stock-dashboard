@@ -20,6 +20,7 @@ from repositories import (
     SnapshotRepository,
     TransactionRepository,
 )
+from repositories.interfaces import CorporateActionRepository
 from services import AnnualPnlEngine, TransactionEngine
 
 
@@ -48,6 +49,7 @@ class AnnualPnlUseCase:
         fx_rates: FxRateRepository,
         engine: AnnualPnlEngine | None = None,
         transaction_engine: TransactionEngine | None = None,
+        corporate_actions: CorporateActionRepository | None = None,
     ) -> None:
         self._transactions = transactions
         self._daily_snapshots = daily_snapshots
@@ -57,6 +59,7 @@ class AnnualPnlUseCase:
         self._fx_rates = fx_rates
         self._engine = engine or AnnualPnlEngine()
         self._transaction_engine = transaction_engine or TransactionEngine()
+        self._corporate_actions = corporate_actions
 
     def ensure(
         self,
@@ -81,6 +84,11 @@ class AnnualPnlUseCase:
         start = date(snapshot_date.year, 1, 1)
         costs = self._costs.list_between_dates(start, snapshot_date)
         rates = self._historical_rates(snapshot_date, transactions, dividends, costs)
+        actions = (
+            self._corporate_actions.list_filtered(end_date=snapshot_date)
+            if self._corporate_actions is not None
+            else None
+        )
         result = self._engine.calculate(
             snapshot_date,
             transactions,
@@ -88,6 +96,7 @@ class AnnualPnlUseCase:
             dividends,
             costs,
             rates,
+            actions,
         )
         if persist:
             self._annual_snapshots.add(result)
@@ -97,7 +106,14 @@ class AnnualPnlUseCase:
         self, *, year: int | None = None, symbol: str | None = None
     ) -> tuple[RealizedSale, ...]:
         """Derive durable sale history from the complete transaction ledger."""
-        ledger = self._transaction_engine.build_ledger(self._transactions.list_all())
+        actions = (
+            self._corporate_actions.list_all()
+            if self._corporate_actions is not None
+            else None
+        )
+        ledger = self._transaction_engine.build_ledger(
+            self._transactions.list_all(), actions
+        )
         normalized = symbol.strip().upper() if symbol else None
         return tuple(
             sale

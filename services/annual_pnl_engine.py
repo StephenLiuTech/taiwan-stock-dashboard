@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from domain import (
     AnnualPnlSnapshot,
+    CorporateAction,
     Currency,
     DividendEvent,
     InvestmentCostEvent,
@@ -35,9 +36,15 @@ class AnnualPnlEngine:
         dividends: list[DividendEvent],
         costs: list[InvestmentCostEvent],
         exchange_rates: Mapping[tuple[Currency, date], Decimal],
+        corporate_actions: list[CorporateAction] | None = None,
     ) -> AnnualPnlSnapshot:
         eligible = [item for item in transactions if item.trade_date <= snapshot_date]
-        ledger = self.transactions.build_ledger(eligible)
+        eligible_actions = (
+            [item for item in corporate_actions if item.effective_date <= snapshot_date]
+            if corporate_actions is not None
+            else None
+        )
+        ledger = self.transactions.build_ledger(eligible, eligible_actions)
         realized = sum(
             (
                 self._convert(
@@ -80,7 +87,11 @@ class AnnualPnlEngine:
             else:
                 other += amount
         dividends_ytd = self._dividends(
-            snapshot_date, eligible, dividends, exchange_rates
+            snapshot_date,
+            eligible,
+            dividends,
+            exchange_rates,
+            eligible_actions,
         )
         total = realized + unrealized_pnl + dividends_ytd - financing - other
         return AnnualPnlSnapshot(
@@ -100,6 +111,7 @@ class AnnualPnlEngine:
         transactions: list[Transaction],
         dividends: list[DividendEvent],
         exchange_rates: Mapping[tuple[Currency, date], Decimal],
+        corporate_actions: list[CorporateAction] | None,
     ) -> Decimal:
         total = Decimal("0")
         for event in dividends:
@@ -115,7 +127,16 @@ class AnnualPnlEngine:
                     item
                     for item in transactions
                     if item.trade_date < event.ex_dividend_date
-                ]
+                ],
+                (
+                    [
+                        item
+                        for item in corporate_actions
+                        if item.effective_date < event.ex_dividend_date
+                    ]
+                    if corporate_actions is not None
+                    else None
+                ),
             )
             quantity = sum(
                 (

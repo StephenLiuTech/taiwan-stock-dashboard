@@ -32,10 +32,12 @@ from pams.annual_pnl_reporting import (
     format_realized_sales,
 )
 from pams.application import (
+    AddCorporateActionCommand,
     AddTransactionCommand,
     AnalyticsDataUnavailableError,
     AnalyticsRepositoryError,
     BootstrapImportError,
+    CorporateActionError,
     DailyReportDeliveryError,
     DailyReportSnapshotMissingError,
     DatabaseMigrationError,
@@ -259,6 +261,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="confirm a non-interactive production apply",
     )
+    corporate_action = commands.add_parser(
+        "corporate-action", help="record non-cash quantity conversions"
+    )
+    corporate_commands = corporate_action.add_subparsers(
+        dest="corporate_action_command", required=True
+    )
+    corporate_add = corporate_commands.add_parser(
+        "add", help="record a split or reverse split"
+    )
+    corporate_add.add_argument("--symbol", required=True)
+    corporate_add.add_argument(
+        "--market", required=True, choices=("TWSE", "TPEX", "US")
+    )
+    corporate_add.add_argument("--effective-date", required=True, type=parse_iso_date)
+    corporate_add.add_argument("--ratio", required=True, type=parse_decimal)
+    corporate_add.add_argument("--source", required=True)
+    corporate_add.add_argument("--reference")
+    corporate_add.add_argument("--notes")
+    corporate_add.add_argument("--database", type=Path)
+    corporate_add.add_argument("--verbose", action="store_true")
     watchlist = commands.add_parser("watchlist", help="manage watchlist entries")
     watchlist_commands = watchlist.add_subparsers(
         dest="watchlist_command", required=True
@@ -410,6 +432,8 @@ def _error_exit_code(error: Exception) -> ExitCode:
         return ExitCode.SECURITY_ERROR
     if isinstance(error, BootstrapImportError):
         return ExitCode.SECURITY_ERROR
+    if isinstance(error, CorporateActionError):
+        return ExitCode.SECURITY_ERROR
     if isinstance(error, WatchlistError):
         return ExitCode.SECURITY_ERROR
     if isinstance(error, DividendEventError):
@@ -497,6 +521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.command == "transaction"
                 and arguments.transaction_command == "add"
             )
+            or arguments.command == "corporate-action"
             or (
                 arguments.command == "watchlist"
                 and arguments.watchlist_command in {"add", "remove"}
@@ -659,6 +684,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     format_transaction_list(result, json_output=arguments.json_output)
                 )
+                return int(ExitCode.SUCCESS)
+            if arguments.command == "corporate-action":
+                assert application.add_corporate_action is not None
+                action = application.add_corporate_action.execute(
+                    AddCorporateActionCommand(
+                        symbol=arguments.symbol,
+                        market=Market(
+                            {"TWSE": "TWSE", "TPEX": "TPEx", "US": "US"}[
+                                arguments.market
+                            ]
+                        ),
+                        effective_date=arguments.effective_date,
+                        quantity_multiplier=arguments.ratio,
+                        source=arguments.source,
+                        reference=arguments.reference,
+                        notes=arguments.notes,
+                    )
+                )
+                print("PAMS Corporate Action")
+                print(f"Symbol: {action.symbol}")
+                print(f"Market: {action.market.value}")
+                print(f"Effective date: {action.effective_date.isoformat()}")
+                print(f"Quantity multiplier: {action.quantity_multiplier}")
+                print(f"Source: {action.source}")
                 return int(ExitCode.SUCCESS)
             if arguments.command == "watchlist":
                 assert application.watchlist is not None

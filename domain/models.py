@@ -109,6 +109,19 @@ class Transaction(SymbolModel):
         return self
 
 
+class CorporateAction(SymbolModel):
+    """A non-cash quantity conversion that preserves position cost basis."""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    market: Market
+    effective_date: date
+    quantity_multiplier: Decimal = Field(gt=0)
+    source: str = Field(min_length=1, max_length=128)
+    reference: str | None = Field(default=None, max_length=256)
+    notes: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class WatchlistItem(SymbolModel):
     """A manually maintained security of interest without advice semantics."""
 

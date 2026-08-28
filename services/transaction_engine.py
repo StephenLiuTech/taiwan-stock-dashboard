@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from domain import (
+    CorporateAction,
     Currency,
     Holding,
     HoldingType,
@@ -55,6 +56,9 @@ class _PositionState:
 class TransactionEngine:
     """Build moving-weighted-average positions from immutable transaction input."""
 
+    def __init__(self, corporate_actions: list[CorporateAction] | None = None) -> None:
+        self.corporate_actions = tuple(corporate_actions or ())
+
     @staticmethod
     def summarize_expenses(
         transactions: list[Transaction],
@@ -80,7 +84,11 @@ class TransactionEngine:
             total_taxes=sum((item.taxes for item in transactions), Decimal("0")),
         )
 
-    def build_ledger(self, transactions: list[Transaction]) -> PortfolioLedger:
+    def build_ledger(
+        self,
+        transactions: list[Transaction],
+        corporate_actions: list[CorporateAction] | None = None,
+    ) -> PortfolioLedger:
         """Process transactions deterministically without mutating the input list."""
         states: dict[PositionKey, _PositionState] = {}
         total_realized_pnl = Decimal("0")
@@ -88,15 +96,28 @@ class TransactionEngine:
         total_sell_fees = Decimal("0")
         total_taxes = Decimal("0")
         realized_sales: list[RealizedSale] = []
-        ordered = sorted(
-            transactions,
-            key=lambda item: (
+        events: list[tuple[object, int, str, Transaction | CorporateAction]] = [
+            (
                 item.trade_date,
-                0 if item.transaction_type is TransactionType.BUY else 1,
+                0 if item.transaction_type is TransactionType.BUY else 2,
                 item.id,
-            ),
+                item,
+            )
+            for item in transactions
+        ]
+        events.extend(
+            (item.effective_date, 1, item.id, item)
+            for item in (
+                list(self.corporate_actions)
+                if corporate_actions is None
+                else corporate_actions
+            )
         )
-        for transaction in ordered:
+        for _, _, _, event in sorted(events, key=lambda item: item[:3]):
+            if isinstance(event, CorporateAction):
+                self._apply_corporate_action(states, event)
+                continue
+            transaction = event
             self._validate_transaction(transaction)
             key = (transaction.symbol, transaction.market, transaction.currency)
             state = states.setdefault(key, _PositionState())
@@ -182,6 +203,24 @@ class TransactionEngine:
             tuple(realized_sales),
         )
 
+    @staticmethod
+    def _apply_corporate_action(
+        states: dict[PositionKey, _PositionState], action: CorporateAction
+    ) -> None:
+        matching = [
+            (key, state)
+            for key, state in states.items()
+            if key[0] == action.symbol and key[1] is action.market
+        ]
+        if len(matching) != 1 or matching[0][1].quantity <= 0:
+            raise InvalidTransactionHistoryError(
+                f"Corporate action requires one active holding for {action.symbol} "
+                f"in action {action.id}"
+            )
+        _, state = matching[0]
+        state.quantity *= action.quantity_multiplier
+        state.average_cost = state.cost_basis / state.quantity
+
     def project_holdings(
         self,
         ledger: PortfolioLedger,
@@ -236,11 +275,14 @@ class TransactionEngine:
         self,
         transactions: list[Transaction],
         existing_holdings: list[Holding],
+        corporate_actions: list[CorporateAction] | None = None,
     ) -> tuple[Holding, ...]:
         """Overlay transaction-derived positions on holdings without ledger history."""
         if not transactions:
             return tuple(existing_holdings)
-        projected = self.project_transaction_holdings(transactions, existing_holdings)
+        projected = self.project_transaction_holdings(
+            transactions, existing_holdings, corporate_actions
+        )
         existing_by_key = {
             (holding.symbol, holding.market, holding.currency): holding
             for holding in existing_holdings
@@ -269,6 +311,7 @@ class TransactionEngine:
         self,
         transactions: list[Transaction],
         existing_holdings: list[Holding],
+        corporate_actions: list[CorporateAction] | None = None,
     ) -> tuple[Holding, ...]:
         """Project only active positions represented by transaction history."""
         if not transactions:
@@ -287,7 +330,7 @@ class TransactionEngine:
                 key,
                 HoldingProjectionMetadata(transaction.symbol, HoldingType.STOCK),
             )
-        ledger = self.build_ledger(transactions)
+        ledger = self.build_ledger(transactions, corporate_actions)
         return self.project_holdings(ledger, metadata, existing_holdings)
 
     @staticmethod

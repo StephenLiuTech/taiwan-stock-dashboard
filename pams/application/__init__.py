@@ -16,6 +16,11 @@ from pams.application.bootstrap_import import (
     BootstrapImportUseCase,
     BootstrapTransactionPreview,
 )
+from pams.application.corporate_actions import (
+    AddCorporateActionCommand,
+    AddCorporateActionUseCase,
+    CorporateActionError,
+)
 from pams.application.demo_data import DemoDataUseCase
 from pams.application.dividends import (
     DividendEventError,
@@ -108,10 +113,13 @@ from pams.application.watchlist import (
 )
 
 __all__ = [
+    "AddCorporateActionCommand",
+    "AddCorporateActionUseCase",
     "AddTransactionCommand",
     "AddTransactionUseCase",
     "ApplicationError",
     "AmbiguousHoldingSymbolError",
+    "CorporateActionError",
     "AnalyticsDataUnavailableError",
     "AnalyticsProcessingError",
     "AnalyticsRepositoryError",

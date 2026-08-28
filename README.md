@@ -39,6 +39,16 @@ Historical USD flows use the latest persisted USD/TWD rate on or before each
 flow date. A missing eligible historical rate is an error; no future rate is
 fabricated.
 
+Schema v10 records splits, reverse splits, and ETF quantity conversions as
+first-class non-cash events. They preserve total cost basis and create no
+trade, cash flow, fee, tax, expense, dividend, or financing change:
+
+```bash
+python -m pams corporate-action add --symbol 00631L --market TWSE \
+  --effective-date 2026-03-31 --ratio 22 --source brokerage \
+  --reference statement-20260828 --notes "1:22 quantity adjustment"
+```
+
 The one-time broker-statement reconciliation is read-only unless a separately
 reviewed apply workflow is introduced:
 

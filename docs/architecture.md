@@ -696,3 +696,13 @@ are not subtracted again. `investment_cost_events` contains explicit dated
 financing or other expenses only; liability notes are never parsed into
 historical costs. Foreign-currency flows use the latest persisted FX rate on or
 before their effective date and fail safely when no eligible rate exists.
+
+## Corporate-action ledger events (schema v10)
+
+`corporate_actions` is a separate persisted event grain for stock splits,
+reverse splits, and equivalent ETF quantity conversions. The Transaction
+Engine replays same-day BUY, corporate action, then SELL. A positive Decimal
+multiplier changes only active quantity, preserves total cost basis exactly,
+and recalculates average cost. It creates no realized P/L, cash flow, fee, tax,
+expense, dividend, or financing change. An action against no active position
+is invalid; corporate actions never masquerade as BUY or SELL transactions.

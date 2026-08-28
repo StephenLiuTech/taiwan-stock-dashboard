@@ -26,6 +26,7 @@ from repositories import (
     TransactionRepository,
     WatchlistRepository,
 )
+from repositories.interfaces import CorporateActionRepository
 from services import NewsService, ReportSectionService, TransactionEngine
 
 LOGGER = logging.getLogger(__name__)
@@ -81,6 +82,8 @@ class BuildReportSectionsUseCase:
         ai_news_provider: NewsProvider | None = None,
         semiconductor_news_provider: NewsProvider | None = None,
         liabilities: LiabilityRepository | None = None,
+        corporate_actions: CorporateActionRepository | None = None,
+        transaction_engine: TransactionEngine | None = None,
     ) -> None:
         self.holdings = holdings
         self.transactions = transactions
@@ -93,6 +96,8 @@ class BuildReportSectionsUseCase:
         self.ai_news_provider = ai_news_provider
         self.semiconductor_news_provider = semiconductor_news_provider
         self.liabilities = liabilities
+        self.corporate_actions = corporate_actions
+        self.transaction_engine = transaction_engine or TransactionEngine()
 
     def execute(
         self,
@@ -220,7 +225,8 @@ class BuildReportSectionsUseCase:
         )
 
     def _eligible_quantities(self, dividends, transactions, holdings):
-        engine = TransactionEngine()
+        corporate_actions = getattr(self, "corporate_actions", None)
+        transaction_engine = getattr(self, "transaction_engine", TransactionEngine())
         result = {}
         for dividend in dividends:
             filtered = [
@@ -228,7 +234,16 @@ class BuildReportSectionsUseCase:
                 for item in transactions
                 if item.trade_date < dividend.ex_dividend_date
             ]
-            projected = engine.project_transaction_holdings(filtered, holdings)
+            actions = (
+                corporate_actions.list_filtered(
+                    end_date=dividend.ex_dividend_date - timedelta(days=1)
+                )
+                if corporate_actions is not None
+                else None
+            )
+            projected = transaction_engine.project_transaction_holdings(
+                filtered, holdings, actions
+            )
             result[(dividend.symbol, dividend.ex_dividend_date)] = sum(
                 (
                     item.quantity

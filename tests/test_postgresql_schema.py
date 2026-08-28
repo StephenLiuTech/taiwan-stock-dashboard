@@ -91,6 +91,19 @@ def test_schema_8_to_9_adds_only_annual_pnl_tables() -> None:
     assert connection.commits == 1
 
 
+def test_schema_9_to_10_adds_only_corporate_actions() -> None:
+    connection = PostgreSQLConnectionStub(9)
+
+    initialize_postgresql_schema(connection)  # type: ignore[arg-type]
+
+    sql = [statement for statement, _ in connection.statements]
+    assert any("CREATE TABLE IF NOT EXISTS corporate_actions" in item for item in sql)
+    assert any("ix_corporate_actions_symbol_date" in item for item in sql)
+    assert not any("ALTER TABLE transactions" in item for item in sql)
+    assert any(parameters == (10,) for _, parameters in connection.statements)
+    assert connection.commits == 1
+
+
 def test_postgresql_schema_upgrade_rolls_back_on_failure() -> None:
     connection = PostgreSQLConnectionStub(7, fail_on="financed_quantity")
 
@@ -102,7 +115,7 @@ def test_postgresql_schema_upgrade_rolls_back_on_failure() -> None:
 
 
 def test_newer_postgresql_schema_is_rejected_without_commit() -> None:
-    connection = PostgreSQLConnectionStub(10)
+    connection = PostgreSQLConnectionStub(11)
 
     with pytest.raises(RuntimeError, match="newer than supported"):
         initialize_postgresql_schema(connection)  # type: ignore[arg-type]

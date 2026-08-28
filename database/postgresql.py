@@ -126,6 +126,14 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_transactions_symbol_date ON transactions(symbol, trade_date);
+CREATE TABLE IF NOT EXISTS corporate_actions (
+    id TEXT PRIMARY KEY, symbol TEXT NOT NULL, market TEXT NOT NULL,
+    effective_date TEXT NOT NULL, quantity_multiplier TEXT NOT NULL,
+    source TEXT NOT NULL, reference TEXT, notes TEXT, created_at TEXT NOT NULL,
+    UNIQUE(symbol, market, effective_date, source, reference)
+);
+CREATE INDEX IF NOT EXISTS ix_corporate_actions_symbol_date
+    ON corporate_actions(symbol, market, effective_date);
 CREATE TABLE IF NOT EXISTS dividends (
     id TEXT PRIMARY KEY, symbol TEXT NOT NULL, market TEXT NOT NULL,
     ex_dividend_date TEXT NOT NULL, payment_date TEXT, amount_per_share TEXT NOT NULL,
@@ -250,6 +258,8 @@ def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
             _migrate_postgresql_v7_to_v8(connection)
         if 0 < current_version <= 8:
             _migrate_postgresql_v8_to_v9(connection)
+        if 0 < current_version <= 9:
+            _migrate_postgresql_v9_to_v10(connection)
 
         for version in range(current_version + 1, SCHEMA_VERSION + 1):
             connection.execute(
@@ -311,4 +321,11 @@ def _migrate_postgresql_v8_to_v9(connection: PostgreSQLConnection) -> None:
     """Add immutable annual P/L snapshots and dated investment costs."""
     for statement in POSTGRESQL_SCHEMA.split(";"):
         if "investment_cost_events" in statement or "annual_pnl_snapshots" in statement:
+            connection.execute(statement)
+
+
+def _migrate_postgresql_v9_to_v10(connection: PostgreSQLConnection) -> None:
+    """Add replayable non-cash quantity-conversion events."""
+    for statement in POSTGRESQL_SCHEMA.split(";"):
+        if "corporate_actions" in statement:
             connection.execute(statement)

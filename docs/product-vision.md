@@ -324,3 +324,7 @@ future conversion rate.
 Missing historical coverage is repaired only through an explicit bounded
 provider backfill. Existing observations are preserved and market-closure
 dates are never filled with fabricated rates.
+
+Corporate quantity conversions are auditable non-cash financial events. Stock
+and ETF splits change owned units while preserving total holding cost and must
+never be represented as artificial BUY or SELL transactions.
