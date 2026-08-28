@@ -17,6 +17,8 @@ MIGRATION_TABLES = (
     "position_snapshots",
     "report_deliveries",
     "watchlist",
+    "investment_cost_events",
+    "annual_pnl_snapshots",
     "schema_version",
 )
 

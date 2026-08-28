@@ -205,6 +205,23 @@ CREATE TABLE IF NOT EXISTS watchlist (
     target_price TEXT, buy_below_price TEXT, notes TEXT,
     PRIMARY KEY (symbol, market)
 );
+CREATE TABLE IF NOT EXISTS investment_cost_events (
+    id TEXT PRIMARY KEY, event_date TEXT NOT NULL,
+    cost_type TEXT NOT NULL CHECK (cost_type IN ('financing', 'other')),
+    amount TEXT NOT NULL, currency TEXT NOT NULL, description TEXT,
+    source TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_investment_cost_events_date_type
+    ON investment_cost_events(event_date, cost_type);
+CREATE TABLE IF NOT EXISTS annual_pnl_snapshots (
+    snapshot_date TEXT PRIMARY KEY, year INTEGER NOT NULL,
+    reporting_currency TEXT NOT NULL, realized_pnl_ytd TEXT NOT NULL,
+    unrealized_pnl TEXT NOT NULL, dividend_income_ytd TEXT NOT NULL,
+    financing_cost_ytd TEXT NOT NULL, other_cost_ytd TEXT NOT NULL,
+    total_pnl_ytd TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_annual_pnl_snapshots_year_date
+    ON annual_pnl_snapshots(year, snapshot_date);
 """
 
 
@@ -229,8 +246,10 @@ def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
                     connection.execute(statement)
         if 0 < current_version < 7:
             _migrate_postgresql_to_v7(connection)
-        if current_version == 7:
+        if 0 < current_version <= 7:
             _migrate_postgresql_v7_to_v8(connection)
+        if 0 < current_version <= 8:
+            _migrate_postgresql_v8_to_v9(connection)
 
         for version in range(current_version + 1, SCHEMA_VERSION + 1):
             connection.execute(
@@ -286,3 +305,10 @@ def _migrate_postgresql_v7_to_v8(connection: PostgreSQLConnection) -> None:
     connection.execute(
         "ALTER TABLE liabilities ADD COLUMN IF NOT EXISTS financed_quantity TEXT"
     )
+
+
+def _migrate_postgresql_v8_to_v9(connection: PostgreSQLConnection) -> None:
+    """Add immutable annual P/L snapshots and dated investment costs."""
+    for statement in POSTGRESQL_SCHEMA.split(";"):
+        if "investment_cost_events" in statement or "annual_pnl_snapshots" in statement:
+            connection.execute(statement)

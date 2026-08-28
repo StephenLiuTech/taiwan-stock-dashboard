@@ -67,17 +67,31 @@ def _tone(value: Decimal | None) -> str:
 
 def _history_text(history: tuple[DailyEmailHistoryPoint, ...]) -> list[str]:
     if len(history) <= 1:
-        return [CHART_FALLBACK]
+        lines = [CHART_FALLBACK]
+        if history and history[-1].total_pnl_ytd is not None:
+            point = history[-1]
+            lines.extend(
+                [
+                    f"Total P/L YTD: {_money(point.total_pnl_ytd, signed=True)}",
+                    f"Realized P/L YTD: {_money(point.realized_pnl_ytd, signed=True)}",
+                    f"Unrealized P/L: {_money(point.unrealized_pnl, signed=True)}",
+                    "Dividend Income YTD: " f"{_money(point.dividend_income_ytd)}",
+                ]
+            )
+        return lines
     lines = [
         (
             f"Period: {history[0].snapshot_date} to {history[-1].snapshot_date} "
             f"({len(history)} available snapshots)"
         ),
-        "Date | Total stock market value | Net stock equity",
+        "Date | Total stock market value | Net stock equity | Total P/L YTD | "
+        "Realized P/L YTD | Unrealized P/L | Dividend Income YTD",
     ]
     lines.extend(
         f"{point.snapshot_date} | {_money(point.total_market_value)} | "
-        f"{_money(point.net_asset_value)}"
+        f"{_money(point.net_asset_value)} | {_money(point.total_pnl_ytd)} | "
+        f"{_money(point.realized_pnl_ytd)} | {_money(point.unrealized_pnl)} | "
+        f"{_money(point.dividend_income_ytd)}"
         for point in history
     )
     return lines
@@ -152,6 +166,30 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
         for point in history
         for value in (point.total_market_value, point.net_asset_value)
     ]
+    annual_series = (
+        (
+            "Total P/L YTD",
+            "#dc2626",
+            tuple(point.total_pnl_ytd for point in history),
+        ),
+        (
+            "Realized P/L YTD",
+            "#9333ea",
+            tuple(point.realized_pnl_ytd for point in history),
+        ),
+        (
+            "Unrealized P/L",
+            "#f59e0b",
+            tuple(point.unrealized_pnl for point in history),
+        ),
+        (
+            "Dividend Income YTD",
+            "#0891b2",
+            tuple(point.dividend_income_ytd for point in history),
+        ),
+    )
+    for _, _, series in annual_series:
+        values.extend(value for value in series if value is not None)
     minimum = min(values)
     maximum = max(values)
     span = maximum - minimum
@@ -180,6 +218,23 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
         fill="#334155",
         font=legend_font,
     )
+    annual_legend_y = 122
+    annual_x = left
+    for label, color, series in annual_series:
+        if not any(value is not None for value in series):
+            continue
+        draw.line(
+            (annual_x, annual_legend_y, annual_x + 28, annual_legend_y),
+            fill=color,
+            width=5,
+        )
+        draw.text(
+            (annual_x + 36, annual_legend_y - 10),
+            label,
+            fill="#334155",
+            font=axis_font,
+        )
+        annual_x += 240
     second_legend_x = left + 410
     draw.line(
         (second_legend_x, legend_y, second_legend_x + 44, legend_y),
@@ -212,8 +267,22 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
     equity_points = [
         coordinates(index, point.net_asset_value) for index, point in enumerate(history)
     ]
-    draw.line(market_points, fill="#2563eb", width=7, joint="curve")
-    draw.line(equity_points, fill="#16a34a", width=7, joint="curve")
+    draw.line(market_points, fill="#2563eb", width=5, joint="curve")
+    draw.line(equity_points, fill="#16a34a", width=5, joint="curve")
+    for label, color, series in annual_series:
+        if not all(value is not None for value in series):
+            continue
+        points = [
+            coordinates(index, value)
+            for index, value in enumerate(series)
+            if value is not None
+        ]
+        draw.line(
+            points,
+            fill=color,
+            width=7 if label == "Total P/L YTD" else 4,
+            joint="curve",
+        )
 
     label_count = min(5, len(history))
     label_indexes = sorted(
@@ -535,6 +604,34 @@ class DailyEmailReportRenderer:
                 f'<p style="color:{NEUTRAL_COLOR}">{escape(CHART_FALLBACK)}</p>'
             )
             inline_images = ()
+        annual_point = report.history[-1] if report.history else None
+        annual_summary_html = ""
+        if annual_point is not None and annual_point.total_pnl_ytd is not None:
+            annual_summary_html = (
+                '<table role="presentation" style="border-collapse:collapse;'
+                'width:100%;margin:12px 0 24px"><tr>'
+                + _summary_card(
+                    "Total P/L YTD",
+                    _money(annual_point.total_pnl_ytd, signed=True),
+                    color=_tone(annual_point.total_pnl_ytd),
+                )
+                + _summary_card(
+                    "Realized P/L YTD",
+                    _money(annual_point.realized_pnl_ytd, signed=True),
+                    color=_tone(annual_point.realized_pnl_ytd),
+                )
+                + _summary_card(
+                    "Unrealized P/L",
+                    _money(annual_point.unrealized_pnl, signed=True),
+                    color=_tone(annual_point.unrealized_pnl),
+                )
+                + "</tr><tr>"
+                + _summary_card(
+                    "Dividend Income YTD", _money(annual_point.dividend_income_ytd)
+                )
+                + '<td style="width:33%"></td><td style="width:33%"></td>'
+                + "</tr></table>"
+            )
 
         daily_cards = (
             "<tr>"
@@ -622,6 +719,7 @@ class DailyEmailReportRenderer:
 {summary_cards}</table>
 <h2 style="font-size:18px">Portfolio Trend</h2>
 {chart_html}
+{annual_summary_html}
 <table role="presentation" class="pams-wide-tables" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto"><tr><td style="padding:0;vertical-align:top">
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
 <table class="pams-canonical-report-table" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto">

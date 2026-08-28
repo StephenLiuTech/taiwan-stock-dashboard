@@ -2,7 +2,9 @@
 
 from collections.abc import Callable
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
+from typing import Protocol
 
 from domain import Holding
 from market_calendar import (
@@ -20,6 +22,18 @@ from pams.application.dto import (
 )
 from repositories import HoldingRepository, SnapshotRepository, TransactionRepository
 from services import TransactionEngine
+
+
+class AnnualPnlWriter(Protocol):
+    """Daily annual-P/L persistence boundary used after valuation."""
+
+    def ensure(
+        self,
+        snapshot_date: date,
+        *,
+        unrealized_pnl: Decimal | None = None,
+        persist: bool = True,
+    ) -> object: ...
 
 
 def _availability_dto(value: MarketAvailability) -> MarketAvailabilitySummary:
@@ -44,6 +58,7 @@ class UpdatePortfolioUseCase:
         holding_repository: HoldingRepository | None = None,
         transaction_engine: TransactionEngine | None = None,
         prefer_historical_for_automatic: bool = False,
+        annual_pnl: AnnualPnlWriter | None = None,
     ) -> None:
         self.calendar = calendar
         self.engine = engine
@@ -54,6 +69,7 @@ class UpdatePortfolioUseCase:
         self.holding_repository = holding_repository
         self.transaction_engine = transaction_engine or TransactionEngine()
         self.prefer_historical_for_automatic = prefer_historical_for_automatic
+        self.annual_pnl = annual_pnl
 
     def execute(
         self,
@@ -103,6 +119,8 @@ class UpdatePortfolioUseCase:
             )
         )
         if existing_snapshot is not None and not force and not enrichment_required:
+            if self.annual_pnl is not None:
+                self.annual_pnl.ensure(requested_date, persist=not dry_run)
             return UpdateResult(
                 mode=UpdateMode.SNAPSHOT_EXISTS,
                 database_path=self.database_path,
@@ -137,6 +155,12 @@ class UpdatePortfolioUseCase:
                 else selected_engine.refresh(
                     requested_date, holdings_override=projected_holdings
                 )
+            )
+        if self.annual_pnl is not None:
+            self.annual_pnl.ensure(
+                requested_date,
+                unrealized_pnl=engine_result.summary.total_unrealized_pnl,
+                persist=not dry_run,
             )
         return self._result_dto(
             engine_result,

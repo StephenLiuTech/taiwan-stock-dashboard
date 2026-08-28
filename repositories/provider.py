@@ -7,11 +7,13 @@ from repositories.holding_rebuild_uow import (
     SQLiteMarginTransactionUnitOfWork,
 )
 from repositories.interfaces import (
+    AnnualPnlSnapshotRepository,
     DividendEventRepository,
     DividendRepository,
     FxRateRepository,
     HoldingRebuildUnitOfWork,
     HoldingRepository,
+    InvestmentCostEventRepository,
     LiabilityRepository,
     MarginTransactionUnitOfWork,
     MarketDataUnitOfWork,
@@ -24,10 +26,12 @@ from repositories.interfaces import (
 )
 from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
 from repositories.postgresql import (
+    PostgreSQLAnnualPnlSnapshotRepository,
     PostgreSQLDividendEventRepository,
     PostgreSQLDividendRepository,
     PostgreSQLFxRateRepository,
     PostgreSQLHoldingRepository,
+    PostgreSQLInvestmentCostEventRepository,
     PostgreSQLLiabilityRepository,
     PostgreSQLPositionSnapshotRepository,
     PostgreSQLPriceQuoteRepository,
@@ -42,10 +46,12 @@ from repositories.postgresql_uow import (
     PostgreSQLMarketDataUnitOfWork,
 )
 from repositories.sqlite import (
+    SQLiteAnnualPnlSnapshotRepository,
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
     SQLiteFxRateRepository,
     SQLiteHoldingRepository,
+    SQLiteInvestmentCostEventRepository,
     SQLiteLiabilityRepository,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
@@ -74,6 +80,8 @@ class RepositoryBundle:
     market_data_uow: MarketDataUnitOfWork
     holding_rebuild_uow: HoldingRebuildUnitOfWork
     margin_transaction_uow: MarginTransactionUnitOfWork
+    annual_pnl_snapshots: AnnualPnlSnapshotRepository
+    investment_cost_events: InvestmentCostEventRepository
 
 
 def create_repositories(backend: str, connection: object) -> RepositoryBundle:
@@ -94,6 +102,8 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             SQLiteMarketDataUnitOfWork(connection),
             SQLiteHoldingRebuildUnitOfWork(connection),
             SQLiteMarginTransactionUnitOfWork(connection),
+            SQLiteAnnualPnlSnapshotRepository(connection),
+            SQLiteInvestmentCostEventRepository(connection),
         )
     if backend == "postgresql":
         return RepositoryBundle(
@@ -111,5 +121,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             PostgreSQLMarketDataUnitOfWork(connection),
             PostgreSQLHoldingRebuildUnitOfWork(connection),
             PostgreSQLMarginTransactionUnitOfWork(connection),
+            PostgreSQLAnnualPnlSnapshotRepository(connection),
+            PostgreSQLInvestmentCostEventRepository(connection),
         )
     raise ValueError(f"Unsupported database backend: {backend}")

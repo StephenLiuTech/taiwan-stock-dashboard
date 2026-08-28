@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -114,6 +114,23 @@ CREATE TABLE IF NOT EXISTS watchlist (
     target_price TEXT, buy_below_price TEXT, notes TEXT,
     PRIMARY KEY (symbol, market)
 );
+CREATE TABLE IF NOT EXISTS investment_cost_events (
+    id TEXT PRIMARY KEY, event_date TEXT NOT NULL,
+    cost_type TEXT NOT NULL CHECK (cost_type IN ('financing', 'other')),
+    amount TEXT NOT NULL, currency TEXT NOT NULL, description TEXT,
+    source TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_investment_cost_events_date_type
+    ON investment_cost_events(event_date, cost_type);
+CREATE TABLE IF NOT EXISTS annual_pnl_snapshots (
+    snapshot_date TEXT PRIMARY KEY, year INTEGER NOT NULL,
+    reporting_currency TEXT NOT NULL, realized_pnl_ytd TEXT NOT NULL,
+    unrealized_pnl TEXT NOT NULL, dividend_income_ytd TEXT NOT NULL,
+    financing_cost_ytd TEXT NOT NULL, other_cost_ytd TEXT NOT NULL,
+    total_pnl_ytd TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_annual_pnl_snapshots_year_date
+    ON annual_pnl_snapshots(year, snapshot_date);
 """
 
 

@@ -1,10 +1,12 @@
 """PostgreSQL implementations of every persisted repository contract."""
 
 from repositories.sqlite import (
+    SQLiteAnnualPnlSnapshotRepository,
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
     SQLiteFxRateRepository,
     SQLiteHoldingRepository,
+    SQLiteInvestmentCostEventRepository,
     SQLiteLiabilityRepository,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
@@ -13,6 +15,14 @@ from repositories.sqlite import (
     SQLiteTransactionRepository,
     SQLiteWatchlistRepository,
 )
+
+
+class PostgreSQLAnnualPnlSnapshotRepository(SQLiteAnnualPnlSnapshotRepository):
+    """Persist immutable annual P/L snapshots in PostgreSQL."""
+
+
+class PostgreSQLInvestmentCostEventRepository(SQLiteInvestmentCostEventRepository):
+    """Persist dated investment costs in PostgreSQL."""
 
 
 class PostgreSQLHoldingRepository(SQLiteHoldingRepository):

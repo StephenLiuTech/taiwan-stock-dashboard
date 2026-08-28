@@ -88,6 +88,21 @@ class EnrichmentEngine(FakeEngine):
         return sample_result()
 
 
+class AnnualPnlWriterStub:
+    def __init__(self) -> None:
+        self.calls: list[tuple[date, object | None, bool]] = []
+
+    def ensure(
+        self,
+        snapshot_date: date,
+        *,
+        unrealized_pnl: object | None = None,
+        persist: bool = True,
+    ) -> object:
+        self.calls.append((snapshot_date, unrealized_pnl, persist))
+        return object()
+
+
 def test_update_automatic_date_runs_engine_when_sources_match() -> None:
     calendar = CalendarStub(date(2026, 7, 22), date(2026, 7, 22))
     engine = FakeEngine()
@@ -117,6 +132,20 @@ def test_repeated_automatic_update_returns_no_op_without_refresh() -> None:
     assert snapshots.queries == [selected_date]
     assert engine.refresh_called is False
     assert engine.preview_called is False
+
+
+def test_update_generates_daily_annual_pnl_snapshot() -> None:
+    selected_date = date(2026, 7, 22)
+    writer = AnnualPnlWriterStub()
+    result = UpdatePortfolioUseCase(
+        CalendarStub(selected_date, selected_date),  # type: ignore[arg-type]
+        FakeEngine(),  # type: ignore[arg-type]
+        Path("pams.db"),
+        annual_pnl=writer,  # type: ignore[arg-type]
+    ).execute()
+
+    assert result.mode is UpdateMode.UPDATED
+    assert writer.calls == [(selected_date, Decimal("220"), True)]
 
 
 def test_existing_snapshot_routes_incomplete_global_data_to_enrichment() -> None:

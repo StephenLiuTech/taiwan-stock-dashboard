@@ -38,6 +38,13 @@ class FinancingType(StrEnum):
     MARGIN = "margin"
 
 
+class InvestmentCostType(StrEnum):
+    """Dated annual investment-expense classifications."""
+
+    FINANCING = "financing"
+    OTHER = "other"
+
+
 class DividendStatus(StrEnum):
     """Dividend lifecycle states."""
 

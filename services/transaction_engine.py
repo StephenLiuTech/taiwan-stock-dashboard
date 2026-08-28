@@ -10,6 +10,7 @@ from domain import (
     HoldingType,
     Market,
     PortfolioLedger,
+    RealizedSale,
     Transaction,
     TransactionExpenseSummary,
     TransactionPosition,
@@ -86,6 +87,7 @@ class TransactionEngine:
         total_buy_fees = Decimal("0")
         total_sell_fees = Decimal("0")
         total_taxes = Decimal("0")
+        realized_sales: list[RealizedSale] = []
         ordered = sorted(
             transactions,
             key=lambda item: (
@@ -125,6 +127,24 @@ class TransactionEngine:
             total_sell_fees += transaction.fees
             total_taxes += transaction.taxes
             realized = net_proceeds - allocated_cost
+            realized_sales.append(
+                RealizedSale(
+                    transaction.id,
+                    transaction.trade_date,
+                    transaction.symbol,
+                    transaction.market.value,
+                    transaction.currency,
+                    transaction.quantity,
+                    state.average_cost,
+                    allocated_cost,
+                    transaction.quantity * transaction.price,
+                    transaction.fees,
+                    transaction.taxes,
+                    net_proceeds,
+                    realized,
+                    realized / allocated_cost if allocated_cost else Decimal("0"),
+                )
+            )
             state.realized_pnl += realized
             total_realized_pnl += realized
             state.quantity -= transaction.quantity
@@ -159,6 +179,7 @@ class TransactionEngine:
             total_buy_fees,
             total_sell_fees,
             total_taxes,
+            tuple(realized_sales),
         )
 
     def project_holdings(

@@ -13,6 +13,7 @@
 | v0.8.0 | Complete | Valuation Engine, Dashboard 2.0, Daily Report Engine |
 | v0.9 | Complete | Deterministic snapshot analytics and valuation consolidation |
 | v1.0.0 | Release-ready | First usable local portfolio-management release |
+| schema v9 | Complete locally | Annual realized and YTD investment P/L foundation |
 
 ## v0.8.0 — Portfolio valuation and reporting
 
@@ -127,6 +128,16 @@ functionality. Allocation analytics, benchmarking, cash-flow-adjusted returns,
 multi-asset support, FX conversion, import adapters, automation, and
 notifications are not part of v1.0.0.
 ## Post-v1.0 operational delivery
+
+### Annual investment P/L foundation
+
+- Ledger-derived immutable `RealizedSale` details for every SELL
+- One immutable `annual_pnl_snapshots` row per date
+- Explicit `investment_cost_events`; no liability-note inference
+- Calendar-year flow reset with historical years retained
+- Historical non-future FX conversion for foreign-currency flows
+- `pnl realized`, `pnl summary`, and `pnl history` CLI queries
+- Portfolio Trend total, realized, unrealized, and dividend YTD series
 
 - Idempotent daily portfolio report delivery
 - Persisted SENT/FAILED outcomes with an atomic send claim

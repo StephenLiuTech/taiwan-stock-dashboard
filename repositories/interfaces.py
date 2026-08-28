@@ -5,17 +5,33 @@ from datetime import date, datetime
 from typing import Protocol
 
 from domain import (
+    AnnualPnlSnapshot,
     DailySnapshot,
     Dividend,
     DividendEvent,
     FxRate,
     Holding,
+    InvestmentCostEvent,
     Liability,
     PositionSnapshot,
     PriceQuote,
     Transaction,
     WatchlistItem,
 )
+
+
+class AnnualPnlSnapshotRepository(Protocol):
+    def get_by_date(self, snapshot_date: date) -> AnnualPnlSnapshot | None: ...
+    def add(self, snapshot: AnnualPnlSnapshot) -> None: ...
+    def list_between_dates(self, start: date, end: date) -> list[AnnualPnlSnapshot]: ...
+    def list_for_year(self, year: int) -> list[AnnualPnlSnapshot]: ...
+
+
+class InvestmentCostEventRepository(Protocol):
+    def add(self, event: InvestmentCostEvent) -> None: ...
+    def list_between_dates(
+        self, start: date, end: date
+    ) -> list[InvestmentCostEvent]: ...
 
 
 class HoldingRepository(Protocol):

@@ -1,0 +1,176 @@
+"""Application, persistence, and CLI tests for annual investment P/L."""
+
+import sqlite3
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+
+from database.schema import initialize_schema
+from domain import (
+    AnnualPnlSnapshot,
+    Currency,
+    DailySnapshot,
+    Market,
+    Transaction,
+    TransactionType,
+)
+from pams.application import AnnualPnlUseCase
+from pams.application.send_daily_report import (
+    DailyEmailHistoryPoint,
+    DailyEmailReport,
+)
+from pams.cli import main
+from pams.delivery import DailyEmailReportRenderer
+from repositories.provider import create_repositories
+
+
+def transaction(identifier: str, side: TransactionType, day: date) -> Transaction:
+    return Transaction(
+        id=identifier,
+        symbol="2330",
+        market=Market.TWSE,
+        transaction_type=side,
+        trade_date=day,
+        settlement_date=day,
+        quantity=Decimal("10"),
+        price=Decimal("100") if side is TransactionType.BUY else Decimal("120"),
+        fees=Decimal("2") if side is TransactionType.BUY else Decimal("3"),
+        taxes=Decimal("0") if side is TransactionType.BUY else Decimal("4"),
+        currency=Currency.TWD,
+    )
+
+
+def database(path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    initialize_schema(connection)
+    return connection
+
+
+def daily_snapshot(day: date) -> DailySnapshot:
+    return DailySnapshot(
+        snapshot_date=day,
+        total_market_value=Decimal("0"),
+        total_cost_basis=Decimal("0"),
+        total_unrealized_pnl=Decimal("25"),
+        total_liabilities=Decimal("0"),
+        net_asset_value=Decimal("0"),
+        leverage_ratio=Decimal("0"),
+        high_water_mark=Decimal("0"),
+        drawdown=Decimal("0"),
+    )
+
+
+def test_use_case_persists_one_immutable_snapshot_per_date(tmp_path: Path) -> None:
+    connection = database(tmp_path / "annual.db")
+    repositories = create_repositories("sqlite", connection)
+    repositories.transactions.add(
+        transaction("buy", TransactionType.BUY, date(2026, 1, 1))
+    )
+    repositories.transactions.add(
+        transaction("sell", TransactionType.SELL, date(2026, 2, 1))
+    )
+    repositories.daily_snapshots.add(daily_snapshot(date(2026, 2, 1)))
+    use_case = AnnualPnlUseCase(
+        repositories.transactions,
+        repositories.daily_snapshots,
+        repositories.annual_pnl_snapshots,
+        repositories.dividend_events,
+        repositories.investment_cost_events,
+        repositories.fx_rates,
+    )
+
+    first = use_case.ensure(date(2026, 2, 1))
+    second = use_case.ensure(date(2026, 2, 1), unrealized_pnl=Decimal("999"))
+
+    assert first == second
+    assert first.realized_pnl_ytd == Decimal("193")
+    assert first.other_cost_ytd == Decimal("2")
+    assert first.total_pnl_ytd == Decimal("216")
+    assert len(repositories.annual_pnl_snapshots.list_for_year(2026)) == 1
+
+
+def test_repository_rejects_overwriting_historical_snapshot(tmp_path: Path) -> None:
+    connection = database(tmp_path / "immutable.db")
+    repository = create_repositories("sqlite", connection).annual_pnl_snapshots
+    snapshot = AnnualPnlSnapshot(
+        snapshot_date=date(2026, 1, 1),
+        year=2026,
+        realized_pnl_ytd=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        dividend_income_ytd=Decimal("0"),
+        total_pnl_ytd=Decimal("0"),
+    )
+    repository.add(snapshot)
+    with pytest.raises(sqlite3.IntegrityError):
+        repository.add(snapshot)
+
+
+def test_realized_pnl_cli_reads_transaction_ledger(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "cli.db"
+    connection = database(path)
+    repositories = create_repositories("sqlite", connection)
+    repositories.transactions.add(
+        transaction("buy", TransactionType.BUY, date(2026, 1, 1))
+    )
+    repositories.transactions.add(
+        transaction("sell", TransactionType.SELL, date(2026, 2, 1))
+    )
+    connection.close()
+
+    result = main(["pnl", "realized", "--year", "2026", "--database", str(path)])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "Realized P/L Transactions" in output
+    assert "2330" in output
+    assert "+NT$193" in output
+
+
+def test_daily_report_portfolio_trend_includes_annual_pnl_series() -> None:
+    report = DailyEmailReport(
+        report_date=date(2026, 2, 2),
+        verified_source_date=date(2026, 2, 2),
+        total_market_value=Decimal("1000"),
+        total_cost_basis=Decimal("900"),
+        total_unrealized_pnl=Decimal("100"),
+        total_return=Decimal("0.1"),
+        total_liabilities=Decimal("0"),
+        net_asset_value=Decimal("1000"),
+        liability_ratio=Decimal("0"),
+        daily_profit_loss=Decimal("5"),
+        daily_profit_loss_percentage=Decimal("0.005"),
+        history=(
+            DailyEmailHistoryPoint(
+                date(2026, 2, 1),
+                Decimal("990"),
+                Decimal("990"),
+                Decimal("90"),
+                Decimal("10"),
+                Decimal("80"),
+                Decimal("0"),
+            ),
+            DailyEmailHistoryPoint(
+                date(2026, 2, 2),
+                Decimal("1000"),
+                Decimal("1000"),
+                Decimal("110"),
+                Decimal("10"),
+                Decimal("100"),
+                Decimal("0"),
+            ),
+        ),
+        positions=(),
+    )
+
+    rendered = DailyEmailReportRenderer().render(report)
+
+    assert "Total P/L YTD" in rendered.plain_text
+    assert "Realized P/L YTD" in rendered.plain_text
+    assert "Unrealized P/L" in rendered.plain_text
+    assert "Dividend Income YTD" in rendered.plain_text
+    assert rendered.inline_images[0].content.startswith(b"\x89PNG")

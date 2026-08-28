@@ -15,9 +15,11 @@ from domain import (
     PositionSnapshot,
 )
 from market_calendar import MarketCalendarUnavailableError
+from pams.application.annual_pnl import AnnualPnlUseCase
 from pams.application.report_sections import BuildReportSectionsUseCase
 from pams.application.update_portfolio import UpdatePortfolioUseCase
 from repositories import (
+    AnnualPnlSnapshotRepository,
     HoldingRepository,
     PositionSnapshotRepository,
     SnapshotRepository,
@@ -75,6 +77,10 @@ class DailyEmailHistoryPoint:
     snapshot_date: date
     total_market_value: Decimal
     net_asset_value: Decimal
+    total_pnl_ytd: Decimal | None = None
+    realized_pnl_ytd: Decimal | None = None
+    unrealized_pnl: Decimal | None = None
+    dividend_income_ytd: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +185,8 @@ class SendDailyReportUseCase:
         asset_store: ReportAssetStore | None = None,
         section_builder: BuildReportSectionsUseCase | None = None,
         today: Callable[[], date] = date.today,
+        annual_pnl: AnnualPnlUseCase | None = None,
+        annual_snapshots: AnnualPnlSnapshotRepository | None = None,
     ) -> None:
         self._update_portfolio = update_portfolio
         self._snapshots = snapshots
@@ -192,6 +200,8 @@ class SendDailyReportUseCase:
         self._asset_store = asset_store
         self._section_builder = section_builder
         self._today = today
+        self._annual_pnl = annual_pnl
+        self._annual_snapshots = annual_snapshots
 
     def execute(
         self,
@@ -265,6 +275,8 @@ class SendDailyReportUseCase:
                 f"aggregate portfolio snapshot does not exist for {target}"
             )
         report_date = snapshot.snapshot_date
+        if self._annual_pnl is not None:
+            self._annual_pnl.ensure(report_date, persist=not dry_run)
         report = self._build_report(snapshot, verified_source_date or report_date)
         rendered = self._renderer.render(report)
         if dry_run:
@@ -363,11 +375,42 @@ class SendDailyReportUseCase:
         )[-30:]
         if not historical_snapshots:
             historical_snapshots = [snapshot]
+        annual_by_date = (
+            {
+                item.snapshot_date: item
+                for item in self._annual_snapshots.list_between_dates(
+                    historical_snapshots[0].snapshot_date,
+                    snapshot.snapshot_date,
+                )
+            }
+            if self._annual_snapshots is not None
+            else {}
+        )
         history = tuple(
             DailyEmailHistoryPoint(
                 item.snapshot_date,
                 item.total_market_value,
                 item.net_asset_value,
+                (
+                    annual_by_date[item.snapshot_date].total_pnl_ytd
+                    if item.snapshot_date in annual_by_date
+                    else None
+                ),
+                (
+                    annual_by_date[item.snapshot_date].realized_pnl_ytd
+                    if item.snapshot_date in annual_by_date
+                    else None
+                ),
+                (
+                    annual_by_date[item.snapshot_date].unrealized_pnl
+                    if item.snapshot_date in annual_by_date
+                    else None
+                ),
+                (
+                    annual_by_date[item.snapshot_date].dividend_income_ytd
+                    if item.snapshot_date in annual_by_date
+                    else None
+                ),
             )
             for item in historical_snapshots
         )

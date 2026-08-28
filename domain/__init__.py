@@ -1,11 +1,13 @@
 """Public PAMS domain API."""
 
 from domain.analytics import DailyPortfolioReturn, PortfolioAnalytics
+from domain.annual_pnl import AnnualPnlSnapshot, InvestmentCostEvent, RealizedSale
 from domain.enums import (
     Currency,
     DividendStatus,
     FinancingType,
     HoldingType,
+    InvestmentCostType,
     LiabilityType,
     Market,
     TransactionType,
@@ -80,6 +82,8 @@ __all__ = [
     "DividendStatus",
     "FxRate",
     "FinancingType",
+    "InvestmentCostType",
+    "InvestmentCostEvent",
     "Holding",
     "HoldingType",
     "HoldingValuation",
@@ -96,6 +100,8 @@ __all__ = [
     "PortfolioAnalytics",
     "PortfolioValuation",
     "PortfolioLedger",
+    "AnnualPnlSnapshot",
+    "RealizedSale",
     "PortfolioAllocationSection",
     "PortfolioInsightsSection",
     "PositionSnapshot",

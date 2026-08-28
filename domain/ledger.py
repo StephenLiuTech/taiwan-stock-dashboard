@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
+from domain.annual_pnl import RealizedSale
 from domain.enums import Currency, Market
 
 
@@ -28,6 +29,7 @@ class PortfolioLedger:
     total_buy_fees: Decimal = Decimal("0")
     total_sell_fees: Decimal = Decimal("0")
     total_taxes: Decimal = Decimal("0")
+    realized_sales: tuple[RealizedSale, ...] = ()
 
     @property
     def total_trading_expenses(self) -> Decimal:

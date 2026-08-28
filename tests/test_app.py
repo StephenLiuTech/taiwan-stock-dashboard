@@ -38,7 +38,7 @@ def test_streamlit_application_starts(
     get_settings.cache_clear()
 
     try:
-        application = AppTest.from_file(str(PROJECT_ROOT / "app.py")).run()
+        application = AppTest.from_file(str(PROJECT_ROOT / "app.py")).run(timeout=10)
 
         assert not application.exception
         assert application.title[0].value == "PAMS"

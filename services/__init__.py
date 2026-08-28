@@ -6,6 +6,7 @@ from services.analytics_engine import (
     DuplicateSnapshotDateError,
     EmptySnapshotHistoryError,
 )
+from services.annual_pnl_engine import AnnualPnlEngine, AnnualPnlFxUnavailableError
 from services.bootstrap import BootstrapService
 from services.margin_financing import (
     MarginFinancingError,
@@ -32,6 +33,8 @@ from services.valuation_engine import ValuationEngine
 __all__ = [
     "AnalyticsEngine",
     "AnalyticsError",
+    "AnnualPnlEngine",
+    "AnnualPnlFxUnavailableError",
     "BootstrapService",
     "DuplicateSnapshotError",
     "DuplicateSnapshotDateError",

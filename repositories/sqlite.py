@@ -6,17 +6,120 @@ from decimal import Decimal
 from uuid import uuid4
 
 from domain import (
+    AnnualPnlSnapshot,
     DailySnapshot,
     Dividend,
     DividendEvent,
     FxRate,
     Holding,
+    InvestmentCostEvent,
     Liability,
     PositionSnapshot,
     PriceQuote,
     Transaction,
     WatchlistItem,
 )
+
+
+class SQLiteAnnualPnlSnapshotRepository:
+    """Persist immutable one-row-per-date annual P/L facts."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def get_by_date(self, snapshot_date: date) -> AnnualPnlSnapshot | None:
+        row = self.connection.execute(
+            "SELECT * FROM annual_pnl_snapshots WHERE snapshot_date = ?",
+            (snapshot_date.isoformat(),),
+        ).fetchone()
+        return self._from_row(row) if row else None
+
+    def add(self, snapshot: AnnualPnlSnapshot) -> None:
+        self.connection.execute(
+            "INSERT INTO annual_pnl_snapshots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                snapshot.snapshot_date.isoformat(),
+                snapshot.year,
+                snapshot.reporting_currency.value,
+                str(snapshot.realized_pnl_ytd),
+                str(snapshot.unrealized_pnl),
+                str(snapshot.dividend_income_ytd),
+                str(snapshot.financing_cost_ytd),
+                str(snapshot.other_cost_ytd),
+                str(snapshot.total_pnl_ytd),
+                snapshot.created_at.isoformat(),
+            ),
+        )
+        self.connection.commit()
+
+    def list_between_dates(self, start: date, end: date) -> list[AnnualPnlSnapshot]:
+        rows = self.connection.execute(
+            """SELECT * FROM annual_pnl_snapshots WHERE snapshot_date BETWEEN ? AND ?
+            ORDER BY snapshot_date""",
+            (start.isoformat(), end.isoformat()),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def list_for_year(self, year: int) -> list[AnnualPnlSnapshot]:
+        rows = self.connection.execute(
+            "SELECT * FROM annual_pnl_snapshots WHERE year = ? ORDER BY snapshot_date",
+            (year,),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> AnnualPnlSnapshot:
+        values = dict(row)
+        values["snapshot_date"] = date.fromisoformat(values["snapshot_date"])
+        values["created_at"] = datetime.fromisoformat(values["created_at"])
+        for key in (
+            "realized_pnl_ytd",
+            "unrealized_pnl",
+            "dividend_income_ytd",
+            "financing_cost_ytd",
+            "other_cost_ytd",
+            "total_pnl_ytd",
+        ):
+            values[key] = _decimal(values[key])
+        return AnnualPnlSnapshot.model_validate(values)
+
+
+class SQLiteInvestmentCostEventRepository:
+    """Persist dated financing and other investment expenses."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def add(self, event: InvestmentCostEvent) -> None:
+        self.connection.execute(
+            "INSERT INTO investment_cost_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                event.id,
+                event.event_date.isoformat(),
+                event.cost_type.value,
+                str(event.amount),
+                event.currency.value,
+                event.description,
+                event.source,
+                event.created_at.isoformat(),
+            ),
+        )
+        self.connection.commit()
+
+    def list_between_dates(self, start: date, end: date) -> list[InvestmentCostEvent]:
+        rows = self.connection.execute(
+            """SELECT * FROM investment_cost_events WHERE event_date BETWEEN ? AND ?
+            ORDER BY event_date, id""",
+            (start.isoformat(), end.isoformat()),
+        ).fetchall()
+        values = []
+        for row in rows:
+            item = dict(row)
+            item["event_date"] = date.fromisoformat(item["event_date"])
+            item["created_at"] = datetime.fromisoformat(item["created_at"])
+            item["amount"] = _decimal(item["amount"])
+            values.append(InvestmentCostEvent.model_validate(item))
+        return values
 
 
 def _decimal(value: object) -> Decimal:

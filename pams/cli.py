@@ -26,6 +26,11 @@ from pams.analytics_reporting import (
     analytics_error_message,
     format_portfolio_analytics,
 )
+from pams.annual_pnl_reporting import (
+    format_annual_history,
+    format_annual_summary,
+    format_realized_sales,
+)
 from pams.application import (
     AddTransactionCommand,
     AnalyticsDataUnavailableError,
@@ -301,6 +306,26 @@ def build_parser() -> argparse.ArgumentParser:
     analytics_portfolio.add_argument("--json", action="store_true", dest="json_output")
     analytics_portfolio.add_argument("--database", type=Path)
     analytics_portfolio.add_argument("--verbose", action="store_true")
+    pnl = commands.add_parser("pnl", help="inspect realized and annual P/L")
+    pnl_commands = pnl.add_subparsers(dest="pnl_command", required=True)
+    realized = pnl_commands.add_parser(
+        "realized", help="list ledger-derived realized SELL results"
+    )
+    realized.add_argument("--year", type=int)
+    realized.add_argument("--symbol")
+    realized.add_argument("--json", action="store_true", dest="json_output")
+    summary = pnl_commands.add_parser("summary", help="show an annual YTD summary")
+    summary.add_argument("--year", type=int, default=date.today().year)
+    summary.add_argument("--as-of", type=parse_iso_date)
+    summary.add_argument("--json", action="store_true", dest="json_output")
+    history = pnl_commands.add_parser("history", help="list annual daily snapshots")
+    history.add_argument("--year", type=int, default=date.today().year)
+    history.add_argument("--from", dest="start_date", type=parse_iso_date)
+    history.add_argument("--to", dest="end_date", type=parse_iso_date)
+    history.add_argument("--json", action="store_true", dest="json_output")
+    for command in (realized, summary, history):
+        command.add_argument("--database", type=Path)
+        command.add_argument("--verbose", action="store_true")
     daily_report = commands.add_parser(
         "daily-report", help="generate and deliver a persisted daily report"
     )
@@ -463,6 +488,33 @@ def main(argv: Sequence[str] | None = None) -> int:
                         analytics, json_output=arguments.json_output
                     )
                 )
+                return int(ExitCode.SUCCESS)
+            if arguments.command == "pnl":
+                assert application.annual_pnl is not None
+                if arguments.pnl_command == "realized":
+                    output = format_realized_sales(
+                        application.annual_pnl.realized_sales(
+                            year=arguments.year, symbol=arguments.symbol
+                        ),
+                        json_output=arguments.json_output,
+                    )
+                elif arguments.pnl_command == "summary":
+                    output = format_annual_summary(
+                        application.annual_pnl.summary(
+                            year=arguments.year, as_of=arguments.as_of
+                        ),
+                        json_output=arguments.json_output,
+                    )
+                else:
+                    output = format_annual_history(
+                        application.annual_pnl.history(
+                            year=arguments.year,
+                            start_date=arguments.start_date,
+                            end_date=arguments.end_date,
+                        ),
+                        json_output=arguments.json_output,
+                    )
+                print(output)
                 return int(ExitCode.SUCCESS)
             if arguments.command == "report":
                 assert application.valuate_portfolio is not None

@@ -648,3 +648,30 @@ quote/rate/snapshot boundary.
 similar identifiers are listing or execution venues, not portfolio identity.
 Holding and quote identity remains `(symbol, market)`; venue metadata may be
 added later without changing that identity if a reliable provider supplies it.
+## Annual investment P/L (schema v9)
+
+`TransactionEngine` emits an immutable `RealizedSale` for every SELL, including
+sold quantity, moving-average unit and total basis, gross and net proceeds,
+fees, taxes, realized P/L, and realized return. This history remains queryable
+after a holding reaches zero.
+
+```text
+TransactionRepository ──> TransactionEngine ──> RealizedSale
+DailySnapshot -----------┐
+DividendEvent -----------┼─> AnnualPnlUseCase ─> AnnualPnlEngine
+InvestmentCostEvent -----┤                       │
+Historical FxRate -------┘                       v
+                                      annual_pnl_snapshots
+```
+
+`annual_pnl_snapshots` has one immutable row per calendar date. YTD flows are
+filtered by calendar year, so a new year resets realized, dividend, financing,
+and other-cost totals without deleting previous years. The formula is
+`realized + unrealized + dividends - financing costs - other costs`.
+
+Broker-style holding basis excludes BUY fees/taxes; those expenses enter
+`other_cost_ytd` once. SELL fees/taxes already reduce realized net proceeds and
+are not subtracted again. `investment_cost_events` contains explicit dated
+financing or other expenses only; liability notes are never parsed into
+historical costs. Foreign-currency flows use the latest persisted FX rate on or
+before their effective date and fail safely when no eligible rate exists.

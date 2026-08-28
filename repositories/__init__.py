@@ -5,12 +5,14 @@ from repositories.holding_rebuild_uow import (
     SQLiteMarginTransactionUnitOfWork,
 )
 from repositories.interfaces import (
+    AnnualPnlSnapshotRepository,
     DividendEventRepository,
     DividendRepository,
     FxRateRepository,
     HoldingRebuildRepository,
     HoldingRebuildUnitOfWork,
     HoldingRepository,
+    InvestmentCostEventRepository,
     LiabilityRepository,
     MarginTransactionUnitOfWork,
     MarketDataUnitOfWork,
@@ -24,10 +26,12 @@ from repositories.interfaces import (
 )
 from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
 from repositories.postgresql import (
+    PostgreSQLAnnualPnlSnapshotRepository,
     PostgreSQLDividendEventRepository,
     PostgreSQLDividendRepository,
     PostgreSQLFxRateRepository,
     PostgreSQLHoldingRepository,
+    PostgreSQLInvestmentCostEventRepository,
     PostgreSQLLiabilityRepository,
     PostgreSQLPositionSnapshotRepository,
     PostgreSQLPriceQuoteRepository,
@@ -42,10 +46,12 @@ from repositories.postgresql_uow import (
     PostgreSQLMarketDataUnitOfWork,
 )
 from repositories.sqlite import (
+    SQLiteAnnualPnlSnapshotRepository,
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
     SQLiteFxRateRepository,
     SQLiteHoldingRepository,
+    SQLiteInvestmentCostEventRepository,
     SQLiteLiabilityRepository,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
@@ -56,12 +62,14 @@ from repositories.sqlite import (
 )
 
 __all__ = [
+    "AnnualPnlSnapshotRepository",
     "DividendRepository",
     "DividendEventRepository",
     "FxRateRepository",
     "HoldingRepository",
     "HoldingRebuildRepository",
     "HoldingRebuildUnitOfWork",
+    "InvestmentCostEventRepository",
     "LiabilityRepository",
     "MarketDataUnitOfWork",
     "MarginTransactionUnitOfWork",
@@ -70,6 +78,8 @@ __all__ = [
     "PostgreSQLDividendEventRepository",
     "PostgreSQLFxRateRepository",
     "PostgreSQLHoldingRepository",
+    "PostgreSQLAnnualPnlSnapshotRepository",
+    "PostgreSQLInvestmentCostEventRepository",
     "PostgreSQLHoldingRebuildUnitOfWork",
     "PostgreSQLLiabilityRepository",
     "PostgreSQLMarketDataUnitOfWork",
@@ -86,6 +96,8 @@ __all__ = [
     "SQLiteDividendEventRepository",
     "SQLiteFxRateRepository",
     "SQLiteHoldingRepository",
+    "SQLiteAnnualPnlSnapshotRepository",
+    "SQLiteInvestmentCostEventRepository",
     "SQLiteHoldingRebuildUnitOfWork",
     "SQLiteLiabilityRepository",
     "SQLiteMarketDataUnitOfWork",

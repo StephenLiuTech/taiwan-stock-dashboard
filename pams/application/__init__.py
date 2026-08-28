@@ -1,6 +1,11 @@
 """Presentation-neutral PAMS application workflows and DTOs."""
 
 from pams.application.analyze_portfolio import AnalyzePortfolioUseCase
+from pams.application.annual_pnl import (
+    AnnualPnlApplicationError,
+    AnnualPnlHistory,
+    AnnualPnlUseCase,
+)
 from pams.application.apply_rebuilt_holdings import ApplyRebuiltHoldingsUseCase
 from pams.application.authorize_email import AuthorizeMicrosoftEmailUseCase
 from pams.application.bootstrap_import import (
@@ -110,6 +115,9 @@ __all__ = [
     "AnalyticsProcessingError",
     "AnalyticsRepositoryError",
     "AnalyzePortfolioUseCase",
+    "AnnualPnlApplicationError",
+    "AnnualPnlHistory",
+    "AnnualPnlUseCase",
     "ApplyRebuiltHoldingsUseCase",
     "AuthorizeMicrosoftEmailUseCase",
     "BootstrapHoldingReconciliation",

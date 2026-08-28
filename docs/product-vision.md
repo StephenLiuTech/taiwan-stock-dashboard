@@ -313,3 +313,11 @@ not become transaction or accounting truth.
 PAMS uses TWD as its portfolio reporting currency while retaining each asset's
 native currency. The first multi-market boundary supports Taiwan equities in
 TWD and US equities/ETFs in USD through replaceable adapters.
+## Annual investment P/L
+
+Annual investment P/L remains transaction-first. Realized sales are derived
+from the ledger's moving-average basis, daily annual snapshots are immutable
+derived facts, and explicit dated cost events are the only source of historical
+financing costs. PAMS does not fabricate cash-flow history from liability
+descriptions. Foreign-currency flows retain dated FX provenance and never use a
+future conversion rate.

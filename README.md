@@ -5,6 +5,40 @@ tracked separately as investment expenses. Holding average cost and total cost
 use executed quantity and price only; sell fees and taxes reduce realized
 profit but never alter the remaining holding average cost.
 
+Schema v9 adds immutable calendar-year investment P/L facts. Every SELL is
+replayed through the same moving-average `TransactionEngine`, so realized P/L
+remains queryable after a position closes. Daily annual snapshots preserve
+realized P/L YTD, unrealized P/L, paid dividend income YTD, explicit financing
+and other investment costs, and total P/L YTD.
+
+Annual P/L follows this deterministic formula:
+
+```text
+Total P/L YTD = Realized P/L YTD + Unrealized P/L
+                + Dividend Income YTD
+                - Financing Cost YTD - Other Cost YTD
+```
+
+BUY fees/taxes are excluded from broker-style holding cost and therefore enter
+`Other Cost YTD` once. SELL fees/taxes already reduce realized net proceeds and
+are not subtracted again. Financing costs come only from explicit dated
+investment-cost events; PAMS never reconstructs them from liability notes.
+
+Inspect the ledger-derived and immutable annual results with:
+
+```powershell
+python -m pams pnl realized --year 2026
+python -m pams pnl realized --symbol 2330 --json
+python -m pams pnl summary --year 2026
+python -m pams pnl summary --year 2026 --as-of 2026-08-28 --json
+python -m pams pnl history --year 2026
+python -m pams pnl history --year 2026 --from 2026-01-01 --to 2026-08-28
+```
+
+Historical USD flows use the latest persisted USD/TWD rate on or before each
+flow date. A missing eligible historical rate is an error; no future rate is
+fabricated.
+
 The one-time broker-statement reconciliation is read-only unless a separately
 reviewed apply workflow is introduced:
 

@@ -62,11 +62,12 @@ def test_postgresql_schema_7_to_8_is_nullable_and_version_gated() -> None:
     )
     assert not any(statement.startswith("UPDATE ") for statement in sql)
     assert any(parameters == (8,) for _, parameters in connection.statements)
+    assert any(parameters == (9,) for _, parameters in connection.statements)
     assert connection.commits == 1
     assert connection.rollbacks == 0
 
 
-def test_current_postgresql_schema_does_not_reapply_v8_delta() -> None:
+def test_schema_8_to_9_adds_only_annual_pnl_tables() -> None:
     connection = PostgreSQLConnectionStub(8)
 
     initialize_postgresql_schema(connection)  # type: ignore[arg-type]
@@ -79,6 +80,14 @@ def test_current_postgresql_schema_does_not_reapply_v8_delta() -> None:
         or "ADD COLUMN IF NOT EXISTS financed_quantity" in statement
     ]
     assert migration_alters == []
+    sql = [statement for statement, _ in connection.statements]
+    assert any(
+        "CREATE TABLE IF NOT EXISTS investment_cost_events" in item for item in sql
+    )
+    assert any(
+        "CREATE TABLE IF NOT EXISTS annual_pnl_snapshots" in item for item in sql
+    )
+    assert any(parameters == (9,) for _, parameters in connection.statements)
     assert connection.commits == 1
 
 
@@ -93,7 +102,7 @@ def test_postgresql_schema_upgrade_rolls_back_on_failure() -> None:
 
 
 def test_newer_postgresql_schema_is_rejected_without_commit() -> None:
-    connection = PostgreSQLConnectionStub(9)
+    connection = PostgreSQLConnectionStub(10)
 
     with pytest.raises(RuntimeError, match="newer than supported"):
         initialize_postgresql_schema(connection)  # type: ignore[arg-type]

@@ -56,6 +56,7 @@ from market_data.transport import (
 from pams.application import (
     AddTransactionUseCase,
     AnalyzePortfolioUseCase,
+    AnnualPnlUseCase,
     ApplyRebuiltHoldingsUseCase,
     AuthorizeMicrosoftEmailUseCase,
     BootstrapImportUseCase,
@@ -110,6 +111,7 @@ class ApplicationContext:
     query_holdings: QueryHoldingsUseCase | None = None
     valuate_portfolio: ValuatePortfolioUseCase | None = None
     analyze_portfolio: AnalyzePortfolioUseCase | None = None
+    annual_pnl: AnnualPnlUseCase | None = None
     send_daily_report: SendDailyReportUseCase | None = None
     watchlist: WatchlistUseCase | None = None
     dividend_events: DividendEventUseCase | None = None
@@ -314,6 +316,8 @@ def compose_daily_report(
                 ),
                 liabilities=context.repositories.liabilities,
             ),
+            annual_pnl=context.annual_pnl,
+            annual_snapshots=context.repositories.annual_pnl_snapshots,
         )
         yield replace(context, send_daily_report=use_case)
 
@@ -643,6 +647,15 @@ def _compose(
         quotes = repositories.price_quotes
         transaction_repository = repositories.transactions
         transaction_engine = TransactionEngine()
+        annual_pnl = AnnualPnlUseCase(
+            transaction_repository,
+            snapshots,
+            repositories.annual_pnl_snapshots,
+            repositories.dividend_events,
+            repositories.investment_cost_events,
+            repositories.fx_rates,
+            transaction_engine=transaction_engine,
+        )
         valuate_portfolio = ValuatePortfolioUseCase(
             holdings,
             quotes,
@@ -691,6 +704,7 @@ def _compose(
                 holdings,
                 transaction_engine,
                 prefer_historical_for_automatic=using_default_providers,
+                annual_pnl=annual_pnl,
             ),
             portfolio_status=PortfolioStatusUseCase(
                 calendar,
@@ -726,6 +740,7 @@ def _compose(
                 transactions=transaction_repository,
                 transaction_engine=transaction_engine,
             ),
+            annual_pnl=annual_pnl,
             watchlist=WatchlistUseCase(repositories.watchlist, quotes),
             dividend_events=DividendEventUseCase(
                 dividend_provider,
