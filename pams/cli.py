@@ -380,6 +380,22 @@ def build_parser() -> argparse.ArgumentParser:
     for command in (realized, summary, history):
         command.add_argument("--database", type=Path)
         command.add_argument("--verbose", action="store_true")
+    liability = commands.add_parser("liability", help="inspect liability principal")
+    liability_commands = liability.add_subparsers(
+        dest="liability_command", required=True
+    )
+    liability_history = liability_commands.add_parser(
+        "history", help="show replayable principal events"
+    )
+    liability_history.add_argument("--liability-id")
+    liability_principal = liability_commands.add_parser(
+        "principal", help="show principal effective on a date"
+    )
+    liability_principal.add_argument("--liability-id", required=True)
+    liability_principal.add_argument("--date", required=True, type=parse_iso_date)
+    for command in (liability_history, liability_principal):
+        command.add_argument("--database", type=Path)
+        command.add_argument("--verbose", action="store_true")
     daily_report = commands.add_parser(
         "daily-report", help="generate and deliver a persisted daily report"
     )
@@ -584,6 +600,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                         json_output=arguments.json_output,
                     )
                 print(output)
+                return int(ExitCode.SUCCESS)
+            if arguments.command == "liability":
+                assert application.liability_principal is not None
+                if arguments.liability_command == "principal":
+                    principal = application.liability_principal.principal(
+                        arguments.liability_id, arguments.date
+                    )
+                    print("PAMS Liability Principal")
+                    print(f"Liability: {arguments.liability_id}")
+                    print(f"Date: {arguments.date}")
+                    print(f"Principal: NT${principal:,.2f}")
+                else:
+                    points = application.liability_principal.history(
+                        arguments.liability_id
+                    )
+                    print("PAMS Liability Principal History")
+                    for point in points:
+                        event = point.event
+                        print(
+                            f"{event.effective_date} | {event.liability_id} | "
+                            f"{event.sequence} | {event.event_type.value} | "
+                            f"{event.principal_delta:+} | {point.principal}"
+                        )
+                    print(f"Count: {len(points)}")
                 return int(ExitCode.SUCCESS)
             if arguments.command == "report":
                 assert application.valuate_portfolio is not None

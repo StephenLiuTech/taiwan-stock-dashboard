@@ -175,6 +175,20 @@ rejects duplicates before writing and commits transaction, holding projection,
 and liability together. Existing descriptive liability metadata remains
 read-compatible during migration and accrued-interest notes are preserved.
 
+### Liability principal event ledger
+
+Schema version 11 adds immutable `liability_principal_events`. A pure
+`LiabilityPrincipalEngine` starts from zero and replays each liability account
+by `(effective_date, sequence, id)`. The sequence is explicit accounting order;
+timestamps and IDs never imply chronology. Events are effective inclusively on
+their date, so they change that date's opening/accruable principal. Replay
+rejects negative principal and validates optional resulting-principal facts.
+
+The margin liability represents the brokerage margin debt account. Its
+financed-symbol fields remain a current-position summary; historical references
+can identify fully repaid instrument exposure without creating a false current
+liability. This ledger does not calculate interest.
+
 The one-time bootstrap importer has a read-only preview and an explicit apply
 boundary. Apply replaces only the reconciled 2026 ledger, writes deterministic
 statement and synthetic transaction IDs, rebuilds holdings, and performs a

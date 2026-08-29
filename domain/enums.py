@@ -58,3 +58,12 @@ class LiabilityType(StrEnum):
     MARGIN_FINANCING = "margin_financing"
     STOCK_PLEDGE = "stock_pledge"
     OTHER = "other"
+
+
+class LiabilityPrincipalEventType(StrEnum):
+    """Auditable principal changes in a liability account."""
+
+    OPENING = "opening"
+    INCREASE = "increase"
+    REPAYMENT = "repayment"
+    CORRECTION = "correction"

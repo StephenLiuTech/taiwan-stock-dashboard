@@ -922,3 +922,16 @@ generic provider information, and malformed documents. Each symbol is isolated:
 a valid quote is retained even if another symbol fails.
 Historical FX backfill is a separate explicit Application workflow; it does
 not create portfolio snapshots or synthesize rates for weekends and holidays.
+
+## Liability principal history
+
+Schema v11 makes debt principal replayable from dated events:
+
+```bash
+python -m pams liability history
+python -m pams liability history --liability-id liability-margin-financing
+python -m pams liability principal --liability-id liability-margin-financing --date 2026-08-28
+```
+
+The cutoff is inclusive. Same-day events use an explicit accounting sequence;
+timestamps and identifiers never imply replay order.

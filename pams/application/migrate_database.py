@@ -20,6 +20,7 @@ MIGRATION_TABLES = (
     "watchlist",
     "investment_cost_events",
     "annual_pnl_snapshots",
+    "liability_principal_events",
     "schema_version",
 )
 

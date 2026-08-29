@@ -230,6 +230,16 @@ CREATE TABLE IF NOT EXISTS annual_pnl_snapshots (
 );
 CREATE INDEX IF NOT EXISTS ix_annual_pnl_snapshots_year_date
     ON annual_pnl_snapshots(year, snapshot_date);
+CREATE TABLE IF NOT EXISTS liability_principal_events (
+    id TEXT PRIMARY KEY, liability_id TEXT NOT NULL, effective_date TEXT NOT NULL,
+    sequence INTEGER NOT NULL, event_type TEXT NOT NULL
+        CHECK (event_type IN ('opening', 'increase', 'repayment', 'correction')),
+    principal_delta TEXT NOT NULL, resulting_principal TEXT,
+    source TEXT NOT NULL, reference TEXT, notes TEXT, created_at TEXT NOT NULL,
+    UNIQUE(liability_id, effective_date, sequence)
+);
+CREATE INDEX IF NOT EXISTS ix_liability_principal_events_replay
+    ON liability_principal_events(liability_id, effective_date, sequence);
 """
 
 
@@ -260,6 +270,8 @@ def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
             _migrate_postgresql_v8_to_v9(connection)
         if 0 < current_version <= 9:
             _migrate_postgresql_v9_to_v10(connection)
+        if 0 < current_version <= 10:
+            _migrate_postgresql_v10_to_v11(connection)
 
         for version in range(current_version + 1, SCHEMA_VERSION + 1):
             connection.execute(
@@ -328,4 +340,11 @@ def _migrate_postgresql_v9_to_v10(connection: PostgreSQLConnection) -> None:
     """Add replayable non-cash quantity-conversion events."""
     for statement in POSTGRESQL_SCHEMA.split(";"):
         if "corporate_actions" in statement:
+            connection.execute(statement)
+
+
+def _migrate_postgresql_v10_to_v11(connection: PostgreSQLConnection) -> None:
+    """Add the replayable liability-principal event ledger."""
+    for statement in POSTGRESQL_SCHEMA.split(";"):
+        if "liability_principal_events" in statement:
             connection.execute(statement)

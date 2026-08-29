@@ -109,6 +109,7 @@ def test_schema_initialization_creates_market_data_version(
     assert "dividend_events" in tables
     assert "financing_type" in transaction_columns
     assert {"financed_symbol", "financed_quantity"} <= liability_columns
+    assert "liability_principal_events" in tables
     assert {
         "price_quotes",
         "daily_snapshots",
@@ -192,4 +193,38 @@ def test_failed_schema_7_rebuild_rolls_back_without_creating_fx_table() -> None:
         ).fetchone()[0]
         == 0
     )
+    connection.close()
+
+
+def test_sqlite_schema_10_to_11_preserves_existing_rows() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(
+        """
+        CREATE TABLE schema_version (
+            version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL
+        );
+        INSERT INTO schema_version VALUES (10, 'before');
+        CREATE TABLE preserved (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT INTO preserved VALUES ('one', 'unchanged');
+        """
+    )
+
+    initialize_schema(connection)
+
+    assert (
+        connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+        == 11
+    )
+    assert tuple(connection.execute("SELECT * FROM preserved").fetchone()) == (
+        "one",
+        "unchanged",
+    )
+    columns = {
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(liability_principal_events)"
+        ).fetchall()
+    }
+    assert {"liability_id", "effective_date", "sequence", "principal_delta"} <= columns
     connection.close()

@@ -190,6 +190,10 @@ uses margin. The transaction remains the reproducible source of the holding,
 while the same atomic application operation updates the corresponding debt and
 financed-position state. Financing is never inferred solely from free text.
 
+Liability principal changes are first-class dated financial events. Current
+debt balances are reproducible from immutable principal history, with explicit
+same-day accounting order, rather than inferred from mutable notes.
+
 Future features should model events rather than hard-code asset behavior.
 
 PAMS follows the broker portfolio cost convention. Trading fees and taxes are

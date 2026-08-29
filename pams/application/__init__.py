@@ -77,6 +77,11 @@ from pams.application.exceptions import (
     ValuationDataUnavailableError,
     ValuationRepositoryError,
 )
+from pams.application.liability_principal import (
+    LiabilityPrincipalBackfillResult,
+    LiabilityPrincipalError,
+    LiabilityPrincipalUseCase,
+)
 from pams.application.migrate_database import (
     DatabaseMigrationError,
     DatabaseMigrationResult,
@@ -168,6 +173,9 @@ __all__ = [
     "MarketAvailabilitySummary",
     "MissingQuoteError",
     "MigrateDatabaseUseCase",
+    "LiabilityPrincipalBackfillResult",
+    "LiabilityPrincipalError",
+    "LiabilityPrincipalUseCase",
     "PortfolioHistory",
     "PortfolioAnalytics",
     "PortfolioAnalyticsError",

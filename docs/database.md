@@ -58,3 +58,7 @@ Schema version 8 adds nullable `transactions.financing_type` and structured
 `liabilities.financed_symbol` / `financed_quantity` fields. Existing cash
 transactions and liabilities remain valid with null values. Margin entry writes
 these fields through the same transaction as its holding and principal update.
+
+Schema version 11 adds `liability_principal_events`, indexed by liability,
+effective date, and explicit same-day sequence. Migration creates only this
+ledger and preserves every schema-v10 business row unchanged.

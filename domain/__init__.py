@@ -8,6 +8,7 @@ from domain.enums import (
     FinancingType,
     HoldingType,
     InvestmentCostType,
+    LiabilityPrincipalEventType,
     LiabilityType,
     Market,
     TransactionType,
@@ -16,6 +17,10 @@ from domain.ledger import (
     PortfolioLedger,
     TransactionExpenseSummary,
     TransactionPosition,
+)
+from domain.liability_principal import (
+    LiabilityPrincipalEvent,
+    LiabilityPrincipalPoint,
 )
 from domain.models import (
     CorporateAction,
@@ -91,6 +96,9 @@ __all__ = [
     "HoldingValuation",
     "Liability",
     "LiabilityType",
+    "LiabilityPrincipalEventType",
+    "LiabilityPrincipalEvent",
+    "LiabilityPrincipalPoint",
     "Market",
     "MultiCurrencyPortfolioValuation",
     "MarketSnapshotItem",

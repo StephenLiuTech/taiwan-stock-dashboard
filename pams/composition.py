@@ -65,6 +65,7 @@ from pams.application import (
     BuildReportSectionsUseCase,
     DemoDataUseCase,
     DividendEventUseCase,
+    LiabilityPrincipalUseCase,
     ListTransactionsUseCase,
     MigrateDatabaseUseCase,
     PortfolioHistoryUseCase,
@@ -115,6 +116,7 @@ class ApplicationContext:
     valuate_portfolio: ValuatePortfolioUseCase | None = None
     analyze_portfolio: AnalyzePortfolioUseCase | None = None
     annual_pnl: AnnualPnlUseCase | None = None
+    liability_principal: LiabilityPrincipalUseCase | None = None
     send_daily_report: SendDailyReportUseCase | None = None
     watchlist: WatchlistUseCase | None = None
     dividend_events: DividendEventUseCase | None = None
@@ -810,6 +812,10 @@ def _compose(
                 transaction_engine=transaction_engine,
             ),
             annual_pnl=annual_pnl,
+            liability_principal=LiabilityPrincipalUseCase(
+                repositories.liability_principal_events,
+                liabilities,
+            ),
             watchlist=WatchlistUseCase(repositories.watchlist, quotes),
             dividend_events=DividendEventUseCase(
                 dividend_provider,

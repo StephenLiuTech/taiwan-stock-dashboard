@@ -14,11 +14,20 @@ from domain import (
     Holding,
     InvestmentCostEvent,
     Liability,
+    LiabilityPrincipalEvent,
     PositionSnapshot,
     PriceQuote,
     Transaction,
     WatchlistItem,
 )
+
+
+class LiabilityPrincipalEventRepository(Protocol):
+    """Persistence for replayable liability principal changes."""
+
+    def list_all(self) -> list[LiabilityPrincipalEvent]: ...
+    def list_by_liability(self, liability_id: str) -> list[LiabilityPrincipalEvent]: ...
+    def insert_many_if_absent(self, events: list[LiabilityPrincipalEvent]) -> int: ...
 
 
 class AnnualPnlSnapshotRepository(Protocol):

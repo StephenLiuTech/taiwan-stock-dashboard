@@ -15,11 +15,80 @@ from domain import (
     Holding,
     InvestmentCostEvent,
     Liability,
+    LiabilityPrincipalEvent,
     PositionSnapshot,
     PriceQuote,
     Transaction,
     WatchlistItem,
 )
+
+
+class SQLiteLiabilityPrincipalEventRepository:
+    """Persist principal events with idempotent batch insertion."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def list_all(self) -> list[LiabilityPrincipalEvent]:
+        rows = self.connection.execute(
+            "SELECT * FROM liability_principal_events "
+            "ORDER BY liability_id, effective_date, sequence, id"
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def list_by_liability(self, liability_id: str) -> list[LiabilityPrincipalEvent]:
+        rows = self.connection.execute(
+            """SELECT * FROM liability_principal_events WHERE liability_id = ?
+            ORDER BY effective_date, sequence, id""",
+            (liability_id,),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def insert_many_if_absent(self, events: list[LiabilityPrincipalEvent]) -> int:
+        before = (
+            self.connection.total_changes
+            if hasattr(self.connection, "total_changes")
+            else None
+        )
+        cursor = self.connection.executemany(
+            """INSERT INTO liability_principal_events VALUES
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO NOTHING""",
+            [
+                (
+                    event.id,
+                    event.liability_id,
+                    event.effective_date.isoformat(),
+                    event.sequence,
+                    event.event_type.value,
+                    str(event.principal_delta),
+                    (
+                        str(event.resulting_principal)
+                        if event.resulting_principal is not None
+                        else None
+                    ),
+                    event.source,
+                    event.reference,
+                    event.notes,
+                    event.created_at.isoformat(),
+                )
+                for event in events
+            ],
+        )
+        self.connection.commit()
+        if before is not None:
+            return self.connection.total_changes - before
+        return max(cursor.rowcount, 0)
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> LiabilityPrincipalEvent:
+        values = dict(row)
+        values["effective_date"] = date.fromisoformat(values["effective_date"])
+        values["created_at"] = datetime.fromisoformat(values["created_at"])
+        values["principal_delta"] = _decimal(values["principal_delta"])
+        if values["resulting_principal"] is not None:
+            values["resulting_principal"] = _decimal(values["resulting_principal"])
+        return LiabilityPrincipalEvent.model_validate(values)
 
 
 class SQLiteAnnualPnlSnapshotRepository:

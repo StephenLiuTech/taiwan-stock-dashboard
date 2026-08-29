@@ -8,6 +8,7 @@ from repositories.sqlite import (
     SQLiteFxRateRepository,
     SQLiteHoldingRepository,
     SQLiteInvestmentCostEventRepository,
+    SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
@@ -16,6 +17,12 @@ from repositories.sqlite import (
     SQLiteTransactionRepository,
     SQLiteWatchlistRepository,
 )
+
+
+class PostgreSQLLiabilityPrincipalEventRepository(
+    SQLiteLiabilityPrincipalEventRepository
+):
+    """Persist replayable liability principal changes in PostgreSQL."""
 
 
 class PostgreSQLCorporateActionRepository(SQLiteCorporateActionRepository):

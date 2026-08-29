@@ -15,6 +15,7 @@ from repositories.interfaces import (
     HoldingRebuildUnitOfWork,
     HoldingRepository,
     InvestmentCostEventRepository,
+    LiabilityPrincipalEventRepository,
     LiabilityRepository,
     MarginTransactionUnitOfWork,
     MarketDataUnitOfWork,
@@ -34,6 +35,7 @@ from repositories.postgresql import (
     PostgreSQLFxRateRepository,
     PostgreSQLHoldingRepository,
     PostgreSQLInvestmentCostEventRepository,
+    PostgreSQLLiabilityPrincipalEventRepository,
     PostgreSQLLiabilityRepository,
     PostgreSQLPositionSnapshotRepository,
     PostgreSQLPriceQuoteRepository,
@@ -55,6 +57,7 @@ from repositories.sqlite import (
     SQLiteFxRateRepository,
     SQLiteHoldingRepository,
     SQLiteInvestmentCostEventRepository,
+    SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
@@ -86,6 +89,7 @@ class RepositoryBundle:
     margin_transaction_uow: MarginTransactionUnitOfWork
     annual_pnl_snapshots: AnnualPnlSnapshotRepository
     investment_cost_events: InvestmentCostEventRepository
+    liability_principal_events: LiabilityPrincipalEventRepository
 
 
 def create_repositories(backend: str, connection: object) -> RepositoryBundle:
@@ -109,6 +113,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             SQLiteMarginTransactionUnitOfWork(connection),
             SQLiteAnnualPnlSnapshotRepository(connection),
             SQLiteInvestmentCostEventRepository(connection),
+            SQLiteLiabilityPrincipalEventRepository(connection),
         )
     if backend == "postgresql":
         return RepositoryBundle(
@@ -129,5 +134,6 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             PostgreSQLMarginTransactionUnitOfWork(connection),
             PostgreSQLAnnualPnlSnapshotRepository(connection),
             PostgreSQLInvestmentCostEventRepository(connection),
+            PostgreSQLLiabilityPrincipalEventRepository(connection),
         )
     raise ValueError(f"Unsupported database backend: {backend}")

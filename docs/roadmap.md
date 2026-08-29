@@ -15,6 +15,7 @@
 | v1.0.0 | Release-ready | First usable local portfolio-management release |
 | schema v9 | Complete locally | Annual realized and YTD investment P/L foundation |
 | schema v10 | Complete locally | Replayable stock/ETF quantity conversions |
+| schema v11 | Complete locally | Replayable liability principal event ledger |
 
 ## v0.8.0 — Portfolio valuation and reporting
 

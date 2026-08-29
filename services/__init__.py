@@ -8,6 +8,10 @@ from services.analytics_engine import (
 )
 from services.annual_pnl_engine import AnnualPnlEngine, AnnualPnlFxUnavailableError
 from services.bootstrap import BootstrapService
+from services.liability_principal import (
+    LiabilityPrincipalEngine,
+    LiabilityPrincipalReplayError,
+)
 from services.margin_financing import (
     MarginFinancingError,
     MarginFinancingResult,
@@ -43,6 +47,8 @@ __all__ = [
     "MarginFinancingError",
     "MarginFinancingResult",
     "MarginFinancingService",
+    "LiabilityPrincipalEngine",
+    "LiabilityPrincipalReplayError",
     "HoldingProjectionMetadata",
     "InvalidTransactionHistoryError",
     "OversellError",

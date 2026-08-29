@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -139,6 +139,16 @@ CREATE TABLE IF NOT EXISTS annual_pnl_snapshots (
 );
 CREATE INDEX IF NOT EXISTS ix_annual_pnl_snapshots_year_date
     ON annual_pnl_snapshots(year, snapshot_date);
+CREATE TABLE IF NOT EXISTS liability_principal_events (
+    id TEXT PRIMARY KEY, liability_id TEXT NOT NULL, effective_date TEXT NOT NULL,
+    sequence INTEGER NOT NULL, event_type TEXT NOT NULL
+        CHECK (event_type IN ('opening', 'increase', 'repayment', 'correction')),
+    principal_delta TEXT NOT NULL, resulting_principal TEXT,
+    source TEXT NOT NULL, reference TEXT, notes TEXT, created_at TEXT NOT NULL,
+    UNIQUE(liability_id, effective_date, sequence)
+);
+CREATE INDEX IF NOT EXISTS ix_liability_principal_events_replay
+    ON liability_principal_events(liability_id, effective_date, sequence);
 """
 
 
