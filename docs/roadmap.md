@@ -12,7 +12,7 @@
 | v0.7 | Complete | Transaction engine, ledger CLI, atomic holding rebuild |
 | v0.8.0 | Complete | Valuation Engine, Dashboard 2.0, Daily Report Engine |
 | v0.9 | Complete | Deterministic snapshot analytics and valuation consolidation |
-| v1.0.0 | Release-ready | First usable local portfolio-management release |
+| v1.0.0 | Production baseline | Multi-market portfolio, accounting, broker import, and operations |
 | schema v9 | Complete locally | Annual realized and YTD investment P/L foundation |
 | schema v10 | Complete locally | Replayable stock/ETF quantity conversions |
 | schema v11 | Complete locally | Replayable liability principal event ledger |
@@ -115,23 +115,25 @@ Sprint 4 adds no historical or as-of valuation, allocation, benchmarks,
 cash-flow performance methodology, FX conversion, multi-currency aggregation,
 or multi-asset support.
 
-## v1.0.0 — First usable release
+## v1.0.0 — Production baseline
 
-Release readiness date: **2026-07-23**
+Baseline frozen: **2026-08-30**, schema **v13**.
 
-- Transaction ledger and holding projection
-- Official Taiwan market-data ingestion
-- Canonical current portfolio valuation
-- Basic snapshot analytics
-- CLI, Streamlit Dashboard, Markdown, HTML, and JSON presentation
-- SQLite persistence and isolated demo workflow
-- Governance, security policy, and automated CI
+- Taiwan and US holdings with USD/TWD conversion
+- Transaction ledger, realized/unrealized P/L, fees, taxes, and dividends
+- Replayable corporate actions and moving-average holding projection
+- Margin financing, stock-pledge liabilities, principal history, and
+  calendar-day financing interest
+- Non-trading-day accounting with explicit accounting-date/valuation-date
+  separation
+- Daily, position, and immutable annual P/L snapshots
+- Broker CSV parsing, reconciliation, dependency-safe apply, provenance, and
+  idempotent imports across overlapping files
+- CLI, Streamlit Dashboard, Markdown, HTML, JSON, and daily email presentation
+- SQLite/PostgreSQL providers, transactional migrations, production
+  verification, logical backups, governance, and CI
 
-Post-v1.0 work remains uncommitted roadmap direction rather than delivered
-functionality. Allocation analytics, benchmarking, cash-flow-adjusted returns,
-multi-asset support, FX conversion, import adapters, automation, and
-notifications are not part of v1.0.0.
-## Post-v1.0 operational delivery
+## Included v1.0 foundations
 
 ### Annual investment P/L foundation
 
@@ -177,7 +179,16 @@ notifications are not part of v1.0.0.
 - Official TWSE/TPEx stock and ETF dividend-event ingestion, persistence, CLI,
   MOPS payment-date enrichment, and transaction-derived current-year calendar
 - Non-persisted expected-payment cash indicator and annual dividend summary
-- Multi-market foundation: TWSE/TPEX plus opt-in US/USD valuation, persisted
-  USD/TWD rates, and combined TWD reporting (in progress)
+- Multi-market foundation: TWSE/TPEX plus US/USD valuation, persisted USD/TWD
+  rates, and combined TWD reporting
 - First-class atomic Taiwan margin BUY entry with explicit financing provenance,
   configured Decimal funding ratio, holding rebuild, and liability update
+
+## Future work
+
+- Advanced Portfolio Performance Engine
+- Time-weighted return (TWR)
+- XIRR and money-weighted return (MWR)
+- Performance and contribution attribution analysis
+- Richer dashboard and report exploration
+- Further unattended automation improvements

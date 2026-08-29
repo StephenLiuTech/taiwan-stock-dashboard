@@ -92,7 +92,7 @@ dependency-complete `NEW` transactions with provenance in one transaction.
 Mismatch, ambiguity, unsupported accounting rows, duplicate source rows, or
 unresolved financing principal changes block the entire apply.
 
-**Personal Asset Management System for Taiwan-listed portfolios.**
+**Personal Asset Management System for Taiwan and US portfolios.**
 
 PAMS is a local-first Python application for recording transactions, projecting
 holdings, ingesting official TWSE and TPEx closing prices, valuing a portfolio,
@@ -109,6 +109,14 @@ Current release: **v1.0.0**
 - Official TWSE and TPEx latest and historical market-data providers
 - Strict source-date verification with no stale-price relabeling
 - Transaction ledger with moving weighted-average holding projection
+- Realized and unrealized P/L with separately tracked fees and taxes
+- Corporate actions, dividends, margin financing, stock-pledge liabilities,
+  principal history, and calendar-day financing interest
+- Multi-market TW/US holdings with persisted USD/TWD FX conversion
+- Daily, position, and immutable annual P/L snapshots with separate accounting
+  and market-valuation dates
+- Broker CSV parsing, reconciliation, dependency-safe apply, provenance, and
+  idempotent overlapping-file imports
 - SQLite and PostgreSQL repository providers selected by database URL
 - Atomic persistence for quotes and portfolio snapshots
 - Dashboard 2.0 with summary, allocation, winners, losers, and sortable holdings
@@ -637,10 +645,16 @@ tests/             Offline unit and integration tests
 
 ## Known limitations
 
-v1.0 supports Taiwan-listed equity portfolios in one currency context. It does
-not include allocation analytics, benchmarks, TWR, MWR, IRR, XIRR, broker
-imports, multi-asset valuation, FX conversion, non-email notifications,
-authentication, or automated backup management.
+v1.0 is the production baseline for Taiwan and US equity holdings, transaction
+and corporate-action replay, broker reconciliation/import, multi-currency
+valuation, liabilities and financing interest, dividends, and daily, position,
+and annual snapshots. Production operations include schema migrations,
+verification, and auditable logical backups.
+
+Future work includes an advanced Portfolio Performance Engine, TWR, XIRR/MWR,
+attribution analysis, richer dashboard/reporting, and further unattended
+automation improvements. These methodologies and features are not implied by
+the deterministic analytics and annual P/L foundation in v1.0.
 
 ## Automated cloud delivery
 
