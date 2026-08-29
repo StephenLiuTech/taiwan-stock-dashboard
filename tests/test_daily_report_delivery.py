@@ -35,6 +35,7 @@ from pams.application import (
 )
 from pams.application.send_daily_report import EmailEnvelope, InlineImage
 from pams.delivery import DailyEmailReportRenderer, SMTPEmailTransport
+from pams.delivery.rendering import PORTFOLIO_TREND_SERIES
 
 
 def snapshot(
@@ -712,24 +713,25 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
     assert message.inline_images == legacy_message.inline_images
     assert "pams-ytd-composition-chart" not in existing_html
     assert "pams-realized-symbol-chart" not in existing_html
-    assert "pams-ytd-composition-chart" in annual_html
+    assert "pams-ytd-composition-chart" not in annual_html
     assert "pams-realized-symbol-chart" in annual_html
-    assert "2026 年度投資績效（YTD）" in message.html
+    assert "年度已實現績效（2026 YTD）" in message.html
     assert "Accounting Date:</strong> 2026-07-23" in message.html
-    assert "Valuation Date:</strong> 2026-07-22" in message.html
-    for label, amount in (
-        ("Realized P/L YTD", "+NT$100"),
-        ("Unrealized P/L", "-NT$50"),
-        ("Dividend Income YTD", "NT$20"),
-        ("Financing Cost YTD", "NT$30"),
-        ("Other Cost YTD", "NT$10"),
-        ("Total P/L YTD", "+NT$30"),
+    assert "Valuation Date:" not in annual_html
+    assert "Realized P/L YTD" in annual_html
+    assert "+NT$100" in annual_html
+    assert "Realized P/L YTD: +NT$100" in message.plain_text
+    for removed_label in (
+        "Unrealized P/L",
+        "Dividend Income YTD",
+        "Financing Cost YTD",
+        "Other Cost YTD",
+        "Total P/L YTD",
+        "YTD P/L Composition",
     ):
-        assert label in message.html
-        assert amount in message.html
-        assert f"{label}: {amount}" in message.plain_text
-    assert message.html.count('role="img"') == 2
-    assert 'class="pams-ytd-composition-chart"' in message.html
+        assert removed_label not in annual_html
+    assert annual_html.count('role="img"') == 1
+    assert 'class="pams-ytd-composition-chart"' not in message.html
     assert 'class="pams-realized-symbol-chart"' in message.html
     assert message.html.index("TWSE 2330") < message.html.index("TPEx 8299")
     assert "#b91c1c" in message.html
@@ -738,10 +740,10 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
     assert "Portfolio Trend" in message.html
     assert "Today's Contributors" in message.html
     assert ">Holdings</h2>" in message.html
-    assert message.html.index("年度投資績效（YTD）") > message.html.index(
+    assert message.html.index("年度已實現績效（2026 YTD）") > message.html.index(
         ">Holdings</h2>"
     )
-    assert "Realized P/L YTD by Symbol" in message.plain_text
+    assert "各股票 YTD 已實現損益" in message.plain_text
     assert "TWSE | 2330 | +NT$125" in message.plain_text
     assert repository.rows == (annual_snapshot,)
     assert annual.mutations == 0
@@ -753,7 +755,7 @@ def test_final_annual_performance_section_warns_when_data_is_unavailable() -> No
     case.execute(date(2026, 7, 22))
 
     message = transport.messages[0]
-    assert "年度投資績效（YTD）" in message.html
+    assert "年度已實現績效（YTD）" in message.html
     assert "Annual P/L data is unavailable for this report." in message.html
     assert "Warning: Annual P/L data is unavailable for this report." in (
         message.plain_text
@@ -1041,6 +1043,27 @@ def test_multiple_snapshots_create_embedded_png_and_readable_text_history() -> N
         assert chart.size == (1200, 650)
     assert "2026-07-20 to 2026-07-22 (3 available snapshots)" in message.plain_text
     assert "2026-07-21 | NT$1,100 | NT$1,000" in message.plain_text
+
+
+def test_portfolio_trend_contains_exactly_the_two_original_series() -> None:
+    assert PORTFOLIO_TREND_SERIES == (
+        "Total stock market value",
+        "Net stock equity",
+    )
+
+    history = [snapshot(date(2026, 7, 21)), snapshot()]
+    case, _, _, transport = use_case(value=snapshot(), history=history)
+    case.execute(date(2026, 7, 22))
+
+    message = transport.messages[0]
+    trend_text = message.plain_text.split("Portfolio Trend\n", 1)[1].split(
+        "\n\nToday's Contributors", 1
+    )[0]
+    assert "Date | Total stock market value | Net stock equity" in trend_text
+    assert "Total P/L YTD" not in trend_text
+    assert "Realized P/L YTD" not in trend_text
+    assert "Unrealized P/L" not in trend_text
+    assert "Dividend Income YTD" not in trend_text
 
 
 def test_resend_asset_flow_publishes_png_and_uses_https_without_attachment() -> None:

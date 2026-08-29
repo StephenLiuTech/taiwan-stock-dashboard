@@ -293,7 +293,7 @@ def test_realized_pnl_cli_reads_transaction_ledger(
     assert "+NT$193" in output
 
 
-def test_daily_report_portfolio_trend_includes_annual_pnl_series() -> None:
+def test_daily_report_portfolio_trend_excludes_annual_pnl_series() -> None:
     report = DailyEmailReport(
         report_date=date(2026, 2, 2),
         verified_source_date=date(2026, 2, 2),
@@ -331,8 +331,12 @@ def test_daily_report_portfolio_trend_includes_annual_pnl_series() -> None:
 
     rendered = DailyEmailReportRenderer().render(report)
 
-    assert "Total P/L YTD" in rendered.plain_text
-    assert "Realized P/L YTD" in rendered.plain_text
-    assert "Unrealized P/L" in rendered.plain_text
-    assert "Dividend Income YTD" in rendered.plain_text
+    trend_text = rendered.plain_text.split("Portfolio Trend\n", 1)[1].split(
+        "\n\nToday's Contributors", 1
+    )[0]
+    assert "Date | Total stock market value | Net stock equity" in trend_text
+    assert "Total P/L YTD" not in trend_text
+    assert "Realized P/L YTD" not in trend_text
+    assert "Unrealized P/L" not in trend_text
+    assert "Dividend Income YTD" not in trend_text
     assert rendered.inline_images[0].content.startswith(b"\x89PNG")

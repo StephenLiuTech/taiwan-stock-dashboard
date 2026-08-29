@@ -31,6 +31,10 @@ from pams.delivery.sections import DailyReportSectionRenderer
 
 CHART_CONTENT_ID = "pams-asset-change-chart"
 CHART_FILENAME = "pams-30-day-asset-change.png"
+PORTFOLIO_TREND_SERIES = (
+    "Total stock market value",
+    "Net stock equity",
+)
 CHART_FALLBACK = (
     "Only one portfolio snapshot is available; "
     "a trend chart requires at least two snapshots."
@@ -67,31 +71,17 @@ def _tone(value: Decimal | None) -> str:
 
 def _history_text(history: tuple[DailyEmailHistoryPoint, ...]) -> list[str]:
     if len(history) <= 1:
-        lines = [CHART_FALLBACK]
-        if history and history[-1].total_pnl_ytd is not None:
-            point = history[-1]
-            lines.extend(
-                [
-                    f"Total P/L YTD: {_money(point.total_pnl_ytd, signed=True)}",
-                    f"Realized P/L YTD: {_money(point.realized_pnl_ytd, signed=True)}",
-                    f"Unrealized P/L: {_money(point.unrealized_pnl, signed=True)}",
-                    "Dividend Income YTD: " f"{_money(point.dividend_income_ytd)}",
-                ]
-            )
-        return lines
+        return [CHART_FALLBACK]
     lines = [
         (
             f"Period: {history[0].snapshot_date} to {history[-1].snapshot_date} "
             f"({len(history)} available snapshots)"
         ),
-        "Date | Total stock market value | Net stock equity | Total P/L YTD | "
-        "Realized P/L YTD | Unrealized P/L | Dividend Income YTD",
+        "Date | Total stock market value | Net stock equity",
     ]
     lines.extend(
         f"{point.snapshot_date} | {_money(point.total_market_value)} | "
-        f"{_money(point.net_asset_value)} | {_money(point.total_pnl_ytd)} | "
-        f"{_money(point.realized_pnl_ytd)} | {_money(point.unrealized_pnl)} | "
-        f"{_money(point.dividend_income_ytd)}"
+        f"{_money(point.net_asset_value)}"
         for point in history
     )
     return lines
@@ -166,30 +156,6 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
         for point in history
         for value in (point.total_market_value, point.net_asset_value)
     ]
-    annual_series = (
-        (
-            "Total P/L YTD",
-            "#dc2626",
-            tuple(point.total_pnl_ytd for point in history),
-        ),
-        (
-            "Realized P/L YTD",
-            "#9333ea",
-            tuple(point.realized_pnl_ytd for point in history),
-        ),
-        (
-            "Unrealized P/L",
-            "#f59e0b",
-            tuple(point.unrealized_pnl for point in history),
-        ),
-        (
-            "Dividend Income YTD",
-            "#0891b2",
-            tuple(point.dividend_income_ytd for point in history),
-        ),
-    )
-    for _, _, series in annual_series:
-        values.extend(value for value in series if value is not None)
     minimum = min(values)
     maximum = max(values)
     span = maximum - minimum
@@ -214,27 +180,10 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
     draw.line((left, legend_y, left + 44, legend_y), fill="#2563eb", width=7)
     draw.text(
         (left + 58, legend_y - 11),
-        "Total stock market value",
+        PORTFOLIO_TREND_SERIES[0],
         fill="#334155",
         font=legend_font,
     )
-    annual_legend_y = 122
-    annual_x = left
-    for label, color, series in annual_series:
-        if not any(value is not None for value in series):
-            continue
-        draw.line(
-            (annual_x, annual_legend_y, annual_x + 28, annual_legend_y),
-            fill=color,
-            width=5,
-        )
-        draw.text(
-            (annual_x + 36, annual_legend_y - 10),
-            label,
-            fill="#334155",
-            font=axis_font,
-        )
-        annual_x += 240
     second_legend_x = left + 410
     draw.line(
         (second_legend_x, legend_y, second_legend_x + 44, legend_y),
@@ -243,7 +192,7 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
     )
     draw.text(
         (second_legend_x + 58, legend_y - 11),
-        "Net stock equity",
+        PORTFOLIO_TREND_SERIES[1],
         fill="#334155",
         font=legend_font,
     )
@@ -269,20 +218,6 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
     ]
     draw.line(market_points, fill="#2563eb", width=5, joint="curve")
     draw.line(equity_points, fill="#16a34a", width=5, joint="curve")
-    for label, color, series in annual_series:
-        if not all(value is not None for value in series):
-            continue
-        points = [
-            coordinates(index, value)
-            for index, value in enumerate(series)
-            if value is not None
-        ]
-        draw.line(
-            points,
-            fill=color,
-            width=7 if label == "Total P/L YTD" else 4,
-            joint="curve",
-        )
 
     label_count = min(5, len(history))
     label_indexes = sorted(
@@ -365,26 +300,17 @@ def _annual_performance_text(report: DailyEmailReport) -> str:
     if performance is None:
         return "\n".join(
             (
-                "年度投資績效（YTD）",
+                "年度已實現績效（YTD）",
                 f"Warning: {report.annual_warning or 'Annual P/L data is unavailable.'}",
             )
         )
     snapshot = performance.snapshot
     lines = [
-        f"{snapshot.year} 年度投資績效（YTD）",
+        f"年度已實現績效（{snapshot.year} YTD）",
         f"Accounting Date: {snapshot.snapshot_date}",
-        f"Valuation Date: {snapshot.valuation_date}",
         f"Realized P/L YTD: {_money(snapshot.realized_pnl_ytd, signed=True)}",
-        f"Unrealized P/L: {_money(snapshot.unrealized_pnl, signed=True)}",
-        f"Dividend Income YTD: {_money(snapshot.dividend_income_ytd)}",
-        f"Financing Cost YTD: {_money(snapshot.financing_cost_ytd)}",
-        f"Other Cost YTD: {_money(snapshot.other_cost_ytd)}",
-        f"Total P/L YTD: {_money(snapshot.total_pnl_ytd, signed=True)}",
         "",
-        "YTD P/L Composition",
-        "Realized P/L | Unrealized P/L | Dividend Income | Financing Cost | Other Cost | Total P/L",
-        "",
-        "Realized P/L YTD by Symbol",
+        "各股票 YTD 已實現損益",
     ]
     lines.extend(
         f"{item.market} | {item.symbol} | {_money(item.realized_pnl, signed=True)}"
@@ -400,66 +326,42 @@ def _annual_performance_html(report: DailyEmailReport) -> str:
     if performance is None:
         return (
             '<div class="pams-annual-performance" style="margin-top:28px">'
-            '<h2 style="font-size:18px;margin:0 0 10px">年度投資績效（YTD）</h2>'
+            '<h2 style="font-size:18px;margin:0 0 10px">年度已實現績效（YTD）</h2>'
             f'<p style="color:{NEUTRAL_COLOR};margin:0">'
             f'{escape(report.annual_warning or "Annual P/L data is unavailable.")}</p></div>'
         )
     snapshot = performance.snapshot
-    composition = (
-        ("Realized P/L", snapshot.realized_pnl_ytd),
-        ("Unrealized P/L", snapshot.unrealized_pnl),
-        ("Dividend Income", snapshot.dividend_income_ytd),
-        ("Financing Cost", -snapshot.financing_cost_ytd),
-        ("Other Cost", -snapshot.other_cost_ytd),
-        ("Total P/L", snapshot.total_pnl_ytd),
-    )
     symbols = tuple(
         (f"{item.market} {item.symbol}", item.realized_pnl)
         for item in performance.realized_by_symbol
     )
     symbol_chart = (
         _annual_bar_chart(
-            "Realized P/L YTD by Symbol",
+            "各股票 YTD 已實現損益",
             symbols,
             chart_class="pams-realized-symbol-chart",
         )
         if symbols
         else (
             '<h3 style="font-size:16px;margin:20px 0 8px">'
-            "Realized P/L YTD by Symbol</h3>"
+            "各股票 YTD 已實現損益</h3>"
             f'<p style="color:{NEUTRAL_COLOR}">No realized sales in the current calendar year.</p>'
         )
-    )
-    metrics = (
-        ("Realized P/L YTD", snapshot.realized_pnl_ytd, True),
-        ("Unrealized P/L", snapshot.unrealized_pnl, True),
-        ("Dividend Income YTD", snapshot.dividend_income_ytd, False),
-        ("Financing Cost YTD", snapshot.financing_cost_ytd, False),
-        ("Other Cost YTD", snapshot.other_cost_ytd, False),
-        ("Total P/L YTD", snapshot.total_pnl_ytd, True),
     )
     metric_rows = "".join(
         '<tr><td style="padding:7px 8px;border-bottom:1px solid #e5e7eb">'
         f'{escape(label)}</td><td style="padding:7px 8px;border-bottom:1px solid #e5e7eb;'
-        f"text-align:right;white-space:nowrap;color:{_tone(value) if performance_value else NEUTRAL_COLOR};"
-        f'font-weight:600">{escape(_money(value, signed=performance_value))}</td></tr>'
-        for label, value, performance_value in metrics
+        f"text-align:right;white-space:nowrap;color:{_tone(value)};"
+        f'font-weight:600">{escape(_money(value, signed=True))}</td></tr>'
+        for label, value in (("Realized P/L YTD", snapshot.realized_pnl_ytd),)
     )
     return (
         '<div class="pams-annual-performance" style="margin-top:28px">'
-        f'<h2 style="font-size:18px;margin:0 0 8px">{snapshot.year} 年度投資績效（YTD）</h2>'
+        f'<h2 style="font-size:18px;margin:0 0 8px">年度已實現績效（{snapshot.year} YTD）</h2>'
         '<p style="margin:0 0 12px;color:#4b5563">'
-        f"<strong>Accounting Date:</strong> {snapshot.snapshot_date}<br>"
-        f"<strong>Valuation Date:</strong> {snapshot.valuation_date}</p>"
+        f"<strong>Accounting Date:</strong> {snapshot.snapshot_date}</p>"
         '<table class="pams-annual-metrics" width="100%" style="width:100%;'
-        f'border-collapse:collapse">{metric_rows}</table>'
-        + _annual_bar_chart(
-            "YTD P/L Composition",
-            composition,
-            chart_class="pams-ytd-composition-chart",
-        )
-        + symbol_chart
-        + "</div>"
+        f'border-collapse:collapse">{metric_rows}</table>' + symbol_chart + "</div>"
     )
 
 
@@ -745,35 +647,6 @@ class DailyEmailReportRenderer:
                 f'<p style="color:{NEUTRAL_COLOR}">{escape(CHART_FALLBACK)}</p>'
             )
             inline_images = ()
-        annual_point = report.history[-1] if report.history else None
-        annual_summary_html = ""
-        if annual_point is not None and annual_point.total_pnl_ytd is not None:
-            annual_summary_html = (
-                '<table role="presentation" style="border-collapse:collapse;'
-                'width:100%;margin:12px 0 24px"><tr>'
-                + _summary_card(
-                    "Total P/L YTD",
-                    _money(annual_point.total_pnl_ytd, signed=True),
-                    color=_tone(annual_point.total_pnl_ytd),
-                )
-                + _summary_card(
-                    "Realized P/L YTD",
-                    _money(annual_point.realized_pnl_ytd, signed=True),
-                    color=_tone(annual_point.realized_pnl_ytd),
-                )
-                + _summary_card(
-                    "Unrealized P/L",
-                    _money(annual_point.unrealized_pnl, signed=True),
-                    color=_tone(annual_point.unrealized_pnl),
-                )
-                + "</tr><tr>"
-                + _summary_card(
-                    "Dividend Income YTD", _money(annual_point.dividend_income_ytd)
-                )
-                + '<td style="width:33%"></td><td style="width:33%"></td>'
-                + "</tr></table>"
-            )
-
         daily_cards = (
             "<tr>"
             + _summary_card(
@@ -860,7 +733,6 @@ class DailyEmailReportRenderer:
 {summary_cards}</table>
 <h2 style="font-size:18px">Portfolio Trend</h2>
 {chart_html}
-{annual_summary_html}
 <table role="presentation" class="pams-wide-tables" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto"><tr><td style="padding:0;vertical-align:top">
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
 <table class="pams-canonical-report-table" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto">
