@@ -1,5 +1,6 @@
 """Safe broker-import planning and atomic application."""
 
+from datetime import date
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
@@ -46,8 +47,16 @@ class ImportBrokerUseCase:
         self.unit = unit_of_work
         self.engine = transaction_engine or TransactionEngine()
 
-    def plan(self, source: Path) -> BrokerApplyPlan:
-        reconciliation = self.reconciliation.execute(source)
+    def plan(
+        self,
+        source: Path,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> BrokerApplyPlan:
+        reconciliation = self.reconciliation.execute(
+            source, start_date=start_date, end_date=end_date
+        )
         items: list[BrokerApplyItem] = []
         for item in reconciliation.items:
             record = item.normalized_record
@@ -86,8 +95,10 @@ class ImportBrokerUseCase:
         *,
         apply: bool,
         expected_fingerprint: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> BrokerApplyResult:
-        plan = self.plan(source)
+        plan = self.plan(source, start_date=start_date, end_date=end_date)
         if (
             expected_fingerprint is not None
             and plan.reconciliation.source_fingerprint != expected_fingerprint

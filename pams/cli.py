@@ -187,6 +187,8 @@ def build_parser() -> argparse.ArgumentParser:
         "import", help="plan or atomically apply safe NEW brokerage rows"
     )
     broker_import.add_argument("source", type=Path)
+    broker_import.add_argument("--from", dest="start_date", type=parse_iso_date)
+    broker_import.add_argument("--to", dest="end_date", type=parse_iso_date)
     broker_mode = broker_import.add_mutually_exclusive_group(required=True)
     broker_mode.add_argument("--dry-run", action="store_true")
     broker_mode.add_argument("--apply", action="store_true")
@@ -596,7 +598,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else:
                     assert application.import_broker is not None
                     preview = application.import_broker.execute(
-                        arguments.source, apply=False
+                        arguments.source,
+                        apply=False,
+                        start_date=arguments.start_date,
+                        end_date=arguments.end_date,
                     )
                     print(format_apply_plan(preview, json_output=arguments.json_output))
                     if arguments.apply:
@@ -606,6 +611,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                             expected_fingerprint=(
                                 preview.plan.reconciliation.source_fingerprint
                             ),
+                            start_date=arguments.start_date,
+                            end_date=arguments.end_date,
                         )
                         print(
                             format_apply_plan(result, json_output=arguments.json_output)

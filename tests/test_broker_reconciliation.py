@@ -228,5 +228,18 @@ def test_cli_requires_exactly_one_broker_import_mode() -> None:
     parser = build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["broker", "import", "statement.csv"])
-    arguments = parser.parse_args(["broker", "import", "statement.csv", "--dry-run"])
+    arguments = parser.parse_args(
+        [
+            "broker",
+            "import",
+            "statement.csv",
+            "--dry-run",
+            "--from",
+            "2026-01-01",
+            "--to",
+            "2026-08-28",
+        ]
+    )
     assert arguments.dry_run is True
+    assert arguments.start_date == date(2026, 1, 1)
+    assert arguments.end_date == date(2026, 8, 28)

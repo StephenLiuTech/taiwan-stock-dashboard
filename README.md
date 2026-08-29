@@ -82,6 +82,8 @@ apply:
 
 ```powershell
 python -m pams broker import data/imports/statement.csv --dry-run
+python -m pams broker import data/imports/statement.csv --dry-run `
+  --from 2026-01-01 --to 2026-08-28
 python -m pams broker import data/imports/statement.csv --apply
 ```
 
