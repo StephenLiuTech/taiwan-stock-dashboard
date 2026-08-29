@@ -689,6 +689,31 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
     case.execute()
 
     message = transport.messages[0]
+    legacy_transport = TransportStub()
+    legacy_case = SendDailyReportUseCase(
+        UpdateStub(),  # type: ignore[arg-type]
+        SnapshotStub(snapshot()),  # type: ignore[arg-type]
+        PositionStub(),  # type: ignore[arg-type]
+        HoldingStub(),  # type: ignore[arg-type]
+        DeliveryStub(),
+        DailyEmailReportRenderer(),
+        legacy_transport,
+        "sender@example.com",
+        "recipient@example.com",
+        today=lambda: date(2026, 7, 23),
+    )
+    legacy_case.execute()
+    legacy_message = legacy_transport.messages[0]
+
+    annual_marker = '<div class="pams-annual-performance"'
+    existing_html, annual_html = message.html.split(annual_marker, 1)
+    legacy_existing_html, _ = legacy_message.html.split(annual_marker, 1)
+    assert existing_html == legacy_existing_html
+    assert message.inline_images == legacy_message.inline_images
+    assert "pams-ytd-composition-chart" not in existing_html
+    assert "pams-realized-symbol-chart" not in existing_html
+    assert "pams-ytd-composition-chart" in annual_html
+    assert "pams-realized-symbol-chart" in annual_html
     assert "2026 年度投資績效（YTD）" in message.html
     assert "Accounting Date:</strong> 2026-07-23" in message.html
     assert "Valuation Date:</strong> 2026-07-22" in message.html
