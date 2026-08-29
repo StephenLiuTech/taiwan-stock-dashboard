@@ -369,13 +369,6 @@ def _migrate_postgresql_v11_to_v12(connection: PostgreSQLConnection) -> None:
     connection.execute(
         "ALTER TABLE annual_pnl_snapshots ADD COLUMN IF NOT EXISTS valuation_date TEXT"
     )
-
-
-def _migrate_postgresql_v12_to_v13(connection: PostgreSQLConnection) -> None:
-    """Add structured broker-source provenance without touching accounting rows."""
-    for statement in POSTGRESQL_SCHEMA.split(";"):
-        if "broker_import_records" in statement:
-            connection.execute(statement)
     connection.execute(
         """UPDATE annual_pnl_snapshots a SET valuation_date = (
         SELECT MAX(d.snapshot_date) FROM daily_snapshots d
@@ -391,3 +384,10 @@ def _migrate_postgresql_v12_to_v13(connection: PostgreSQLConnection) -> None:
     connection.execute(
         "ALTER TABLE annual_pnl_snapshots ALTER COLUMN valuation_date SET NOT NULL"
     )
+
+
+def _migrate_postgresql_v12_to_v13(connection: PostgreSQLConnection) -> None:
+    """Add structured broker-source provenance without touching accounting rows."""
+    for statement in POSTGRESQL_SCHEMA.split(";"):
+        if "broker_import_records" in statement:
+            connection.execute(statement)

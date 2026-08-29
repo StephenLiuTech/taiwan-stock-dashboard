@@ -144,6 +144,7 @@ def test_schema_12_to_13_adds_only_broker_provenance() -> None:
     )
     assert any("ix_broker_import_domain_entity" in item for item in sql)
     assert not any("ALTER TABLE transactions" in item for item in sql)
+    assert not any("annual_pnl_snapshots" in item for item in sql)
     assert any(parameters == (13,) for _, parameters in connection.statements)
     assert connection.commits == 1
 
