@@ -300,15 +300,20 @@ def _annual_performance_text(report: DailyEmailReport) -> str:
     if performance is None:
         return "\n".join(
             (
-                "年度已實現績效（YTD）",
+                "年度投資績效（YTD）",
                 f"Warning: {report.annual_warning or 'Annual P/L data is unavailable.'}",
             )
         )
     snapshot = performance.snapshot
     lines = [
-        f"年度已實現績效（{snapshot.year} YTD）",
+        f"{snapshot.year} 年度投資績效（YTD）",
         f"Accounting Date: {snapshot.snapshot_date}",
+        f"Valuation Date: {snapshot.valuation_date}",
         f"Realized P/L YTD: {_money(snapshot.realized_pnl_ytd, signed=True)}",
+        f"Dividend Income YTD: {_money(snapshot.dividend_income_ytd)}",
+        f"Financing Cost YTD: {_money(snapshot.financing_cost_ytd)}",
+        f"Other Cost YTD: {_money(snapshot.other_cost_ytd)}",
+        f"Total P/L YTD: {_money(snapshot.total_pnl_ytd, signed=True)}",
         "",
         "各股票 YTD 已實現損益",
     ]
@@ -326,7 +331,7 @@ def _annual_performance_html(report: DailyEmailReport) -> str:
     if performance is None:
         return (
             '<div class="pams-annual-performance" style="margin-top:28px">'
-            '<h2 style="font-size:18px;margin:0 0 10px">年度已實現績效（YTD）</h2>'
+            '<h2 style="font-size:18px;margin:0 0 10px">年度投資績效（YTD）</h2>'
             f'<p style="color:{NEUTRAL_COLOR};margin:0">'
             f'{escape(report.annual_warning or "Annual P/L data is unavailable.")}</p></div>'
         )
@@ -348,18 +353,26 @@ def _annual_performance_html(report: DailyEmailReport) -> str:
             f'<p style="color:{NEUTRAL_COLOR}">No realized sales in the current calendar year.</p>'
         )
     )
+    metrics = (
+        ("Realized P/L YTD", snapshot.realized_pnl_ytd, True),
+        ("Dividend Income YTD", snapshot.dividend_income_ytd, False),
+        ("Financing Cost YTD", snapshot.financing_cost_ytd, False),
+        ("Other Cost YTD", snapshot.other_cost_ytd, False),
+        ("Total P/L YTD", snapshot.total_pnl_ytd, True),
+    )
     metric_rows = "".join(
         '<tr><td style="padding:7px 8px;border-bottom:1px solid #e5e7eb">'
         f'{escape(label)}</td><td style="padding:7px 8px;border-bottom:1px solid #e5e7eb;'
-        f"text-align:right;white-space:nowrap;color:{_tone(value)};"
-        f'font-weight:600">{escape(_money(value, signed=True))}</td></tr>'
-        for label, value in (("Realized P/L YTD", snapshot.realized_pnl_ytd),)
+        f"text-align:right;white-space:nowrap;color:{_tone(value) if performance_value else NEUTRAL_COLOR};"
+        f'font-weight:600">{escape(_money(value, signed=performance_value))}</td></tr>'
+        for label, value, performance_value in metrics
     )
     return (
         '<div class="pams-annual-performance" style="margin-top:28px">'
-        f'<h2 style="font-size:18px;margin:0 0 8px">年度已實現績效（{snapshot.year} YTD）</h2>'
+        f'<h2 style="font-size:18px;margin:0 0 8px">{snapshot.year} 年度投資績效（YTD）</h2>'
         '<p style="margin:0 0 12px;color:#4b5563">'
-        f"<strong>Accounting Date:</strong> {snapshot.snapshot_date}</p>"
+        f"<strong>Accounting Date:</strong> {snapshot.snapshot_date}<br>"
+        f"<strong>Valuation Date:</strong> {snapshot.valuation_date}</p>"
         '<table class="pams-annual-metrics" width="100%" style="width:100%;'
         f'border-collapse:collapse">{metric_rows}</table>' + symbol_chart + "</div>"
     )

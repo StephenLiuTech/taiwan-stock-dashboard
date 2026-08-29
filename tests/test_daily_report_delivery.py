@@ -715,21 +715,21 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
     assert "pams-realized-symbol-chart" not in existing_html
     assert "pams-ytd-composition-chart" not in annual_html
     assert "pams-realized-symbol-chart" in annual_html
-    assert "年度已實現績效（2026 YTD）" in message.html
+    assert "2026 年度投資績效（YTD）" in message.html
     assert "Accounting Date:</strong> 2026-07-23" in message.html
-    assert "Valuation Date:" not in annual_html
-    assert "Realized P/L YTD" in annual_html
-    assert "+NT$100" in annual_html
-    assert "Realized P/L YTD: +NT$100" in message.plain_text
-    for removed_label in (
-        "Unrealized P/L",
-        "Dividend Income YTD",
-        "Financing Cost YTD",
-        "Other Cost YTD",
-        "Total P/L YTD",
-        "YTD P/L Composition",
+    assert "Valuation Date:</strong> 2026-07-22" in annual_html
+    for label, amount in (
+        ("Realized P/L YTD", "+NT$100"),
+        ("Dividend Income YTD", "NT$20"),
+        ("Financing Cost YTD", "NT$30"),
+        ("Other Cost YTD", "NT$10"),
+        ("Total P/L YTD", "+NT$30"),
     ):
-        assert removed_label not in annual_html
+        assert label in annual_html
+        assert amount in annual_html
+        assert f"{label}: {amount}" in message.plain_text
+    assert "Unrealized P/L" not in annual_html
+    assert "YTD P/L Composition" not in annual_html
     assert annual_html.count('role="img"') == 1
     assert 'class="pams-ytd-composition-chart"' not in message.html
     assert 'class="pams-realized-symbol-chart"' in message.html
@@ -740,7 +740,7 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
     assert "Portfolio Trend" in message.html
     assert "Today's Contributors" in message.html
     assert ">Holdings</h2>" in message.html
-    assert message.html.index("年度已實現績效（2026 YTD）") > message.html.index(
+    assert message.html.index("2026 年度投資績效（YTD）") > message.html.index(
         ">Holdings</h2>"
     )
     assert "各股票 YTD 已實現損益" in message.plain_text
@@ -755,7 +755,7 @@ def test_final_annual_performance_section_warns_when_data_is_unavailable() -> No
     case.execute(date(2026, 7, 22))
 
     message = transport.messages[0]
-    assert "年度已實現績效（YTD）" in message.html
+    assert "年度投資績效（YTD）" in message.html
     assert "Annual P/L data is unavailable for this report." in message.html
     assert "Warning: Annual P/L data is unavailable for this report." in (
         message.plain_text
