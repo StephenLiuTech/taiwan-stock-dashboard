@@ -49,6 +49,7 @@ from pams.application import (
     ValuationRepositoryError,
     WatchlistError,
 )
+from pams.brokerage.reporting import format_reconciliation
 from pams.composition import (
     compose_application,
     compose_bootstrap_import,
@@ -169,6 +170,19 @@ def build_parser() -> argparse.ArgumentParser:
     fx_mode.add_argument("--apply", action="store_true")
     fx_backfill.add_argument("--database", type=Path)
     fx_backfill.add_argument("--verbose", action="store_true")
+    broker = commands.add_parser(
+        "broker", help="reconcile brokerage statements without database writes"
+    )
+    broker_commands = broker.add_subparsers(dest="broker_command", required=True)
+    broker_reconcile = broker_commands.add_parser(
+        "reconcile", help="compare a brokerage CSV with the PAMS ledger"
+    )
+    broker_reconcile.add_argument("source", type=Path)
+    broker_reconcile.add_argument("--from", dest="start_date", type=parse_iso_date)
+    broker_reconcile.add_argument("--to", dest="end_date", type=parse_iso_date)
+    broker_reconcile.add_argument("--json", action="store_true", dest="json_output")
+    broker_reconcile.add_argument("--database", type=Path)
+    broker_reconcile.add_argument("--verbose", action="store_true")
     holdings = commands.add_parser("holdings", help="manage projected holdings")
     holding_commands = holdings.add_subparsers(dest="holdings_command", required=True)
     rebuild = holding_commands.add_parser(
@@ -558,6 +572,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.database,
             verbose=getattr(arguments, "verbose", False),
         ) as application:
+            if arguments.command == "broker":
+                assert application.reconcile_broker is not None
+                plan = application.reconcile_broker.execute(
+                    arguments.source,
+                    start_date=arguments.start_date,
+                    end_date=arguments.end_date,
+                )
+                print(format_reconciliation(plan, json_output=arguments.json_output))
+                return int(ExitCode.SUCCESS)
             if arguments.command == "daily-report":
                 assert application.send_daily_report is not None
                 result = application.send_daily_report.execute(

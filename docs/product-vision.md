@@ -336,3 +336,8 @@ dates are never filled with fabricated rates.
 Corporate quantity conversions are auditable non-cash financial events. Stock
 and ETF splits change owned units while preserving total holding cost and must
 never be represented as artificial BUY or SELL transactions.
+
+Broker statements enter through replaceable adapters and a deterministic,
+read-only reconciliation engine before any financial event can be persisted.
+Source provenance is structured and auditable; raw account files and brittle
+free-form note conventions are not business truth.

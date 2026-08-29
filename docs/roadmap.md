@@ -58,7 +58,8 @@ remain intentionally outside v0.8.0:
 
 - dividend and corporate-action workflows
 - additional delivery adapters and scheduling
-- broker imports and reconciliation
+- broker-neutral statement parsing and read-only reconciliation (completed)
+- schema-v13 broker provenance and explicitly approved import apply (proposed)
 - authentication and multi-user boundaries
 - production database adapters, backups, and deployment operations
 

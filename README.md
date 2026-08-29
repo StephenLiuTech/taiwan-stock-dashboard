@@ -67,6 +67,19 @@ rebuilds holdings, and verifies the persisted result in one transaction. Any
 failure rolls back the entire operation; rerunning an identical import is a
 successful no-op.
 
+For future statements, use the broker-neutral read-only reconciliation CLI:
+
+```powershell
+python -m pams broker reconcile data/imports/statement.csv
+python -m pams broker reconcile data/imports/statement.csv `
+  --from 2026-01-01 --to 2026-12-31 --json
+```
+
+It reports `MATCHED`, `NEW`, `MISMATCH`, `AMBIGUOUS`, and `UNSUPPORTED` rows
+and identifies the source by SHA-256. It never writes the database. Real broker
+files are local evidence and must not be committed. Apply is blocked until the
+proposed structured schema-v13 provenance ledger is separately approved.
+
 **Personal Asset Management System for Taiwan-listed portfolios.**
 
 PAMS is a local-first Python application for recording transactions, projecting

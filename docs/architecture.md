@@ -154,6 +154,32 @@ and taxes reduce realized profit. BUY fees, SELL fees, and taxes remain
 immutable ledger expenses and are reported separately; they never enter
 holding cost, unrealized profit or loss, or holding return.
 
+### Broker import and reconciliation boundary
+
+```text
+Broker CSV adapter
+    ↓
+Immutable normalized broker records
+    ↓
+BrokerReconciliationEngine (pure)
+    ↓
+ReconcileBrokerUseCase
+    ↓
+CLI / JSON reconciliation plan
+```
+
+The adapter preserves `Decimal` values, source-row references, and unsupported
+row types without writing them as trades. Matching uses full economic identity
+(`symbol`, `market`, date, side, quantity, price), explicit financing type when
+the source supplies it, and exact fee/tax/source-reference facts to resolve
+otherwise identical same-day executions. Multiple remaining candidates are
+`AMBIGUOUS`; no fuzzy choice is allowed. Missing rows in a partial statement
+never imply ledger deletion.
+
+Schema v12 has no structured import-provenance boundary. Consequently the
+Checkpoint 7 CLI is read-only. ADR 0004 proposes schema-v13 provenance needed
+for transactional, idempotent apply; free-form notes are not import identity.
+
 ### Margin-financed transaction boundary
 
 ```text

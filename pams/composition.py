@@ -74,6 +74,7 @@ from pams.application import (
     PortfolioHistoryUseCase,
     PortfolioStatusUseCase,
     QueryHoldingsUseCase,
+    ReconcileBrokerUseCase,
     ReportSectionSettings,
     SendDailyReportUseCase,
     UpdatePortfolioUseCase,
@@ -125,6 +126,7 @@ class ApplicationContext:
     watchlist: WatchlistUseCase | None = None
     dividend_events: DividendEventUseCase | None = None
     bootstrap_import: BootstrapImportUseCase | None = None
+    reconcile_broker: ReconcileBrokerUseCase | None = None
 
 
 class _DryRunEmailTransport:
@@ -856,6 +858,7 @@ def _compose(
             bootstrap_import=BootstrapImportUseCase(
                 holdings, transaction_repository, transaction_engine
             ),
+            reconcile_broker=ReconcileBrokerUseCase(holdings, transaction_repository),
         )
     finally:
         connection.close()

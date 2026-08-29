@@ -99,6 +99,7 @@ from pams.application.portfolio_history import PortfolioHistoryUseCase
 from pams.application.portfolio_status import PortfolioStatusUseCase
 from pams.application.query_holdings import QueryHoldingsUseCase
 from pams.application.rebuild_holdings import RebuildHoldingsUseCase
+from pams.application.reconcile_broker import ReconcileBrokerUseCase
 from pams.application.report_sections import (
     BuildReportSectionsUseCase,
     EventProvider,
@@ -200,6 +201,7 @@ __all__ = [
     "PortfolioStatusUseCase",
     "PortfolioTotals",
     "QueryHoldingsUseCase",
+    "ReconcileBrokerUseCase",
     "PositionSummary",
     "ProductionDatabaseProtectedError",
     "ProjectedHoldingResult",
