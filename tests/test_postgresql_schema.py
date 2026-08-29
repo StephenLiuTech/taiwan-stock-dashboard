@@ -133,6 +133,21 @@ def test_schema_11_to_12_adds_and_backfills_valuation_date() -> None:
     assert connection.commits == 1
 
 
+def test_schema_12_to_13_adds_only_broker_provenance() -> None:
+    connection = PostgreSQLConnectionStub(12)
+
+    initialize_postgresql_schema(connection)  # type: ignore[arg-type]
+
+    sql = [statement for statement, _ in connection.statements]
+    assert any(
+        "CREATE TABLE IF NOT EXISTS broker_import_records" in item for item in sql
+    )
+    assert any("ix_broker_import_domain_entity" in item for item in sql)
+    assert not any("ALTER TABLE transactions" in item for item in sql)
+    assert any(parameters == (13,) for _, parameters in connection.statements)
+    assert connection.commits == 1
+
+
 def test_postgresql_schema_upgrade_rolls_back_on_failure() -> None:
     connection = PostgreSQLConnectionStub(7, fail_on="financed_quantity")
 
@@ -144,7 +159,7 @@ def test_postgresql_schema_upgrade_rolls_back_on_failure() -> None:
 
 
 def test_newer_postgresql_schema_is_rejected_without_commit() -> None:
-    connection = PostgreSQLConnectionStub(13)
+    connection = PostgreSQLConnectionStub(14)
 
     with pytest.raises(RuntimeError, match="newer than supported"):
         initialize_postgresql_schema(connection)  # type: ignore[arg-type]

@@ -341,3 +341,6 @@ Broker statements enter through replaceable adapters and a deterministic,
 read-only reconciliation engine before any financial event can be persisted.
 Source provenance is structured and auditable; raw account files and brittle
 free-form note conventions are not business truth.
+Schema-v13 broker imports remain transaction-first: reconciliation is the
+economic duplicate defense, provenance is the audit link, and atomic apply is
+permitted only when every accounting dependency is explicit.

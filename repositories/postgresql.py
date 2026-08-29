@@ -2,6 +2,7 @@
 
 from repositories.sqlite import (
     SQLiteAnnualPnlSnapshotRepository,
+    SQLiteBrokerImportRecordRepository,
     SQLiteCorporateActionRepository,
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
@@ -23,6 +24,10 @@ class PostgreSQLLiabilityPrincipalEventRepository(
     SQLiteLiabilityPrincipalEventRepository
 ):
     """Persist replayable liability principal changes in PostgreSQL."""
+
+
+class PostgreSQLBrokerImportRecordRepository(SQLiteBrokerImportRecordRepository):
+    """Persist structured broker provenance in PostgreSQL."""
 
 
 class PostgreSQLCorporateActionRepository(SQLiteCorporateActionRepository):

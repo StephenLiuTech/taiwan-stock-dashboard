@@ -49,7 +49,7 @@ from pams.application import (
     ValuationRepositoryError,
     WatchlistError,
 )
-from pams.brokerage.reporting import format_reconciliation
+from pams.brokerage.reporting import format_apply_plan, format_reconciliation
 from pams.composition import (
     compose_application,
     compose_bootstrap_import,
@@ -183,6 +183,16 @@ def build_parser() -> argparse.ArgumentParser:
     broker_reconcile.add_argument("--json", action="store_true", dest="json_output")
     broker_reconcile.add_argument("--database", type=Path)
     broker_reconcile.add_argument("--verbose", action="store_true")
+    broker_import = broker_commands.add_parser(
+        "import", help="plan or atomically apply safe NEW brokerage rows"
+    )
+    broker_import.add_argument("source", type=Path)
+    broker_mode = broker_import.add_mutually_exclusive_group(required=True)
+    broker_mode.add_argument("--dry-run", action="store_true")
+    broker_mode.add_argument("--apply", action="store_true")
+    broker_import.add_argument("--json", action="store_true", dest="json_output")
+    broker_import.add_argument("--database", type=Path)
+    broker_import.add_argument("--verbose", action="store_true")
     holdings = commands.add_parser("holdings", help="manage projected holdings")
     holding_commands = holdings.add_subparsers(dest="holdings_command", required=True)
     rebuild = holding_commands.add_parser(
@@ -573,13 +583,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             verbose=getattr(arguments, "verbose", False),
         ) as application:
             if arguments.command == "broker":
-                assert application.reconcile_broker is not None
-                plan = application.reconcile_broker.execute(
-                    arguments.source,
-                    start_date=arguments.start_date,
-                    end_date=arguments.end_date,
-                )
-                print(format_reconciliation(plan, json_output=arguments.json_output))
+                if arguments.broker_command == "reconcile":
+                    assert application.reconcile_broker is not None
+                    plan = application.reconcile_broker.execute(
+                        arguments.source,
+                        start_date=arguments.start_date,
+                        end_date=arguments.end_date,
+                    )
+                    print(
+                        format_reconciliation(plan, json_output=arguments.json_output)
+                    )
+                else:
+                    assert application.import_broker is not None
+                    preview = application.import_broker.execute(
+                        arguments.source, apply=False
+                    )
+                    print(format_apply_plan(preview, json_output=arguments.json_output))
+                    if arguments.apply:
+                        result = application.import_broker.execute(
+                            arguments.source,
+                            apply=True,
+                            expected_fingerprint=(
+                                preview.plan.reconciliation.source_fingerprint
+                            ),
+                        )
+                        print(
+                            format_apply_plan(result, json_output=arguments.json_output)
+                        )
                 return int(ExitCode.SUCCESS)
             if arguments.command == "daily-report":
                 assert application.send_daily_report is not None

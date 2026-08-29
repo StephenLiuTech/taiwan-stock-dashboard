@@ -76,9 +76,19 @@ python -m pams broker reconcile data/imports/statement.csv `
 ```
 
 It reports `MATCHED`, `NEW`, `MISMATCH`, `AMBIGUOUS`, and `UNSUPPORTED` rows
-and identifies the source by SHA-256. It never writes the database. Real broker
-files are local evidence and must not be committed. Apply is blocked until the
-proposed structured schema-v13 provenance ledger is separately approved.
+and identifies the source by SHA-256. Real broker files are local evidence and
+must not be committed. Schema v13 adds structured provenance and explicit safe
+apply:
+
+```powershell
+python -m pams broker import data/imports/statement.csv --dry-run
+python -m pams broker import data/imports/statement.csv --apply
+```
+
+Apply reconciles again, verifies the displayed fingerprint, and writes only
+dependency-complete `NEW` transactions with provenance in one transaction.
+Mismatch, ambiguity, unsupported accounting rows, duplicate source rows, or
+unresolved financing principal changes block the entire apply.
 
 **Personal Asset Management System for Taiwan-listed portfolios.**
 

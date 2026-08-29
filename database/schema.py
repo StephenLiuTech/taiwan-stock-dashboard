@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -150,6 +150,15 @@ CREATE TABLE IF NOT EXISTS liability_principal_events (
 );
 CREATE INDEX IF NOT EXISTS ix_liability_principal_events_replay
     ON liability_principal_events(liability_id, effective_date, sequence);
+CREATE TABLE IF NOT EXISTS broker_import_records (
+    id TEXT PRIMARY KEY, broker TEXT NOT NULL, source_fingerprint TEXT NOT NULL,
+    source_row_reference TEXT NOT NULL, record_type TEXT NOT NULL,
+    domain_entity_type TEXT NOT NULL, domain_entity_id TEXT NOT NULL,
+    normalized_identity TEXT, imported_at TEXT NOT NULL, notes TEXT,
+    UNIQUE(broker, source_fingerprint, source_row_reference, domain_entity_type)
+);
+CREATE INDEX IF NOT EXISTS ix_broker_import_domain_entity
+    ON broker_import_records(domain_entity_type, domain_entity_id);
 """
 
 

@@ -2,6 +2,7 @@
 
 from domain.analytics import DailyPortfolioReturn, PortfolioAnalytics
 from domain.annual_pnl import AnnualPnlSnapshot, InvestmentCostEvent, RealizedSale
+from domain.broker_import import BrokerImportRecord
 from domain.enums import (
     Currency,
     DividendStatus,
@@ -72,6 +73,7 @@ from domain.valuation import HoldingValuation, PortfolioValuation
 
 __all__ = [
     "CorporateAction",
+    "BrokerImportRecord",
     "Currency",
     "AllocationItem",
     "CollateralHoldingReference",

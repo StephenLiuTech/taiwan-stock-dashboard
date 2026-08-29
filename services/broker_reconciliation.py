@@ -62,8 +62,7 @@ class BrokerReconciliationEngine:
                 candidate
                 for candidate in candidates
                 if candidate.notes
-                and record.source_reference
-                and record.source_reference in candidate.notes
+                and record.source_reference.split(":", 1)[0] in candidate.notes
             ]
             if len(referenced) == 1:
                 candidates = referenced
@@ -178,7 +177,10 @@ class BrokerReconciliationEngine:
             "fee": (record.fee, transaction.fees),
             "tax": (record.tax, transaction.taxes),
         }
-        if record.financing_type is not None:
+        if (
+            record.financing_type is not None
+            and record.transaction_type is TransactionType.BUY
+        ):
             pairs["financing_type"] = (
                 record.financing_type,
                 transaction.financing_type,
@@ -216,8 +218,20 @@ class BrokerReconciliationEngine:
 
     @staticmethod
     def _dependencies(record: NormalizedBrokerRecord) -> tuple[str, ...]:
-        if record.transaction_type is not None and record.financing_type is None:
+        if not record.financing_classification_known:
             return ("BLOCKED: explicit cash/margin classification is required",)
         if record.transaction_type is TransactionType.SELL:
-            return ("BLOCKED: financing principal repayment evidence is required",)
-        return ("BLOCKED: financing principal evidence is required",)
+            if record.financing_type is not None and (
+                record.financing_principal_delta is None
+                or record.financing_principal_delta >= 0
+            ):
+                return (
+                    "BLOCKED: negative financing principal repayment evidence is required",
+                )
+            return ()
+        if record.financing_type is not None and (
+            record.financing_principal_delta is None
+            or record.financing_principal_delta <= 0
+        ):
+            return ("BLOCKED: positive financing principal evidence is required",)
+        return ()

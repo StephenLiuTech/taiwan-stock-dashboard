@@ -36,6 +36,8 @@ class NormalizedBrokerRecord:
     market: Market | None
     transaction_type: TransactionType | None
     financing_type: FinancingType | None
+    financing_classification_known: bool
+    financing_principal_delta: Decimal | None
     quantity: Decimal | None
     price: Decimal | None
     gross_amount: Decimal | None
@@ -93,3 +95,56 @@ class ReconciliationPlan:
             }
             for item in self.items
         )
+
+
+class BrokerApplyStatus(StrEnum):
+    NO_WRITE = "NO_WRITE"
+    ELIGIBLE = "ELIGIBLE"
+    DEPENDENCY_BLOCKED = "DEPENDENCY_BLOCKED"
+    RECONCILIATION_BLOCKED = "RECONCILIATION_BLOCKED"
+
+
+@dataclass(frozen=True)
+class BrokerApplyItem:
+    source_row: int
+    source_reference: str
+    reconciliation_status: ReconciliationStatus
+    apply_status: BrokerApplyStatus
+    domain_action: str | None
+    target_entity_type: str | None
+    proposed_entity_id: str | None
+    dependencies: tuple[str, ...] = ()
+    blocking_reasons: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class BrokerApplyPlan:
+    reconciliation: ReconciliationPlan
+    items: tuple[BrokerApplyItem, ...]
+
+    @property
+    def blocked(self) -> bool:
+        return any(
+            item.apply_status
+            in {
+                BrokerApplyStatus.DEPENDENCY_BLOCKED,
+                BrokerApplyStatus.RECONCILIATION_BLOCKED,
+            }
+            for item in self.items
+        )
+
+    @property
+    def eligible_count(self) -> int:
+        return sum(
+            item.apply_status is BrokerApplyStatus.ELIGIBLE for item in self.items
+        )
+
+
+@dataclass(frozen=True)
+class BrokerApplyResult:
+    plan: BrokerApplyPlan
+    applied: bool
+    inserted_transactions: int
+    inserted_principal_events: int
+    inserted_provenance: int

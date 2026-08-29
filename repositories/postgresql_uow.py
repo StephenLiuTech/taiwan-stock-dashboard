@@ -4,8 +4,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from repositories.postgresql import (
+    PostgreSQLBrokerImportRecordRepository,
     PostgreSQLFxRateRepository,
     PostgreSQLHoldingRepository,
+    PostgreSQLLiabilityPrincipalEventRepository,
     PostgreSQLLiabilityRepository,
     PostgreSQLPositionSnapshotRepository,
     PostgreSQLPriceQuoteRepository,
@@ -72,6 +74,34 @@ class PostgreSQLMarginTransactionUnitOfWork:
             connection, auto_commit=False
         )
         self.liabilities = PostgreSQLLiabilityRepository(connection, auto_commit=False)
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        try:
+            yield
+        except Exception:
+            self.connection.rollback()
+            raise
+        else:
+            self.connection.commit()
+
+
+class PostgreSQLBrokerImportUnitOfWork:
+    """Atomically apply broker source facts and structured provenance."""
+
+    def __init__(self, connection: object) -> None:
+        self.connection = connection
+        self.holdings = PostgreSQLHoldingRepository(connection, auto_commit=False)
+        self.transactions = PostgreSQLTransactionRepository(
+            connection, auto_commit=False
+        )
+        self.liabilities = PostgreSQLLiabilityRepository(connection, auto_commit=False)
+        self.liability_principal_events = PostgreSQLLiabilityPrincipalEventRepository(
+            connection, auto_commit=False
+        )
+        self.broker_import_records = PostgreSQLBrokerImportRecordRepository(
+            connection, auto_commit=False
+        )
 
     @contextmanager
     def transaction(self) -> Iterator[None]:

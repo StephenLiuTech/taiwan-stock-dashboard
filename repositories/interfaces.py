@@ -6,6 +6,7 @@ from typing import Protocol
 
 from domain import (
     AnnualPnlSnapshot,
+    BrokerImportRecord,
     CorporateAction,
     DailySnapshot,
     Dividend,
@@ -28,6 +29,16 @@ class LiabilityPrincipalEventRepository(Protocol):
     def list_all(self) -> list[LiabilityPrincipalEvent]: ...
     def list_by_liability(self, liability_id: str) -> list[LiabilityPrincipalEvent]: ...
     def insert_many_if_absent(self, events: list[LiabilityPrincipalEvent]) -> int: ...
+
+
+class BrokerImportRecordRepository(Protocol):
+    """Persistence for structured brokerage source provenance."""
+
+    def list_all(self) -> list[BrokerImportRecord]: ...
+    def add(self, record: BrokerImportRecord) -> None: ...
+    def exists_source(
+        self, broker: str, fingerprint: str, row_reference: str, entity_type: str
+    ) -> bool: ...
 
 
 class AnnualPnlSnapshotRepository(Protocol):
@@ -239,6 +250,18 @@ class MarginTransactionUnitOfWork(Protocol):
     holdings: HoldingRepository
     transactions: TransactionRepository
     liabilities: LiabilityRepository
+
+    def transaction(self) -> AbstractContextManager[None]: ...
+
+
+class BrokerImportUnitOfWork(Protocol):
+    """Atomic boundary for one broker transaction and its provenance/effects."""
+
+    holdings: HoldingRepository
+    transactions: TransactionRepository
+    liabilities: LiabilityRepository
+    liability_principal_events: LiabilityPrincipalEventRepository
+    broker_import_records: BrokerImportRecordRepository
 
     def transaction(self) -> AbstractContextManager[None]: ...
 

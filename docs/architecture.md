@@ -176,9 +176,25 @@ otherwise identical same-day executions. Multiple remaining candidates are
 `AMBIGUOUS`; no fuzzy choice is allowed. Missing rows in a partial statement
 never imply ledger deletion.
 
-Schema v12 has no structured import-provenance boundary. Consequently the
-Checkpoint 7 CLI is read-only. ADR 0004 proposes schema-v13 provenance needed
-for transactional, idempotent apply; free-form notes are not import identity.
+Schema v13 adds `broker_import_records`. Its uniqueness key is broker, source
+fingerprint, stable source-row identity, and domain entity type. Stable broker
+references are combined with a normalized economic-row digest; when no broker
+reference exists, the digest alone is used, never a mutable CSV row number.
+
+```text
+reconcile source → immutable apply plan → validate every dependency
+      ↓
+BrokerImportUnitOfWork
+  ├─ transaction
+  ├─ holding projection
+  ├─ explicit margin principal event/current liability (when proven)
+  └─ broker provenance
+```
+
+All writes commit or roll back together. Apply supports cash BUY/SELL and
+margin BUY/SELL only when the source explicitly supplies classification and
+signed principal delta. Dividend, corporate-action, and financing-settlement
+rows remain reconciliation-only. Free-form notes are not import identity.
 
 ### Margin-financed transaction boundary
 

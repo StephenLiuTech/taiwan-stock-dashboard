@@ -4,6 +4,7 @@ import csv
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from pathlib import Path
 
 from domain import Currency, FinancingType, Market, TransactionType
@@ -83,7 +84,7 @@ class TaiwanBrokerCsvParser:
         if identity is None:
             return NormalizedBrokerRecord(
                 "taiwan-broker",
-                row["委託書號"].strip() or f"row-{row_number}",
+                self._source_reference(row, trade_date, identity),
                 row_number,
                 BrokerRecordKind.UNSUPPORTED,
                 trade_date,
@@ -91,6 +92,8 @@ class TaiwanBrokerCsvParser:
                 None,
                 None,
                 None,
+                None,
+                False,
                 None,
                 quantity,
                 price,
@@ -112,7 +115,7 @@ class TaiwanBrokerCsvParser:
         )
         return NormalizedBrokerRecord(
             "taiwan-broker",
-            row["委託書號"].strip() or f"row-{row_number}",
+            self._source_reference(row, trade_date, identity),
             row_number,
             kind,
             trade_date,
@@ -121,6 +124,8 @@ class TaiwanBrokerCsvParser:
             market,
             transaction_type if kind is BrokerRecordKind.TRADE else None,
             financing,
+            bool(note and ("現股" in note or "融資" in note)),
+            self._optional_decimal(row.get("本金變動", "")),
             quantity,
             price,
             gross,
@@ -134,6 +139,32 @@ class TaiwanBrokerCsvParser:
                 else None
             ),
         )
+
+    @staticmethod
+    def _source_reference(
+        row: Mapping[str, str],
+        trade_date: date,
+        identity: tuple[str, Market] | None,
+    ) -> str:
+        symbol = identity[0] if identity else row["股名"].strip()
+        values = (
+            trade_date.isoformat(),
+            symbol,
+            row["成交股數"].strip(),
+            row["成交單價"].strip(),
+            row["淨收付"].strip(),
+            row["手續費"].strip(),
+            row["交易稅"].strip(),
+            row["稅款"].strip(),
+        )
+        normalized = sha256("|".join(values).encode("utf-8")).hexdigest()
+        stable = row["委託書號"].strip()
+        return f"{stable}:{normalized}" if stable else f"normalized-{normalized}"
+
+    @staticmethod
+    def _optional_decimal(value: str) -> Decimal | None:
+        normalized = value.strip().replace(",", "")
+        return Decimal(normalized) if normalized else None
 
     @staticmethod
     def _record_kind(note: str) -> BrokerRecordKind:

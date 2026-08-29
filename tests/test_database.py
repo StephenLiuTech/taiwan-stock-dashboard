@@ -214,7 +214,7 @@ def test_sqlite_schema_10_to_11_preserves_existing_rows() -> None:
 
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 12
+        == 13
     )
     assert tuple(connection.execute("SELECT * FROM preserved").fetchone()) == (
         "one",
@@ -267,7 +267,7 @@ def test_sqlite_schema_11_to_12_backfills_valuation_provenance() -> None:
     assert row["unrealized_pnl"] == "123"
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 12
+        == 13
     )
     columns = {
         item[1]: item[3]
@@ -298,3 +298,31 @@ def test_sqlite_v12_migration_stops_when_provenance_is_unresolvable() -> None:
     }
     assert "valuation_date" not in columns
     connection.close()
+
+
+def test_sqlite_schema_12_to_13_preserves_rows_and_adds_empty_provenance() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+        INSERT INTO schema_version VALUES (12, 'before');
+        CREATE TABLE preserved (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT INTO preserved VALUES ('one', 'unchanged');
+        """
+    )
+
+    initialize_schema(connection)
+
+    assert (
+        connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+        == 13
+    )
+    assert tuple(connection.execute("SELECT * FROM preserved").fetchone()) == (
+        "one",
+        "unchanged",
+    )
+    assert (
+        connection.execute("SELECT COUNT(*) FROM broker_import_records").fetchone()[0]
+        == 0
+    )

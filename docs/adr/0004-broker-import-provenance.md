@@ -2,8 +2,8 @@
 
 ## Status
 
-Proposed. Checkpoint 7 implements read-only reconciliation only; production
-migration and apply remain blocked pending separate approval.
+Accepted by Checkpoint 8. Schema v13 and the safe transaction apply boundary
+implement this decision.
 
 ## Context
 
@@ -24,24 +24,23 @@ broker_import_records
   broker
   source_fingerprint
   source_row_reference
-  record_kind
-  transaction_id nullable
-  corporate_action_id nullable
-  dividend_id nullable
-  normalized_fingerprint
+  record_type
+  domain_entity_type
+  domain_entity_id
+  normalized_identity
   imported_at
 ```
 
-Required uniqueness is `(broker, source_fingerprint, source_row_reference)`.
-Apply would insert a domain event and its provenance record in one unit of
-work. Existing schema-v12 rows remain unchanged and can still match by economic
-identity and existing source reference.
+Required uniqueness is `(broker, source_fingerprint, source_row_reference,
+domain_entity_type)`. Apply inserts a domain event and provenance in one unit
+of work. Existing schema-v12 rows remain unchanged and still match by economic
+identity and source reference.
 
 ## Consequences
 
-- `pams broker reconcile` is safe and read-only on schema v12.
+- `pams broker reconcile` remains safe and read-only.
 - No raw file contents or account identifiers are persisted.
-- `pams broker import --apply` is deliberately unavailable until schema v13 is
-  approved, migrated, and covered by SQLite/PostgreSQL transactional tests.
+- `pams broker import --apply` accepts only reconciled, dependency-complete NEW
+  transactions. Corporate actions and dividends remain blocked in this scope.
 - Mismatch, ambiguous, unsupported, and financing-principal dependencies can
   never be auto-written.

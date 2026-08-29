@@ -241,6 +241,15 @@ CREATE TABLE IF NOT EXISTS liability_principal_events (
 );
 CREATE INDEX IF NOT EXISTS ix_liability_principal_events_replay
     ON liability_principal_events(liability_id, effective_date, sequence);
+CREATE TABLE IF NOT EXISTS broker_import_records (
+    id TEXT PRIMARY KEY, broker TEXT NOT NULL, source_fingerprint TEXT NOT NULL,
+    source_row_reference TEXT NOT NULL, record_type TEXT NOT NULL,
+    domain_entity_type TEXT NOT NULL, domain_entity_id TEXT NOT NULL,
+    normalized_identity TEXT, imported_at TEXT NOT NULL, notes TEXT,
+    UNIQUE(broker, source_fingerprint, source_row_reference, domain_entity_type)
+);
+CREATE INDEX IF NOT EXISTS ix_broker_import_domain_entity
+    ON broker_import_records(domain_entity_type, domain_entity_id);
 """
 
 
@@ -275,6 +284,8 @@ def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
             _migrate_postgresql_v10_to_v11(connection)
         if 0 < current_version <= 11:
             _migrate_postgresql_v11_to_v12(connection)
+        if 0 < current_version <= 12:
+            _migrate_postgresql_v12_to_v13(connection)
 
         for version in range(current_version + 1, SCHEMA_VERSION + 1):
             connection.execute(
@@ -358,6 +369,13 @@ def _migrate_postgresql_v11_to_v12(connection: PostgreSQLConnection) -> None:
     connection.execute(
         "ALTER TABLE annual_pnl_snapshots ADD COLUMN IF NOT EXISTS valuation_date TEXT"
     )
+
+
+def _migrate_postgresql_v12_to_v13(connection: PostgreSQLConnection) -> None:
+    """Add structured broker-source provenance without touching accounting rows."""
+    for statement in POSTGRESQL_SCHEMA.split(";"):
+        if "broker_import_records" in statement:
+            connection.execute(statement)
     connection.execute(
         """UPDATE annual_pnl_snapshots a SET valuation_date = (
         SELECT MAX(d.snapshot_date) FROM daily_snapshots d

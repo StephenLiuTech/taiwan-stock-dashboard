@@ -3,11 +3,14 @@
 from dataclasses import dataclass
 
 from repositories.holding_rebuild_uow import (
+    SQLiteBrokerImportUnitOfWork,
     SQLiteHoldingRebuildUnitOfWork,
     SQLiteMarginTransactionUnitOfWork,
 )
 from repositories.interfaces import (
     AnnualPnlSnapshotRepository,
+    BrokerImportRecordRepository,
+    BrokerImportUnitOfWork,
     CorporateActionRepository,
     DividendEventRepository,
     DividendRepository,
@@ -29,6 +32,7 @@ from repositories.interfaces import (
 from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
 from repositories.postgresql import (
     PostgreSQLAnnualPnlSnapshotRepository,
+    PostgreSQLBrokerImportRecordRepository,
     PostgreSQLCorporateActionRepository,
     PostgreSQLDividendEventRepository,
     PostgreSQLDividendRepository,
@@ -45,12 +49,14 @@ from repositories.postgresql import (
     PostgreSQLWatchlistRepository,
 )
 from repositories.postgresql_uow import (
+    PostgreSQLBrokerImportUnitOfWork,
     PostgreSQLHoldingRebuildUnitOfWork,
     PostgreSQLMarginTransactionUnitOfWork,
     PostgreSQLMarketDataUnitOfWork,
 )
 from repositories.sqlite import (
     SQLiteAnnualPnlSnapshotRepository,
+    SQLiteBrokerImportRecordRepository,
     SQLiteCorporateActionRepository,
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
@@ -90,6 +96,8 @@ class RepositoryBundle:
     annual_pnl_snapshots: AnnualPnlSnapshotRepository
     investment_cost_events: InvestmentCostEventRepository
     liability_principal_events: LiabilityPrincipalEventRepository
+    broker_import_records: BrokerImportRecordRepository
+    broker_import_uow: BrokerImportUnitOfWork
 
 
 def create_repositories(backend: str, connection: object) -> RepositoryBundle:
@@ -114,6 +122,8 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             SQLiteAnnualPnlSnapshotRepository(connection),
             SQLiteInvestmentCostEventRepository(connection),
             SQLiteLiabilityPrincipalEventRepository(connection),
+            SQLiteBrokerImportRecordRepository(connection),
+            SQLiteBrokerImportUnitOfWork(connection),
         )
     if backend == "postgresql":
         return RepositoryBundle(
@@ -135,5 +145,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             PostgreSQLAnnualPnlSnapshotRepository(connection),
             PostgreSQLInvestmentCostEventRepository(connection),
             PostgreSQLLiabilityPrincipalEventRepository(connection),
+            PostgreSQLBrokerImportRecordRepository(connection),
+            PostgreSQLBrokerImportUnitOfWork(connection),
         )
     raise ValueError(f"Unsupported database backend: {backend}")

@@ -68,6 +68,7 @@ from pams.application import (
     DemoDataUseCase,
     DividendEventUseCase,
     FinancingInterestUseCase,
+    ImportBrokerUseCase,
     LiabilityPrincipalUseCase,
     ListTransactionsUseCase,
     MigrateDatabaseUseCase,
@@ -127,6 +128,7 @@ class ApplicationContext:
     dividend_events: DividendEventUseCase | None = None
     bootstrap_import: BootstrapImportUseCase | None = None
     reconcile_broker: ReconcileBrokerUseCase | None = None
+    import_broker: ImportBrokerUseCase | None = None
 
 
 class _DryRunEmailTransport:
@@ -776,6 +778,7 @@ def _compose(
                     return False
             return True
 
+        reconcile_broker = ReconcileBrokerUseCase(holdings, transaction_repository)
         yield ApplicationContext(
             connection=connection,
             repositories=repositories,
@@ -858,7 +861,12 @@ def _compose(
             bootstrap_import=BootstrapImportUseCase(
                 holdings, transaction_repository, transaction_engine
             ),
-            reconcile_broker=ReconcileBrokerUseCase(holdings, transaction_repository),
+            reconcile_broker=reconcile_broker,
+            import_broker=ImportBrokerUseCase(
+                reconcile_broker,
+                repositories.broker_import_uow,
+                transaction_engine,
+            ),
         )
     finally:
         connection.close()

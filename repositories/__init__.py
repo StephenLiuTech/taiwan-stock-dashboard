@@ -1,11 +1,14 @@
 """Repository contracts and SQLite implementations."""
 
 from repositories.holding_rebuild_uow import (
+    SQLiteBrokerImportUnitOfWork,
     SQLiteHoldingRebuildUnitOfWork,
     SQLiteMarginTransactionUnitOfWork,
 )
 from repositories.interfaces import (
     AnnualPnlSnapshotRepository,
+    BrokerImportRecordRepository,
+    BrokerImportUnitOfWork,
     DividendEventRepository,
     DividendRepository,
     FxRateRepository,
@@ -28,6 +31,7 @@ from repositories.interfaces import (
 from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
 from repositories.postgresql import (
     PostgreSQLAnnualPnlSnapshotRepository,
+    PostgreSQLBrokerImportRecordRepository,
     PostgreSQLDividendEventRepository,
     PostgreSQLDividendRepository,
     PostgreSQLFxRateRepository,
@@ -43,12 +47,14 @@ from repositories.postgresql import (
     PostgreSQLWatchlistRepository,
 )
 from repositories.postgresql_uow import (
+    PostgreSQLBrokerImportUnitOfWork,
     PostgreSQLHoldingRebuildUnitOfWork,
     PostgreSQLMarginTransactionUnitOfWork,
     PostgreSQLMarketDataUnitOfWork,
 )
 from repositories.sqlite import (
     SQLiteAnnualPnlSnapshotRepository,
+    SQLiteBrokerImportRecordRepository,
     SQLiteDividendEventRepository,
     SQLiteDividendRepository,
     SQLiteFxRateRepository,
@@ -66,6 +72,8 @@ from repositories.sqlite import (
 
 __all__ = [
     "AnnualPnlSnapshotRepository",
+    "BrokerImportRecordRepository",
+    "BrokerImportUnitOfWork",
     "DividendRepository",
     "DividendEventRepository",
     "FxRateRepository",
@@ -83,6 +91,8 @@ __all__ = [
     "PostgreSQLFxRateRepository",
     "PostgreSQLHoldingRepository",
     "PostgreSQLAnnualPnlSnapshotRepository",
+    "PostgreSQLBrokerImportRecordRepository",
+    "PostgreSQLBrokerImportUnitOfWork",
     "PostgreSQLInvestmentCostEventRepository",
     "PostgreSQLLiabilityPrincipalEventRepository",
     "PostgreSQLHoldingRebuildUnitOfWork",
@@ -102,6 +112,8 @@ __all__ = [
     "SQLiteFxRateRepository",
     "SQLiteHoldingRepository",
     "SQLiteAnnualPnlSnapshotRepository",
+    "SQLiteBrokerImportRecordRepository",
+    "SQLiteBrokerImportUnitOfWork",
     "SQLiteInvestmentCostEventRepository",
     "SQLiteLiabilityPrincipalEventRepository",
     "SQLiteHoldingRebuildUnitOfWork",

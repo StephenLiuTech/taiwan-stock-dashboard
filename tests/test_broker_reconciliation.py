@@ -3,6 +3,8 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from domain import Currency, FinancingType, Market, Transaction, TransactionType
 from pams.application import ReconcileBrokerUseCase
 from pams.brokerage import (
@@ -94,7 +96,7 @@ def test_parser_classifies_non_trade_rows_without_forcing_buy_or_sell() -> None:
     assert records[4].financing_type is FinancingType.MARGIN
     plan = BrokerReconciliationEngine().reconcile("abc", 5, (records[4],), [])
     assert plan.items[0].dependencies == (
-        "BLOCKED: financing principal repayment evidence is required",
+        "BLOCKED: negative financing principal repayment evidence is required",
     )
 
 
@@ -167,10 +169,14 @@ def test_new_proposal_is_deterministic_and_margin_dependency_is_blocked() -> Non
 
 def test_explicit_margin_record_requires_principal_evidence() -> None:
     _, records = parsed()
-    margin = replace(records[2], financing_type=FinancingType.MARGIN)
+    margin = replace(
+        records[2],
+        financing_type=FinancingType.MARGIN,
+        financing_classification_known=True,
+    )
     plan = BrokerReconciliationEngine().reconcile("abc", 1, (margin,), [])
     assert plan.items[0].dependencies == (
-        "BLOCKED: financing principal evidence is required",
+        "BLOCKED: positive financing principal evidence is required",
     )
 
 
@@ -216,3 +222,11 @@ def test_cli_exposes_only_read_only_broker_reconcile() -> None:
     assert arguments.broker_command == "reconcile"
     assert arguments.start_date == date(2026, 1, 1)
     assert arguments.json_output is True
+
+
+def test_cli_requires_exactly_one_broker_import_mode() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["broker", "import", "statement.csv"])
+    arguments = parser.parse_args(["broker", "import", "statement.csv", "--dry-run"])
+    assert arguments.dry_run is True

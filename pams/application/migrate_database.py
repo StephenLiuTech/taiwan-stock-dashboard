@@ -21,6 +21,7 @@ MIGRATION_TABLES = (
     "investment_cost_events",
     "annual_pnl_snapshots",
     "liability_principal_events",
+    "broker_import_records",
     "schema_version",
 )
 

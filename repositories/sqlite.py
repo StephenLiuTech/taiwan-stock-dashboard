@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from domain import (
     AnnualPnlSnapshot,
+    BrokerImportRecord,
     CorporateAction,
     DailySnapshot,
     Dividend,
@@ -26,8 +27,11 @@ from domain import (
 class SQLiteLiabilityPrincipalEventRepository:
     """Persist principal events with idempotent batch insertion."""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
         self.connection = connection
+        self.auto_commit = auto_commit
 
     def list_all(self) -> list[LiabilityPrincipalEvent]:
         rows = self.connection.execute(
@@ -75,7 +79,8 @@ class SQLiteLiabilityPrincipalEventRepository:
                 for event in events
             ],
         )
-        self.connection.commit()
+        if self.auto_commit:
+            self.connection.commit()
         if before is not None:
             return self.connection.total_changes - before
         return max(cursor.rowcount, 0)
@@ -89,6 +94,58 @@ class SQLiteLiabilityPrincipalEventRepository:
         if values["resulting_principal"] is not None:
             values["resulting_principal"] = _decimal(values["resulting_principal"])
         return LiabilityPrincipalEvent.model_validate(values)
+
+
+class SQLiteBrokerImportRecordRepository:
+    """Persist structured broker provenance without raw statement content."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def list_all(self) -> list[BrokerImportRecord]:
+        rows = self.connection.execute(
+            "SELECT * FROM broker_import_records ORDER BY imported_at, id"
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def exists_source(
+        self, broker: str, fingerprint: str, row_reference: str, entity_type: str
+    ) -> bool:
+        row = self.connection.execute(
+            """SELECT 1 FROM broker_import_records
+            WHERE broker = ? AND source_fingerprint = ?
+              AND source_row_reference = ? AND domain_entity_type = ?""",
+            (broker, fingerprint, row_reference, entity_type),
+        ).fetchone()
+        return row is not None
+
+    def add(self, record: BrokerImportRecord) -> None:
+        self.connection.execute(
+            "INSERT INTO broker_import_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                record.id,
+                record.broker,
+                record.source_fingerprint,
+                record.source_row_reference,
+                record.record_type,
+                record.domain_entity_type,
+                record.domain_entity_id,
+                record.normalized_identity,
+                record.imported_at.isoformat(),
+                record.notes,
+            ),
+        )
+        if self.auto_commit:
+            self.connection.commit()
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> BrokerImportRecord:
+        values = dict(row)
+        values["imported_at"] = datetime.fromisoformat(values["imported_at"])
+        return BrokerImportRecord.model_validate(values)
 
 
 class SQLiteAnnualPnlSnapshotRepository:
