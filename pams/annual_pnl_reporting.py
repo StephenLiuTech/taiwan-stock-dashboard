@@ -70,7 +70,8 @@ def format_annual_summary(
     return "\n".join(
         [
             "Annual / YTD P&L",
-            f"Date: {snapshot.snapshot_date}",
+            f"Accounting date: {snapshot.snapshot_date}",
+            f"Market valuation date: {snapshot.valuation_date}",
             f"Realized P/L YTD: {_money(snapshot.realized_pnl_ytd)}",
             f"Unrealized P/L: {_money(snapshot.unrealized_pnl)}",
             f"Dividend income YTD: {_money(snapshot.dividend_income_ytd)}",

@@ -931,6 +931,7 @@ Schema v11 makes debt principal replayable from dated events:
 python -m pams liability history
 python -m pams liability history --liability-id liability-margin-financing
 python -m pams liability principal --liability-id liability-margin-financing --date 2026-08-28
+python -m pams liability interest --date 2026-08-29
 ```
 
 The cutoff is inclusive. Same-day events use an explicit accounting sequence;

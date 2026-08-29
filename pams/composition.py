@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 from pydantic import SecretStr
@@ -16,7 +17,7 @@ from database.provider import (
     open_database,
     resolve_sqlite_path,
 )
-from domain import Market
+from domain import LiabilityType, Market
 from market_calendar import (
     MarketCalendar,
     OfficialHistoricalMarketDateProvider,
@@ -35,6 +36,7 @@ from market_data.dividends import (
     TWSEHistoricalDividendProvider,
 )
 from market_data.engine import MarketDataEngine
+from market_data.exceptions import MarketDateUnavailableError
 from market_data.global_engine import GlobalMarketDataEngine
 from market_data.providers import (
     AlphaVantageFXRateProvider,
@@ -65,6 +67,7 @@ from pams.application import (
     BuildReportSectionsUseCase,
     DemoDataUseCase,
     DividendEventUseCase,
+    FinancingInterestUseCase,
     LiabilityPrincipalUseCase,
     ListTransactionsUseCase,
     MigrateDatabaseUseCase,
@@ -117,6 +120,7 @@ class ApplicationContext:
     analyze_portfolio: AnalyzePortfolioUseCase | None = None
     annual_pnl: AnnualPnlUseCase | None = None
     liability_principal: LiabilityPrincipalUseCase | None = None
+    financing_interest: FinancingInterestUseCase | None = None
     send_daily_report: SendDailyReportUseCase | None = None
     watchlist: WatchlistUseCase | None = None
     dividend_events: DividendEventUseCase | None = None
@@ -718,6 +722,15 @@ def _compose(
             transaction_engine=transaction_engine,
             corporate_actions=repositories.corporate_actions,
         )
+        financing_interest = FinancingInterestUseCase(
+            liabilities,
+            repositories.liability_principal_events,
+            repositories.investment_cost_events,
+            {
+                LiabilityType.MARGIN_FINANCING: Decimal("0.065"),
+                LiabilityType.STOCK_PLEDGE: Decimal("0.065"),
+            },
+        )
         valuate_portfolio = ValuatePortfolioUseCase(
             holdings,
             quotes,
@@ -747,6 +760,20 @@ def _compose(
                 )
             )
 
+        def is_non_trading_day(accounting_date: date) -> bool:
+            """Require both official date-query adapters to confirm no session."""
+            for provider in (
+                historical_twse(accounting_date),
+                historical_tpex(accounting_date),
+            ):
+                try:
+                    records = provider.fetch()
+                except MarketDateUnavailableError:
+                    continue
+                if records:
+                    return False
+            return True
+
         yield ApplicationContext(
             connection=connection,
             repositories=repositories,
@@ -767,6 +794,8 @@ def _compose(
                 transaction_engine,
                 prefer_historical_for_automatic=using_default_providers,
                 annual_pnl=annual_pnl,
+                financing_interest=financing_interest,
+                is_non_trading_day=is_non_trading_day,
             ),
             portfolio_status=PortfolioStatusUseCase(
                 calendar,
@@ -816,6 +845,7 @@ def _compose(
                 repositories.liability_principal_events,
                 liabilities,
             ),
+            financing_interest=financing_interest,
             watchlist=WatchlistUseCase(repositories.watchlist, quotes),
             dividend_events=DividendEventUseCase(
                 dividend_provider,

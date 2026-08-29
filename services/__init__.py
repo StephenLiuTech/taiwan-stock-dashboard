@@ -8,6 +8,7 @@ from services.analytics_engine import (
 )
 from services.annual_pnl_engine import AnnualPnlEngine, AnnualPnlFxUnavailableError
 from services.bootstrap import BootstrapService
+from services.financing_interest import DailyFinancingInterest, FinancingInterestEngine
 from services.liability_principal import (
     LiabilityPrincipalEngine,
     LiabilityPrincipalReplayError,
@@ -39,6 +40,8 @@ __all__ = [
     "AnalyticsError",
     "AnnualPnlEngine",
     "AnnualPnlFxUnavailableError",
+    "DailyFinancingInterest",
+    "FinancingInterestEngine",
     "BootstrapService",
     "DuplicateSnapshotError",
     "DuplicateSnapshotDateError",

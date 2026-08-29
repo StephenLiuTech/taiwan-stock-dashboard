@@ -62,3 +62,8 @@ these fields through the same transaction as its holding and principal update.
 Schema version 11 adds `liability_principal_events`, indexed by liability,
 effective date, and explicit same-day sequence. Migration creates only this
 ledger and preserves every schema-v10 business row unchanged.
+
+Schema version 12 adds the non-null `annual_pnl_snapshots.valuation_date`
+provenance column. Migration resolves each legacy row to the latest prior
+`daily_snapshots` row with the same unrealized P/L and aborts transactionally
+if any legacy provenance cannot be proven.

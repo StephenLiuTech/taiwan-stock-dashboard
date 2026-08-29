@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from market_calendar import MarketAvailability
+from market_data.exceptions import MarketDateUnavailableError
 from pams.application import (
     MarketAvailabilitySummary,
     PortfolioHistoryUseCase,
@@ -98,9 +99,35 @@ class AnnualPnlWriterStub:
         *,
         unrealized_pnl: object | None = None,
         persist: bool = True,
+        valuation_date: date | None = None,
     ) -> object:
+        del valuation_date
         self.calls.append((snapshot_date, unrealized_pnl, persist))
         return object()
+
+
+class FinancingInterestWriterStub:
+    def __init__(self, order: list[str] | None = None) -> None:
+        self.calls: list[tuple[date, bool]] = []
+        self.order = order
+
+    def ensure_through(self, end_date: date, *, persist: bool = True) -> object:
+        self.calls.append((end_date, persist))
+        if self.order is not None:
+            self.order.append("financing")
+        return object()
+
+
+class ClosedMarketEngine(FakeEngine):
+    def refresh(self, trade_date: date, **kwargs: object) -> object:
+        del trade_date, kwargs
+        raise MarketDateUnavailableError("confirmed closed")
+
+    def rebuild(self, trade_date: date, **kwargs: object) -> object:
+        return self.refresh(trade_date, **kwargs)
+
+    def preview(self, trade_date: date, **kwargs: object) -> object:
+        return self.refresh(trade_date, **kwargs)
 
 
 def test_update_automatic_date_runs_engine_when_sources_match() -> None:
@@ -146,6 +173,69 @@ def test_update_generates_daily_annual_pnl_snapshot() -> None:
 
     assert result.mode is UpdateMode.UPDATED
     assert writer.calls == [(selected_date, Decimal("220"), True)]
+
+
+def test_update_ensures_financing_before_annual_pnl_even_for_existing_snapshot() -> (
+    None
+):
+    selected_date = date(2026, 8, 29)
+    order: list[str] = []
+    financing = FinancingInterestWriterStub(order)
+
+    class OrderedAnnual(AnnualPnlWriterStub):
+        def ensure(self, *args: object, **kwargs: object) -> object:
+            order.append("annual")
+            return super().ensure(*args, **kwargs)  # type: ignore[arg-type]
+
+    result = UpdatePortfolioUseCase(
+        CalendarStub(selected_date, selected_date),  # type: ignore[arg-type]
+        FakeEngine(),  # type: ignore[arg-type]
+        Path("pams.db"),
+        snapshot_repository=SnapshotsStub(selected_date),  # type: ignore[arg-type]
+        annual_pnl=OrderedAnnual(),  # type: ignore[arg-type]
+        financing_interest=financing,  # type: ignore[arg-type]
+    ).execute()
+
+    assert result.mode is UpdateMode.SNAPSHOT_EXISTS
+    assert financing.calls == [(selected_date, True)]
+    assert order == ["financing", "annual"]
+
+
+def test_confirmed_non_trading_day_runs_accounting_only_without_market_snapshot() -> (
+    None
+):
+    accounting_date = date(2026, 8, 29)
+    financing = FinancingInterestWriterStub()
+    annual = AnnualPnlWriterStub()
+    result = UpdatePortfolioUseCase(
+        CalendarStub(date(2026, 8, 28), date(2026, 8, 28)),  # type: ignore[arg-type]
+        ClosedMarketEngine(),  # type: ignore[arg-type]
+        Path("pams.db"),
+        historical_engine_factory=lambda _: ClosedMarketEngine(),  # type: ignore[arg-type]
+        annual_pnl=annual,  # type: ignore[arg-type]
+        financing_interest=financing,  # type: ignore[arg-type]
+        is_non_trading_day=lambda _: True,
+    ).execute(accounting_date)
+
+    assert result.mode is UpdateMode.ACCOUNTING_UPDATED
+    assert financing.calls == [(accounting_date, True)]
+    assert annual.calls == [(accounting_date, None, True)]
+
+
+def test_trading_day_missing_data_remains_a_failure() -> None:
+    requested = date(2026, 8, 31)
+    use_case = UpdatePortfolioUseCase(
+        CalendarStub(date(2026, 8, 28), date(2026, 8, 28)),  # type: ignore[arg-type]
+        ClosedMarketEngine(),  # type: ignore[arg-type]
+        Path("pams.db"),
+        historical_engine_factory=lambda _: ClosedMarketEngine(),  # type: ignore[arg-type]
+        annual_pnl=AnnualPnlWriterStub(),  # type: ignore[arg-type]
+        financing_interest=FinancingInterestWriterStub(),  # type: ignore[arg-type]
+        is_non_trading_day=lambda _: False,
+    )
+
+    with pytest.raises(MarketDateUnavailableError):
+        use_case.execute(requested)
 
 
 def test_existing_snapshot_routes_incomplete_global_data_to_enrichment() -> None:

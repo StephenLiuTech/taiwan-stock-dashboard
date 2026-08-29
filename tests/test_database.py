@@ -214,7 +214,7 @@ def test_sqlite_schema_10_to_11_preserves_existing_rows() -> None:
 
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 11
+        == 12
     )
     assert tuple(connection.execute("SELECT * FROM preserved").fetchone()) == (
         "one",
@@ -227,4 +227,74 @@ def test_sqlite_schema_10_to_11_preserves_existing_rows() -> None:
         ).fetchall()
     }
     assert {"liability_id", "effective_date", "sequence", "principal_delta"} <= columns
+    connection.close()
+
+
+def test_sqlite_schema_11_to_12_backfills_valuation_provenance() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+        INSERT INTO schema_version VALUES (11, 'before');
+        CREATE TABLE daily_snapshots (
+            snapshot_date TEXT PRIMARY KEY, total_market_value TEXT NOT NULL,
+            total_cost_basis TEXT NOT NULL, total_unrealized_pnl TEXT NOT NULL,
+            total_liabilities TEXT NOT NULL, net_asset_value TEXT NOT NULL,
+            leverage_ratio TEXT NOT NULL, high_water_mark TEXT NOT NULL,
+            drawdown TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        INSERT INTO daily_snapshots VALUES
+            ('2026-08-28','1','1','123','0','1','0','1','0','before');
+        CREATE TABLE annual_pnl_snapshots (
+            snapshot_date TEXT PRIMARY KEY, year INTEGER NOT NULL,
+            reporting_currency TEXT NOT NULL, realized_pnl_ytd TEXT NOT NULL,
+            unrealized_pnl TEXT NOT NULL, dividend_income_ytd TEXT NOT NULL,
+            financing_cost_ytd TEXT NOT NULL, other_cost_ytd TEXT NOT NULL,
+            total_pnl_ytd TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        INSERT INTO annual_pnl_snapshots VALUES
+            ('2026-08-28',2026,'TWD','10','123','5','2','1','135','before');
+        """
+    )
+
+    initialize_schema(connection)
+
+    row = connection.execute(
+        "SELECT * FROM annual_pnl_snapshots WHERE snapshot_date='2026-08-28'"
+    ).fetchone()
+    assert row["valuation_date"] == "2026-08-28"
+    assert row["unrealized_pnl"] == "123"
+    assert (
+        connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+        == 12
+    )
+    columns = {
+        item[1]: item[3]
+        for item in connection.execute("PRAGMA table_info(annual_pnl_snapshots)")
+    }
+    assert columns["valuation_date"] == 1
+    connection.close()
+
+
+def test_sqlite_v12_migration_stops_when_provenance_is_unresolvable() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(
+        """
+        CREATE TABLE daily_snapshots (
+            snapshot_date TEXT PRIMARY KEY, total_unrealized_pnl TEXT NOT NULL
+        );
+        CREATE TABLE annual_pnl_snapshots (
+            snapshot_date TEXT PRIMARY KEY, unrealized_pnl TEXT NOT NULL
+        );
+        INSERT INTO annual_pnl_snapshots VALUES ('2026-08-28','123');
+        """
+    )
+    with pytest.raises(RuntimeError, match="cannot be resolved"):
+        initialize_schema(connection)
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(annual_pnl_snapshots)")
+    }
+    assert "valuation_date" not in columns
     connection.close()

@@ -106,9 +106,14 @@ class SQLiteAnnualPnlSnapshotRepository:
 
     def add(self, snapshot: AnnualPnlSnapshot) -> None:
         self.connection.execute(
-            "INSERT INTO annual_pnl_snapshots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            """INSERT INTO annual_pnl_snapshots (
+            snapshot_date, valuation_date, year, reporting_currency,
+            realized_pnl_ytd, unrealized_pnl, dividend_income_ytd,
+            financing_cost_ytd, other_cost_ytd, total_pnl_ytd, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot.snapshot_date.isoformat(),
+                snapshot.valuation_date.isoformat(),
                 snapshot.year,
                 snapshot.reporting_currency.value,
                 str(snapshot.realized_pnl_ytd),
@@ -141,6 +146,7 @@ class SQLiteAnnualPnlSnapshotRepository:
     def _from_row(row: sqlite3.Row) -> AnnualPnlSnapshot:
         values = dict(row)
         values["snapshot_date"] = date.fromisoformat(values["snapshot_date"])
+        values["valuation_date"] = date.fromisoformat(values["valuation_date"])
         values["created_at"] = datetime.fromisoformat(values["created_at"])
         for key in (
             "realized_pnl_ytd",
@@ -175,6 +181,41 @@ class SQLiteInvestmentCostEventRepository:
             ),
         )
         self.connection.commit()
+
+    def insert_many_if_absent(self, events: list[InvestmentCostEvent]) -> int:
+        """Atomically insert new semantic IDs without rewriting existing facts."""
+        if not events:
+            return 0
+        before = (
+            self.connection.total_changes
+            if hasattr(self.connection, "total_changes")
+            else None
+        )
+        try:
+            cursor = self.connection.executemany(
+                """INSERT INTO investment_cost_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO NOTHING""",
+                [
+                    (
+                        event.id,
+                        event.event_date.isoformat(),
+                        event.cost_type.value,
+                        str(event.amount),
+                        event.currency.value,
+                        event.description,
+                        event.source,
+                        event.created_at.isoformat(),
+                    )
+                    for event in events
+                ],
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        if before is not None:
+            return self.connection.total_changes - before
+        return max(cursor.rowcount, 0)
 
     def list_between_dates(self, start: date, end: date) -> list[InvestmentCostEvent]:
         rows = self.connection.execute(
@@ -753,6 +794,14 @@ class SQLiteSnapshotRepository:
     def get_latest(self) -> DailySnapshot | None:
         row = self.connection.execute(
             "SELECT * FROM daily_snapshots ORDER BY snapshot_date DESC LIMIT 1"
+        ).fetchone()
+        return self._from_row(row) if row else None
+
+    def get_latest_on_or_before(self, snapshot_date: date) -> DailySnapshot | None:
+        row = self.connection.execute(
+            """SELECT * FROM daily_snapshots WHERE snapshot_date <= ?
+            ORDER BY snapshot_date DESC LIMIT 1""",
+            (snapshot_date.isoformat(),),
         ).fetchone()
         return self._from_row(row) if row else None
 

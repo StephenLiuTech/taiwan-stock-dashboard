@@ -393,7 +393,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     liability_principal.add_argument("--liability-id", required=True)
     liability_principal.add_argument("--date", required=True, type=parse_iso_date)
-    for command in (liability_history, liability_principal):
+    liability_interest = liability_commands.add_parser(
+        "interest", help="Inspect calculated financing interest without writing"
+    )
+    liability_interest.add_argument("--date", required=True, type=parse_iso_date)
+    for command in (liability_history, liability_principal, liability_interest):
         command.add_argument("--database", type=Path)
         command.add_argument("--verbose", action="store_true")
     daily_report = commands.add_parser(
@@ -611,7 +615,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     print(f"Liability: {arguments.liability_id}")
                     print(f"Date: {arguments.date}")
                     print(f"Principal: NT${principal:,.2f}")
-                else:
+                elif arguments.liability_command == "history":
                     points = application.liability_principal.history(
                         arguments.liability_id
                     )
@@ -624,6 +628,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                             f"{event.principal_delta:+} | {point.principal}"
                         )
                     print(f"Count: {len(points)}")
+                else:
+                    assert application.financing_interest is not None
+                    items = application.financing_interest.inspect(arguments.date)
+                    print("PAMS Financing Interest")
+                    print(f"Accrual date: {arguments.date.isoformat()}")
+                    for item in items:
+                        print("")
+                        print(f"Liability: {item.liability_id}")
+                        print(f"Principal: {item.principal}")
+                        print(f"Annual rate: {item.annual_rate}")
+                        print(f"Daily interest: {item.daily_interest}")
+                        print(f"Status: {'persisted' if item.persisted else 'missing'}")
                 return int(ExitCode.SUCCESS)
             if arguments.command == "report":
                 assert application.valuate_portfolio is not None

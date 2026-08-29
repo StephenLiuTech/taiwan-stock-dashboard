@@ -60,7 +60,7 @@ def test_postgresql_schema_7_to_8_is_nullable_and_version_gated() -> None:
         "ADD COLUMN IF NOT EXISTS financed_quantity TEXT" in statement
         for statement in sql
     )
-    assert not any(statement.startswith("UPDATE ") for statement in sql)
+    assert not any(statement.startswith("UPDATE transactions") for statement in sql)
     assert any(parameters == (8,) for _, parameters in connection.statements)
     assert any(parameters == (9,) for _, parameters in connection.statements)
     assert connection.commits == 1
@@ -114,8 +114,22 @@ def test_schema_10_to_11_adds_only_liability_principal_ledger() -> None:
         "CREATE TABLE IF NOT EXISTS liability_principal_events" in item for item in sql
     )
     assert any("ix_liability_principal_events_replay" in item for item in sql)
-    assert not any("ALTER TABLE" in item for item in sql)
+    assert not any("ALTER TABLE transactions" in item for item in sql)
+    assert any("ALTER TABLE annual_pnl_snapshots" in item for item in sql)
     assert any(parameters == (11,) for _, parameters in connection.statements)
+    assert connection.commits == 1
+
+
+def test_schema_11_to_12_adds_and_backfills_valuation_date() -> None:
+    connection = PostgreSQLConnectionStub(11)
+
+    initialize_postgresql_schema(connection)  # type: ignore[arg-type]
+
+    sql = [statement for statement, _ in connection.statements]
+    assert any("ADD COLUMN IF NOT EXISTS valuation_date TEXT" in item for item in sql)
+    assert any("MAX(d.snapshot_date)" in item for item in sql)
+    assert any("ALTER COLUMN valuation_date SET NOT NULL" in item for item in sql)
+    assert any(parameters == (12,) for _, parameters in connection.statements)
     assert connection.commits == 1
 
 
@@ -130,7 +144,7 @@ def test_postgresql_schema_upgrade_rolls_back_on_failure() -> None:
 
 
 def test_newer_postgresql_schema_is_rejected_without_commit() -> None:
-    connection = PostgreSQLConnectionStub(12)
+    connection = PostgreSQLConnectionStub(13)
 
     with pytest.raises(RuntimeError, match="newer than supported"):
         initialize_postgresql_schema(connection)  # type: ignore[arg-type]

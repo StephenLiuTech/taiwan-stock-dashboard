@@ -13,6 +13,7 @@ from market_calendar import (
     MarketCalendarUnavailableError,
 )
 from market_data.engine import MarketDataEngine, MarketDataRefreshResult
+from market_data.exceptions import MarketDateUnavailableError
 from pams.application.dto import (
     MarketAvailabilitySummary,
     PortfolioTotals,
@@ -33,7 +34,14 @@ class AnnualPnlWriter(Protocol):
         *,
         unrealized_pnl: Decimal | None = None,
         persist: bool = True,
+        valuation_date: date | None = None,
     ) -> object: ...
+
+
+class FinancingInterestWriter(Protocol):
+    """Calendar-day financing expense boundary invoked before annual P/L."""
+
+    def ensure_through(self, end_date: date, *, persist: bool = True) -> object: ...
 
 
 def _availability_dto(value: MarketAvailability) -> MarketAvailabilitySummary:
@@ -59,6 +67,8 @@ class UpdatePortfolioUseCase:
         transaction_engine: TransactionEngine | None = None,
         prefer_historical_for_automatic: bool = False,
         annual_pnl: AnnualPnlWriter | None = None,
+        financing_interest: FinancingInterestWriter | None = None,
+        is_non_trading_day: Callable[[date], bool] | None = None,
     ) -> None:
         self.calendar = calendar
         self.engine = engine
@@ -70,6 +80,8 @@ class UpdatePortfolioUseCase:
         self.transaction_engine = transaction_engine or TransactionEngine()
         self.prefer_historical_for_automatic = prefer_historical_for_automatic
         self.annual_pnl = annual_pnl
+        self.financing_interest = financing_interest
+        self.is_non_trading_day = is_non_trading_day
 
     def execute(
         self,
@@ -119,6 +131,10 @@ class UpdatePortfolioUseCase:
             )
         )
         if existing_snapshot is not None and not force and not enrichment_required:
+            if self.financing_interest is not None:
+                self.financing_interest.ensure_through(
+                    requested_date, persist=not dry_run
+                )
             if self.annual_pnl is not None:
                 self.annual_pnl.ensure(requested_date, persist=not dry_run)
             return UpdateResult(
@@ -128,39 +144,49 @@ class UpdatePortfolioUseCase:
                 verified_source_date=None,
                 availability=availability,
             )
-        if dry_run:
-            engine_result = (
-                selected_engine.preview(requested_date)
-                if projected_holdings is None
-                else selected_engine.preview(
+        try:
+            if dry_run:
+                engine_result = (
+                    selected_engine.preview(requested_date)
+                    if projected_holdings is None
+                    else selected_engine.preview(
+                        requested_date, holdings_override=projected_holdings
+                    )
+                )
+            elif enrichment_required:
+                engine_result = selected_engine.enrich_existing(
                     requested_date, holdings_override=projected_holdings
                 )
-            )
-        elif enrichment_required:
-            engine_result = selected_engine.enrich_existing(
-                requested_date, holdings_override=projected_holdings
-            )
-        elif force:
-            engine_result = (
-                selected_engine.rebuild(requested_date)
-                if projected_holdings is None
-                else selected_engine.rebuild(
-                    requested_date, holdings_override=projected_holdings
+            elif force:
+                engine_result = (
+                    selected_engine.rebuild(requested_date)
+                    if projected_holdings is None
+                    else selected_engine.rebuild(
+                        requested_date, holdings_override=projected_holdings
+                    )
                 )
-            )
-        else:
-            engine_result = (
-                selected_engine.refresh(requested_date)
-                if projected_holdings is None
-                else selected_engine.refresh(
-                    requested_date, holdings_override=projected_holdings
+            else:
+                engine_result = (
+                    selected_engine.refresh(requested_date)
+                    if projected_holdings is None
+                    else selected_engine.refresh(
+                        requested_date, holdings_override=projected_holdings
+                    )
                 )
-            )
+        except MarketDateUnavailableError:
+            if self.is_non_trading_day is None or not self.is_non_trading_day(
+                requested_date
+            ):
+                raise
+            return self._accounting_only(requested_date, dry_run=dry_run)
+        if self.financing_interest is not None:
+            self.financing_interest.ensure_through(requested_date, persist=not dry_run)
         if self.annual_pnl is not None:
             self.annual_pnl.ensure(
                 requested_date,
                 unrealized_pnl=engine_result.summary.total_unrealized_pnl,
                 persist=not dry_run,
+                valuation_date=requested_date,
             )
         return self._result_dto(
             engine_result,
@@ -168,6 +194,21 @@ class UpdatePortfolioUseCase:
             dry_run=dry_run,
             availability=availability,
             enriched=enrichment_required,
+        )
+
+    def _accounting_only(self, accounting_date: date, *, dry_run: bool) -> UpdateResult:
+        """Accrue a confirmed closed-market date without fabricating valuation."""
+        if self.financing_interest is not None:
+            self.financing_interest.ensure_through(accounting_date, persist=not dry_run)
+        if self.annual_pnl is None:
+            raise ValueError("Annual P/L is required for an accounting-only update")
+        self.annual_pnl.ensure(accounting_date, persist=not dry_run)
+        return UpdateResult(
+            mode=(UpdateMode.DRY_RUN if dry_run else UpdateMode.ACCOUNTING_UPDATED),
+            database_path=self.database_path,
+            requested_date=accounting_date,
+            verified_source_date=None,
+            availability=None,
         )
 
     def _project_current_holdings(self) -> tuple[Holding, ...] | None:

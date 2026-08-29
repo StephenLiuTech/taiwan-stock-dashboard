@@ -89,9 +89,80 @@ def test_use_case_persists_one_immutable_snapshot_per_date(tmp_path: Path) -> No
 
     assert first == second
     assert first.realized_pnl_ytd == Decimal("193")
+    assert first.valuation_date == date(2026, 2, 1)
     assert first.other_cost_ytd == Decimal("2")
     assert first.total_pnl_ytd == Decimal("216")
     assert len(repositories.annual_pnl_snapshots.list_for_year(2026)) == 1
+
+
+def test_non_trading_accounting_date_uses_latest_prior_valuation(
+    tmp_path: Path,
+) -> None:
+    connection = database(tmp_path / "prior-valuation.db")
+    repositories = create_repositories("sqlite", connection)
+    repositories.daily_snapshots.add(daily_snapshot(date(2026, 8, 28)))
+    use_case = AnnualPnlUseCase(
+        repositories.transactions,
+        repositories.daily_snapshots,
+        repositories.annual_pnl_snapshots,
+        repositories.dividend_events,
+        repositories.investment_cost_events,
+        repositories.fx_rates,
+    )
+
+    result = use_case.ensure(date(2026, 8, 29))
+
+    assert result.snapshot_date == date(2026, 8, 29)
+    assert result.valuation_date == date(2026, 8, 28)
+    assert result.unrealized_pnl == Decimal("25")
+    assert repositories.daily_snapshots.get_by_date(date(2026, 8, 29)) is None
+    persisted = repositories.annual_pnl_snapshots.get_by_date(date(2026, 8, 29))
+    assert persisted == result
+    connection.close()
+
+
+def test_valuation_resolver_never_uses_future_and_fails_without_prior(
+    tmp_path: Path,
+) -> None:
+    connection = database(tmp_path / "no-future.db")
+    repositories = create_repositories("sqlite", connection)
+    repositories.daily_snapshots.add(daily_snapshot(date(2026, 8, 30)))
+    use_case = AnnualPnlUseCase(
+        repositories.transactions,
+        repositories.daily_snapshots,
+        repositories.annual_pnl_snapshots,
+        repositories.dividend_events,
+        repositories.investment_cost_events,
+        repositories.fx_rates,
+    )
+
+    with pytest.raises(RuntimeError, match="no portfolio valuation"):
+        use_case.ensure(date(2026, 8, 29))
+    connection.close()
+
+
+def test_next_trading_day_uses_new_valuation_without_rewriting_weekend(
+    tmp_path: Path,
+) -> None:
+    connection = database(tmp_path / "next-session.db")
+    repositories = create_repositories("sqlite", connection)
+    repositories.daily_snapshots.add(daily_snapshot(date(2026, 8, 28)))
+    use_case = AnnualPnlUseCase(
+        repositories.transactions,
+        repositories.daily_snapshots,
+        repositories.annual_pnl_snapshots,
+        repositories.dividend_events,
+        repositories.investment_cost_events,
+        repositories.fx_rates,
+    )
+    weekend = use_case.ensure(date(2026, 8, 30))
+    repositories.daily_snapshots.add(daily_snapshot(date(2026, 8, 31)))
+    session = use_case.ensure(date(2026, 8, 31))
+
+    assert weekend.valuation_date == date(2026, 8, 28)
+    assert session.valuation_date == date(2026, 8, 31)
+    assert use_case.summary(year=2026, as_of=date(2026, 8, 30)) == weekend
+    connection.close()
 
 
 def test_use_case_resolves_weekend_usd_cost_with_prior_persisted_fx(
@@ -187,6 +258,7 @@ def test_repository_rejects_overwriting_historical_snapshot(tmp_path: Path) -> N
     repository = create_repositories("sqlite", connection).annual_pnl_snapshots
     snapshot = AnnualPnlSnapshot(
         snapshot_date=date(2026, 1, 1),
+        valuation_date=date(2026, 1, 1),
         year=2026,
         realized_pnl_ytd=Decimal("0"),
         unrealized_pnl=Decimal("0"),

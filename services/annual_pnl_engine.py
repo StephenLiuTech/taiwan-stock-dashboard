@@ -37,6 +37,8 @@ class AnnualPnlEngine:
         costs: list[InvestmentCostEvent],
         exchange_rates: Mapping[tuple[Currency, date], Decimal],
         corporate_actions: list[CorporateAction] | None = None,
+        *,
+        valuation_date: date | None = None,
     ) -> AnnualPnlSnapshot:
         eligible = [item for item in transactions if item.trade_date <= snapshot_date]
         eligible_actions = (
@@ -96,6 +98,7 @@ class AnnualPnlEngine:
         total = realized + unrealized_pnl + dividends_ytd - financing - other
         return AnnualPnlSnapshot(
             snapshot_date=snapshot_date,
+            valuation_date=valuation_date or snapshot_date,
             year=snapshot_date.year,
             realized_pnl_ytd=realized,
             unrealized_pnl=unrealized_pnl,

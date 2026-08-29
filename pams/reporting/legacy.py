@@ -109,6 +109,16 @@ def format_human_report(result: UpdateResult) -> str:
                 f"Database: {result.database_path}",
             ]
         )
+    if result.mode is UpdateMode.ACCOUNTING_UPDATED:
+        assert result.requested_date is not None
+        return "\n".join(
+            [
+                "PAMS Accounting Update",
+                f"Accounting date: {result.requested_date.isoformat()}",
+                "No market snapshot created: official market was closed",
+                "Financing accrual and Annual P/L updated",
+            ]
+        )
     assert result.requested_date is not None
     assert result.verified_source_date is not None
     assert result.totals is not None

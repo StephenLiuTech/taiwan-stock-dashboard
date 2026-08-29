@@ -194,6 +194,10 @@ Liability principal changes are first-class dated financial events. Current
 debt balances are reproducible from immutable principal history, with explicit
 same-day accounting order, rather than inferred from mutable notes.
 
+Financing expense accrues on calendar days from replayed principal. Annual P/L
+keeps its accounting date distinct from its immutable market valuation date,
+so non-trading days never require fabricated market facts.
+
 Future features should model events rather than hard-code asset behavior.
 
 PAMS follows the broker portfolio cost convention. Trading fees and taxes are

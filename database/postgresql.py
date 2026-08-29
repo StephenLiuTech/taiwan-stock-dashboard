@@ -222,7 +222,8 @@ CREATE TABLE IF NOT EXISTS investment_cost_events (
 CREATE INDEX IF NOT EXISTS ix_investment_cost_events_date_type
     ON investment_cost_events(event_date, cost_type);
 CREATE TABLE IF NOT EXISTS annual_pnl_snapshots (
-    snapshot_date TEXT PRIMARY KEY, year INTEGER NOT NULL,
+    snapshot_date TEXT PRIMARY KEY, valuation_date TEXT NOT NULL,
+    year INTEGER NOT NULL,
     reporting_currency TEXT NOT NULL, realized_pnl_ytd TEXT NOT NULL,
     unrealized_pnl TEXT NOT NULL, dividend_income_ytd TEXT NOT NULL,
     financing_cost_ytd TEXT NOT NULL, other_cost_ytd TEXT NOT NULL,
@@ -272,6 +273,8 @@ def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
             _migrate_postgresql_v9_to_v10(connection)
         if 0 < current_version <= 10:
             _migrate_postgresql_v10_to_v11(connection)
+        if 0 < current_version <= 11:
+            _migrate_postgresql_v11_to_v12(connection)
 
         for version in range(current_version + 1, SCHEMA_VERSION + 1):
             connection.execute(
@@ -348,3 +351,25 @@ def _migrate_postgresql_v10_to_v11(connection: PostgreSQLConnection) -> None:
     for statement in POSTGRESQL_SCHEMA.split(";"):
         if "liability_principal_events" in statement:
             connection.execute(statement)
+
+
+def _migrate_postgresql_v11_to_v12(connection: PostgreSQLConnection) -> None:
+    """Add deterministic market-valuation provenance to annual P/L rows."""
+    connection.execute(
+        "ALTER TABLE annual_pnl_snapshots ADD COLUMN IF NOT EXISTS valuation_date TEXT"
+    )
+    connection.execute(
+        """UPDATE annual_pnl_snapshots a SET valuation_date = (
+        SELECT MAX(d.snapshot_date) FROM daily_snapshots d
+        WHERE d.snapshot_date <= a.snapshot_date
+          AND d.total_unrealized_pnl = a.unrealized_pnl)
+        WHERE a.valuation_date IS NULL"""
+    )
+    unresolved = connection.execute(
+        "SELECT COUNT(*) FROM annual_pnl_snapshots WHERE valuation_date IS NULL"
+    ).fetchone()
+    if unresolved and int(unresolved[0]) != 0:
+        raise RuntimeError("annual P/L valuation provenance cannot be resolved")
+    connection.execute(
+        "ALTER TABLE annual_pnl_snapshots ALTER COLUMN valuation_date SET NOT NULL"
+    )

@@ -51,6 +51,7 @@ class AnnualPnlSnapshot(BaseModel):
     model_config = {"frozen": True}
 
     snapshot_date: date
+    valuation_date: date
     year: int
     reporting_currency: Currency = Currency.TWD
     realized_pnl_ytd: Decimal
@@ -65,6 +66,8 @@ class AnnualPnlSnapshot(BaseModel):
     def validate_totals(self) -> "AnnualPnlSnapshot":
         if self.year != self.snapshot_date.year:
             raise ValueError("annual P/L year must match snapshot date")
+        if self.valuation_date > self.snapshot_date:
+            raise ValueError("annual P/L valuation date cannot be in the future")
         expected = (
             self.realized_pnl_ytd
             + self.unrealized_pnl

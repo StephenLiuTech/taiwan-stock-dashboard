@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -131,7 +131,8 @@ CREATE TABLE IF NOT EXISTS investment_cost_events (
 CREATE INDEX IF NOT EXISTS ix_investment_cost_events_date_type
     ON investment_cost_events(event_date, cost_type);
 CREATE TABLE IF NOT EXISTS annual_pnl_snapshots (
-    snapshot_date TEXT PRIMARY KEY, year INTEGER NOT NULL,
+    snapshot_date TEXT PRIMARY KEY, valuation_date TEXT NOT NULL,
+    year INTEGER NOT NULL,
     reporting_currency TEXT NOT NULL, realized_pnl_ytd TEXT NOT NULL,
     unrealized_pnl TEXT NOT NULL, dividend_income_ytd TEXT NOT NULL,
     financing_cost_ytd TEXT NOT NULL, other_cost_ytd TEXT NOT NULL,
@@ -173,6 +174,16 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             or "market" not in position_columns
         ):
             _migrate_multi_currency_schema(connection)
+    annual_table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='annual_pnl_snapshots'"
+    ).fetchone()
+    if annual_table is not None:
+        annual_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(annual_pnl_snapshots)")
+        }
+        if "valuation_date" not in annual_columns:
+            _migrate_annual_pnl_valuation_date(connection)
     connection.executescript(INITIAL_SCHEMA)
     _migrate_margin_financing_schema(connection)
     for version in range(1, SCHEMA_VERSION + 1):
@@ -182,6 +193,51 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             (version,),
         )
     connection.commit()
+
+
+def _migrate_annual_pnl_valuation_date(connection: sqlite3.Connection) -> None:
+    """Rebuild annual snapshots with deterministic market-valuation provenance."""
+    rows = connection.execute(
+        """SELECT a.snapshot_date,
+        (SELECT MAX(d.snapshot_date) FROM daily_snapshots d
+         WHERE d.snapshot_date <= a.snapshot_date
+           AND d.total_unrealized_pnl = a.unrealized_pnl) AS valuation_date
+        FROM annual_pnl_snapshots a"""
+    ).fetchall()
+    unresolved = [row[0] for row in rows if row[1] is None]
+    if unresolved:
+        raise RuntimeError(
+            "annual P/L valuation provenance cannot be resolved for "
+            + ", ".join(unresolved)
+        )
+    connection.executescript(
+        """
+        BEGIN;
+        CREATE TABLE annual_pnl_snapshots_v12 (
+            snapshot_date TEXT PRIMARY KEY, valuation_date TEXT NOT NULL,
+            year INTEGER NOT NULL, reporting_currency TEXT NOT NULL,
+            realized_pnl_ytd TEXT NOT NULL, unrealized_pnl TEXT NOT NULL,
+            dividend_income_ytd TEXT NOT NULL, financing_cost_ytd TEXT NOT NULL,
+            other_cost_ytd TEXT NOT NULL, total_pnl_ytd TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO annual_pnl_snapshots_v12
+        SELECT a.snapshot_date,
+               (SELECT MAX(d.snapshot_date) FROM daily_snapshots d
+                WHERE d.snapshot_date <= a.snapshot_date
+                  AND d.total_unrealized_pnl = a.unrealized_pnl),
+               a.year, a.reporting_currency, a.realized_pnl_ytd,
+               a.unrealized_pnl, a.dividend_income_ytd,
+               a.financing_cost_ytd, a.other_cost_ytd, a.total_pnl_ytd,
+               a.created_at
+        FROM annual_pnl_snapshots a;
+        DROP TABLE annual_pnl_snapshots;
+        ALTER TABLE annual_pnl_snapshots_v12 RENAME TO annual_pnl_snapshots;
+        CREATE INDEX ix_annual_pnl_snapshots_year_date
+            ON annual_pnl_snapshots(year, snapshot_date);
+        COMMIT;
+        """
+    )
 
 
 def _migrate_margin_financing_schema(connection: sqlite3.Connection) -> None:

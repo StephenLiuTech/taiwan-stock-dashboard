@@ -18,6 +18,7 @@ class UpdateMode(StrEnum):
     ENRICHED = "enriched_existing_snapshot"
     DRY_RUN = "dry_run"
     SNAPSHOT_EXISTS = "no_update_snapshot_exists"
+    ACCOUNTING_UPDATED = "accounting_updated_without_market_snapshot"
     SOURCES_UNSYNCHRONIZED = "no_update_sources_unsynchronized"
 
 

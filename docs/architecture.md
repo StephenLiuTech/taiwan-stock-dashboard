@@ -189,6 +189,24 @@ financed-symbol fields remain a current-position summary; historical references
 can identify fully repaid instrument exposure without creating a false current
 liability. This ledger does not calculate interest.
 
+### Calendar-day financing accrual
+
+Schema version 12 separates Annual P/L accounting dates from market valuation
+dates. Each immutable `annual_pnl_snapshots` row records `valuation_date`, the
+latest valid `daily_snapshots.snapshot_date` not later than its accounting
+date. Calendar-day financing accrual can therefore continue across weekends
+and holidays without fabricating quotes or market snapshots. Both official
+Taiwan date-query providers must explicitly confirm that a date has no dataset
+before the update workflow uses this accounting-only path; transport and
+provider failures remain fatal.
+
+Daily financing interest is a pure Actual/365 calculation over principal
+replayed from the schema-v11 ledger. Composition explicitly maps margin
+financing and stock pledge liabilities to the currently approved 6.5% annual
+rate. Deterministic `investment_cost_events` begin at 2026-08-29, fill missing
+calendar days through the requested accounting date, and never overlap the
+approved catch-up through 2026-08-28.
+
 The one-time bootstrap importer has a read-only preview and an explicit apply
 boundary. Apply replaces only the reconciled 2026 ledger, writes deterministic
 statement and synthetic transaction IDs, rebuilds holdings, and performs a

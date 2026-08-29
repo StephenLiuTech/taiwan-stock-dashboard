@@ -67,17 +67,40 @@ class AnnualPnlUseCase:
         *,
         unrealized_pnl: Decimal | None = None,
         persist: bool = True,
+        valuation_date: date | None = None,
     ) -> AnnualPnlSnapshot:
         """Return an existing immutable row or create the missing daily fact."""
         existing = self._annual_snapshots.get_by_date(snapshot_date)
         if existing is not None:
             return existing
-        daily = self._daily_snapshots.get_by_date(snapshot_date)
+        daily = (
+            self._daily_snapshots.get_by_date(valuation_date)
+            if valuation_date is not None
+            else self._daily_snapshots.get_latest_on_or_before(snapshot_date)
+        )
+        preview_without_persisted_valuation = (
+            daily is None and unrealized_pnl is not None and not persist
+        )
+        if daily is None and not preview_without_persisted_valuation:
+            raise AnnualPnlApplicationError(
+                f"no portfolio valuation exists on or before {snapshot_date}"
+            )
+        if (
+            daily is not None
+            and valuation_date is not None
+            and daily.snapshot_date != valuation_date
+        ):
+            raise AnnualPnlApplicationError(
+                f"portfolio valuation does not exist for {valuation_date}"
+            )
+        valuation_date = (
+            daily.snapshot_date
+            if daily is not None
+            else (valuation_date or snapshot_date)
+        )
+        assert valuation_date is not None
         if unrealized_pnl is None:
-            if daily is None:
-                raise AnnualPnlApplicationError(
-                    f"portfolio snapshot does not exist for {snapshot_date}"
-                )
+            assert daily is not None
             unrealized_pnl = daily.total_unrealized_pnl
         transactions = self._transactions.list_filtered(end_date=snapshot_date)
         dividends = self._dividends.list_filtered()
@@ -97,6 +120,7 @@ class AnnualPnlUseCase:
             costs,
             rates,
             actions,
+            valuation_date=valuation_date,
         )
         if persist:
             self._annual_snapshots.add(result)
