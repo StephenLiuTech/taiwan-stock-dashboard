@@ -8,11 +8,13 @@ from decimal import Decimal
 from typing import Protocol
 
 from domain import (
+    AnnualPnlSnapshot,
     Currency,
     DailyReportSections,
     DailySnapshot,
     Market,
     PositionSnapshot,
+    RealizedPnlBySymbol,
 )
 from market_calendar import MarketCalendarUnavailableError
 from pams.application.annual_pnl import AnnualPnlUseCase
@@ -84,6 +86,14 @@ class DailyEmailHistoryPoint:
 
 
 @dataclass(frozen=True)
+class DailyEmailAnnualPerformance:
+    """Persisted annual accounting truth prepared for email presentation."""
+
+    snapshot: AnnualPnlSnapshot
+    realized_by_symbol: tuple[RealizedPnlBySymbol, ...]
+
+
+@dataclass(frozen=True)
 class DailyEmailReport:
     report_date: date
     verified_source_date: date | None
@@ -99,6 +109,8 @@ class DailyEmailReport:
     history: tuple[DailyEmailHistoryPoint, ...]
     positions: tuple[DailyEmailPosition, ...]
     sections: DailyReportSections = DailyReportSections()
+    annual_performance: DailyEmailAnnualPerformance | None = None
+    annual_warning: str | None = None
 
 
 @dataclass(frozen=True)
@@ -211,8 +223,9 @@ class SendDailyReportUseCase:
         force: bool = False,
     ) -> DailyReportSendResult:
         """Perform one automatic or explicit-date delivery workflow."""
+        accounting_limit = requested_date or self._today()
         if requested_date is None:
-            today = self._today()
+            today = accounting_limit
             latest = self._snapshots.get_latest()
             if (
                 latest is not None
@@ -277,7 +290,11 @@ class SendDailyReportUseCase:
         report_date = snapshot.snapshot_date
         if self._annual_pnl is not None:
             self._annual_pnl.ensure(report_date, persist=not dry_run)
-        report = self._build_report(snapshot, verified_source_date or report_date)
+        report = self._build_report(
+            snapshot,
+            verified_source_date or report_date,
+            accounting_limit,
+        )
         rendered = self._renderer.render(report)
         if dry_run:
             return DailyReportSendResult(
@@ -360,7 +377,10 @@ class SendDailyReportUseCase:
         )
 
     def _build_report(
-        self, snapshot: DailySnapshot, verified_source_date: date
+        self,
+        snapshot: DailySnapshot,
+        verified_source_date: date,
+        accounting_limit: date | None = None,
     ) -> DailyEmailReport:
         holdings = self._holdings.list_all()
         names = {holding.id: holding.name for holding in holdings}
@@ -466,6 +486,10 @@ class SendDailyReportUseCase:
             if self._section_builder is not None
             else DailyReportSections()
         )
+        annual_performance, annual_warning = self._annual_performance(
+            accounting_limit or snapshot.snapshot_date,
+            snapshot.snapshot_date,
+        )
         return DailyEmailReport(
             snapshot.snapshot_date,
             verified_source_date,
@@ -481,6 +505,34 @@ class SendDailyReportUseCase:
             history,
             positions,
             sections,
+            annual_performance,
+            annual_warning,
+        )
+
+    def _annual_performance(
+        self, accounting_limit: date, valuation_date: date
+    ) -> tuple[DailyEmailAnnualPerformance | None, str | None]:
+        if self._annual_snapshots is None or self._annual_pnl is None:
+            return None, "Annual P/L data is unavailable for this report."
+        candidates = [
+            item
+            for item in self._annual_snapshots.list_for_year(accounting_limit.year)
+            if item.snapshot_date <= accounting_limit
+            and item.valuation_date == valuation_date
+        ]
+        if not candidates:
+            return (
+                None,
+                "Annual P/L data is unavailable for the report's accounting "
+                "and valuation dates.",
+            )
+        snapshot = candidates[-1]
+        return (
+            DailyEmailAnnualPerformance(
+                snapshot,
+                self._annual_pnl.realized_pnl_by_symbol(as_of=snapshot.snapshot_date),
+            ),
+            None,
         )
 
     @staticmethod

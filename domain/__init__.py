@@ -1,7 +1,12 @@
 """Public PAMS domain API."""
 
 from domain.analytics import DailyPortfolioReturn, PortfolioAnalytics
-from domain.annual_pnl import AnnualPnlSnapshot, InvestmentCostEvent, RealizedSale
+from domain.annual_pnl import (
+    AnnualPnlSnapshot,
+    InvestmentCostEvent,
+    RealizedPnlBySymbol,
+    RealizedSale,
+)
 from domain.broker_import import BrokerImportRecord
 from domain.enums import (
     Currency,
@@ -114,6 +119,7 @@ __all__ = [
     "PortfolioLedger",
     "AnnualPnlSnapshot",
     "RealizedSale",
+    "RealizedPnlBySymbol",
     "PortfolioAllocationSection",
     "PortfolioInsightsSection",
     "PositionSnapshot",

@@ -30,6 +30,15 @@ class RealizedSale:
     realized_return: Decimal
 
 
+@dataclass(frozen=True)
+class RealizedPnlBySymbol:
+    """One reporting-currency YTD realized P/L total by instrument."""
+
+    symbol: str
+    market: str
+    realized_pnl: Decimal
+
+
 class InvestmentCostEvent(BaseModel):
     """One dated investment expense not represented in SELL realized P/L."""
 

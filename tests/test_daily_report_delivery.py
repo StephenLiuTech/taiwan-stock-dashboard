@@ -13,6 +13,7 @@ import pytest
 from PIL import Image
 
 from domain import (
+    AnnualPnlSnapshot,
     Currency,
     DailyReportSections,
     DailySnapshot,
@@ -21,6 +22,7 @@ from domain import (
     Holding,
     Market,
     PositionSnapshot,
+    RealizedPnlBySymbol,
 )
 from market_calendar import MarketAvailability, MarketCalendarUnavailableError
 from market_data import ProviderDataError
@@ -625,6 +627,113 @@ def test_html_and_plain_text_contain_correct_persisted_figures() -> None:
     assert message.plain_text.index("Portfolio Summary") < message.plain_text.index(
         "Portfolio Trend"
     )
+
+
+def test_final_annual_performance_section_uses_persisted_dates_and_values() -> None:
+    annual_snapshot = AnnualPnlSnapshot(
+        snapshot_date=date(2026, 7, 23),
+        valuation_date=date(2026, 7, 22),
+        year=2026,
+        realized_pnl_ytd=Decimal("100"),
+        unrealized_pnl=Decimal("-50"),
+        dividend_income_ytd=Decimal("20"),
+        financing_cost_ytd=Decimal("30"),
+        other_cost_ytd=Decimal("10"),
+        total_pnl_ytd=Decimal("30"),
+    )
+
+    class AnnualSnapshots:
+        def __init__(self) -> None:
+            self.rows = (annual_snapshot,)
+
+        def list_for_year(self, year: int) -> list[AnnualPnlSnapshot]:
+            return [item for item in self.rows if item.year == year]
+
+        def list_between_dates(self, start: date, end: date) -> list[AnnualPnlSnapshot]:
+            return [item for item in self.rows if start <= item.snapshot_date <= end]
+
+    class AnnualPnl:
+        def __init__(self) -> None:
+            self.mutations = 0
+
+        def ensure(self, *_args: object, **_kwargs: object) -> AnnualPnlSnapshot:
+            return annual_snapshot
+
+        def realized_pnl_by_symbol(
+            self, *, as_of: date
+        ) -> tuple[RealizedPnlBySymbol, ...]:
+            assert as_of == date(2026, 7, 23)
+            return (
+                RealizedPnlBySymbol("2330", "TWSE", Decimal("125")),
+                RealizedPnlBySymbol("8299", "TPEx", Decimal("-25")),
+            )
+
+    annual = AnnualPnl()
+    repository = AnnualSnapshots()
+    transport = TransportStub()
+    case = SendDailyReportUseCase(
+        UpdateStub(),  # type: ignore[arg-type]
+        SnapshotStub(snapshot()),  # type: ignore[arg-type]
+        PositionStub(),  # type: ignore[arg-type]
+        HoldingStub(),  # type: ignore[arg-type]
+        DeliveryStub(),
+        DailyEmailReportRenderer(),
+        transport,
+        "sender@example.com",
+        "recipient@example.com",
+        today=lambda: date(2026, 7, 23),
+        annual_pnl=annual,  # type: ignore[arg-type]
+        annual_snapshots=repository,  # type: ignore[arg-type]
+    )
+
+    case.execute()
+
+    message = transport.messages[0]
+    assert "2026 年度投資績效（YTD）" in message.html
+    assert "Accounting Date:</strong> 2026-07-23" in message.html
+    assert "Valuation Date:</strong> 2026-07-22" in message.html
+    for label, amount in (
+        ("Realized P/L YTD", "+NT$100"),
+        ("Unrealized P/L", "-NT$50"),
+        ("Dividend Income YTD", "NT$20"),
+        ("Financing Cost YTD", "NT$30"),
+        ("Other Cost YTD", "NT$10"),
+        ("Total P/L YTD", "+NT$30"),
+    ):
+        assert label in message.html
+        assert amount in message.html
+        assert f"{label}: {amount}" in message.plain_text
+    assert message.html.count('role="img"') == 2
+    assert 'class="pams-ytd-composition-chart"' in message.html
+    assert 'class="pams-realized-symbol-chart"' in message.html
+    assert message.html.index("TWSE 2330") < message.html.index("TPEx 8299")
+    assert "#b91c1c" in message.html
+    assert "#15803d" in message.html
+    assert "Portfolio Summary" in message.html
+    assert "Portfolio Trend" in message.html
+    assert "Today's Contributors" in message.html
+    assert ">Holdings</h2>" in message.html
+    assert message.html.index("年度投資績效（YTD）") > message.html.index(
+        ">Holdings</h2>"
+    )
+    assert "Realized P/L YTD by Symbol" in message.plain_text
+    assert "TWSE | 2330 | +NT$125" in message.plain_text
+    assert repository.rows == (annual_snapshot,)
+    assert annual.mutations == 0
+
+
+def test_final_annual_performance_section_warns_when_data_is_unavailable() -> None:
+    case, _, _, transport = use_case(value=snapshot())
+
+    case.execute(date(2026, 7, 22))
+
+    message = transport.messages[0]
+    assert "年度投資績效（YTD）" in message.html
+    assert "Annual P/L data is unavailable for this report." in message.html
+    assert "Warning: Annual P/L data is unavailable for this report." in (
+        message.plain_text
+    )
+    assert "pams-ytd-composition-chart" not in message.html
 
 
 def test_positive_daily_profit_loss_uses_persisted_position_movements() -> None:

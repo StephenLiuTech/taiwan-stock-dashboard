@@ -12,6 +12,7 @@ from domain import (
     InvestmentCostEvent,
     InvestmentCostType,
     Market,
+    RealizedPnlBySymbol,
     Transaction,
     TransactionType,
 )
@@ -106,6 +107,39 @@ class AnnualPnlEngine:
             financing_cost_ytd=financing,
             other_cost_ytd=other,
             total_pnl_ytd=total,
+        )
+
+    def realized_pnl_by_symbol(
+        self,
+        snapshot_date: date,
+        transactions: list[Transaction],
+        exchange_rates: Mapping[tuple[Currency, date], Decimal],
+        corporate_actions: list[CorporateAction] | None = None,
+    ) -> tuple[RealizedPnlBySymbol, ...]:
+        """Aggregate ledger-derived realized P/L in TWD without broker totals."""
+        eligible = [item for item in transactions if item.trade_date <= snapshot_date]
+        eligible_actions = (
+            [item for item in corporate_actions if item.effective_date <= snapshot_date]
+            if corporate_actions is not None
+            else None
+        )
+        ledger = self.transactions.build_ledger(eligible, eligible_actions)
+        totals: dict[tuple[str, str], Decimal] = {}
+        for sale in ledger.realized_sales:
+            if sale.trade_date.year != snapshot_date.year:
+                continue
+            key = (sale.market, sale.symbol)
+            totals[key] = totals.get(key, Decimal("0")) + self._convert(
+                sale.realized_pnl,
+                sale.currency,
+                sale.trade_date,
+                exchange_rates,
+            )
+        return tuple(
+            RealizedPnlBySymbol(symbol, market, amount)
+            for (market, symbol), amount in sorted(
+                totals.items(), key=lambda item: (-item[1], item[0][0], item[0][1])
+            )
         )
 
     def _dividends(

@@ -322,6 +322,147 @@ def _chart_font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
+def _annual_bar_chart(
+    title: str, rows: tuple[tuple[str, Decimal], ...], *, chart_class: str
+) -> str:
+    """Render one conservative email-safe horizontal bar chart."""
+    maximum = max((abs(value) for _, value in rows), default=Decimal("0"))
+    rendered_rows = []
+    for label, value in rows:
+        width = (
+            int((abs(value) * Decimal("100") / maximum).to_integral_value())
+            if maximum != 0
+            else 0
+        )
+        color = _tone(value)
+        bar = (
+            '<table role="presentation" width="100%" style="width:100%;'
+            'border-collapse:collapse"><tr>'
+            f'<td width="{width}%" bgcolor="{color}" '
+            f'style="height:14px;background:{color};font-size:1px;line-height:14px">&nbsp;</td>'
+            f'<td width="{100 - width}%" style="height:14px;font-size:1px;line-height:14px">&nbsp;</td>'
+            "</tr></table>"
+        )
+        rendered_rows.append(
+            "<tr>"
+            f'<td style="padding:7px 8px 7px 0;width:24%;white-space:nowrap">{escape(label)}</td>'
+            f'<td style="padding:7px 10px;width:54%">{bar}</td>'
+            f'<td style="padding:7px 0 7px 8px;width:22%;text-align:right;'
+            f'white-space:nowrap;color:{color};font-weight:600">'
+            f"{escape(_money(value, signed=True))}</td></tr>"
+        )
+    return (
+        f'<h3 style="font-size:16px;margin:20px 0 8px">{escape(title)}</h3>'
+        f'<table class="{chart_class}" role="img" aria-label="{escape(title, quote=True)}" '
+        'width="100%" style="width:100%;border-collapse:collapse;table-layout:fixed">'
+        + "".join(rendered_rows)
+        + "</table>"
+    )
+
+
+def _annual_performance_text(report: DailyEmailReport) -> str:
+    performance = report.annual_performance
+    if performance is None:
+        return "\n".join(
+            (
+                "年度投資績效（YTD）",
+                f"Warning: {report.annual_warning or 'Annual P/L data is unavailable.'}",
+            )
+        )
+    snapshot = performance.snapshot
+    lines = [
+        f"{snapshot.year} 年度投資績效（YTD）",
+        f"Accounting Date: {snapshot.snapshot_date}",
+        f"Valuation Date: {snapshot.valuation_date}",
+        f"Realized P/L YTD: {_money(snapshot.realized_pnl_ytd, signed=True)}",
+        f"Unrealized P/L: {_money(snapshot.unrealized_pnl, signed=True)}",
+        f"Dividend Income YTD: {_money(snapshot.dividend_income_ytd)}",
+        f"Financing Cost YTD: {_money(snapshot.financing_cost_ytd)}",
+        f"Other Cost YTD: {_money(snapshot.other_cost_ytd)}",
+        f"Total P/L YTD: {_money(snapshot.total_pnl_ytd, signed=True)}",
+        "",
+        "YTD P/L Composition",
+        "Realized P/L | Unrealized P/L | Dividend Income | Financing Cost | Other Cost | Total P/L",
+        "",
+        "Realized P/L YTD by Symbol",
+    ]
+    lines.extend(
+        f"{item.market} | {item.symbol} | {_money(item.realized_pnl, signed=True)}"
+        for item in performance.realized_by_symbol
+    )
+    if not performance.realized_by_symbol:
+        lines.append("No realized sales in the current calendar year.")
+    return "\n".join(lines)
+
+
+def _annual_performance_html(report: DailyEmailReport) -> str:
+    performance = report.annual_performance
+    if performance is None:
+        return (
+            '<div class="pams-annual-performance" style="margin-top:28px">'
+            '<h2 style="font-size:18px;margin:0 0 10px">年度投資績效（YTD）</h2>'
+            f'<p style="color:{NEUTRAL_COLOR};margin:0">'
+            f'{escape(report.annual_warning or "Annual P/L data is unavailable.")}</p></div>'
+        )
+    snapshot = performance.snapshot
+    composition = (
+        ("Realized P/L", snapshot.realized_pnl_ytd),
+        ("Unrealized P/L", snapshot.unrealized_pnl),
+        ("Dividend Income", snapshot.dividend_income_ytd),
+        ("Financing Cost", -snapshot.financing_cost_ytd),
+        ("Other Cost", -snapshot.other_cost_ytd),
+        ("Total P/L", snapshot.total_pnl_ytd),
+    )
+    symbols = tuple(
+        (f"{item.market} {item.symbol}", item.realized_pnl)
+        for item in performance.realized_by_symbol
+    )
+    symbol_chart = (
+        _annual_bar_chart(
+            "Realized P/L YTD by Symbol",
+            symbols,
+            chart_class="pams-realized-symbol-chart",
+        )
+        if symbols
+        else (
+            '<h3 style="font-size:16px;margin:20px 0 8px">'
+            "Realized P/L YTD by Symbol</h3>"
+            f'<p style="color:{NEUTRAL_COLOR}">No realized sales in the current calendar year.</p>'
+        )
+    )
+    metrics = (
+        ("Realized P/L YTD", snapshot.realized_pnl_ytd, True),
+        ("Unrealized P/L", snapshot.unrealized_pnl, True),
+        ("Dividend Income YTD", snapshot.dividend_income_ytd, False),
+        ("Financing Cost YTD", snapshot.financing_cost_ytd, False),
+        ("Other Cost YTD", snapshot.other_cost_ytd, False),
+        ("Total P/L YTD", snapshot.total_pnl_ytd, True),
+    )
+    metric_rows = "".join(
+        '<tr><td style="padding:7px 8px;border-bottom:1px solid #e5e7eb">'
+        f'{escape(label)}</td><td style="padding:7px 8px;border-bottom:1px solid #e5e7eb;'
+        f"text-align:right;white-space:nowrap;color:{_tone(value) if performance_value else NEUTRAL_COLOR};"
+        f'font-weight:600">{escape(_money(value, signed=performance_value))}</td></tr>'
+        for label, value, performance_value in metrics
+    )
+    return (
+        '<div class="pams-annual-performance" style="margin-top:28px">'
+        f'<h2 style="font-size:18px;margin:0 0 8px">{snapshot.year} 年度投資績效（YTD）</h2>'
+        '<p style="margin:0 0 12px;color:#4b5563">'
+        f"<strong>Accounting Date:</strong> {snapshot.snapshot_date}<br>"
+        f"<strong>Valuation Date:</strong> {snapshot.valuation_date}</p>"
+        '<table class="pams-annual-metrics" width="100%" style="width:100%;'
+        f'border-collapse:collapse">{metric_rows}</table>'
+        + _annual_bar_chart(
+            "YTD P/L Composition",
+            composition,
+            chart_class="pams-ytd-composition-chart",
+        )
+        + symbol_chart
+        + "</div>"
+    )
+
+
 def _cell(
     value: str,
     *,
@@ -731,13 +872,17 @@ class DailyEmailReportRenderer:
 <thead><tr>{headers((("Market", "6%", "left"), ("Symbol", "7%", "left"), ("Name", None, "left"), ("Currency", "7%", "left"), ("Quantity", "7%", "right"), ("Average Cost", "9%", "right"), ("Close", "7%", "right"), ("Quote Date", "9%", "right"), ("FX", "6%", "right"), ("Unrealized P/L", "9%", "right"), ("Return %", "6%", "right"), ("Market Value", "9%", "right")), font_size="13px")}</tr></thead>
 <tbody>{rows}</tbody></table>
 {DailyReportSectionRenderer().html(report.sections)}
+{_annual_performance_html(report)}
 </td></tr></table>
 </div></body></html>"""
         section_text = DailyReportSectionRenderer().text(report.sections)
+        annual_text = _annual_performance_text(report)
         return RenderedEmail(
             subject,
             "\n".join(text_lines)
             + ("\n\n" + section_text if section_text else "")
+            + "\n\n"
+            + annual_text
             + "\n",
             html,
             inline_images,

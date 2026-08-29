@@ -162,3 +162,25 @@ def test_new_calendar_year_resets_flow_metrics() -> None:
     assert result.realized_pnl_ytd == 0
     assert result.other_cost_ytd == 0
     assert result.total_pnl_ytd == Decimal("7")
+
+
+def test_realized_pnl_by_symbol_uses_ledger_values_and_descending_order() -> None:
+    transactions = [
+        tx("2330-buy", TransactionType.BUY, date(2026, 1, 1), "10", "100"),
+        tx("2330-sell", TransactionType.SELL, date(2026, 2, 1), "5", "150"),
+        tx("8299-buy", TransactionType.BUY, date(2026, 1, 1), "10", "100").model_copy(
+            update={"symbol": "8299", "market": Market.TPEX}
+        ),
+        tx("8299-sell", TransactionType.SELL, date(2026, 2, 1), "5", "80").model_copy(
+            update={"symbol": "8299", "market": Market.TPEX}
+        ),
+    ]
+
+    result = AnnualPnlEngine().realized_pnl_by_symbol(
+        date(2026, 8, 30), transactions, {}
+    )
+
+    assert [(item.symbol, item.realized_pnl) for item in result] == [
+        ("2330", Decimal("250")),
+        ("8299", Decimal("-100")),
+    ]

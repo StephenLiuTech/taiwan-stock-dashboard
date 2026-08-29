@@ -764,6 +764,12 @@ filtered by calendar year, so a new year resets realized, dividend, financing,
 and other-cost totals without deleting previous years. The formula is
 `realized + unrealized + dividends - financing costs - other costs`.
 
+The Daily Report appends a presentation-only annual-performance section from
+the latest eligible immutable annual snapshot whose valuation date matches the
+report valuation. Its two email-safe charts render snapshot composition and
+TransactionEngine-derived realized P/L by symbol; they never consume broker
+reported performance or recalculate portfolio accounting in the renderer.
+
 Broker-style holding basis excludes BUY fees/taxes; those expenses enter
 `other_cost_ytd` once. SELL fees/taxes already reduce realized net proceeds and
 are not subtracted again. `investment_cost_events` contains explicit dated

@@ -9,6 +9,7 @@ from domain import (
     Currency,
     DividendEvent,
     InvestmentCostEvent,
+    RealizedPnlBySymbol,
     RealizedSale,
     Transaction,
 )
@@ -145,6 +146,17 @@ class AnnualPnlUseCase:
             if (year is None or sale.trade_date.year == year)
             and (normalized is None or sale.symbol == normalized)
         )
+
+    def realized_pnl_by_symbol(self, *, as_of: date) -> tuple[RealizedPnlBySymbol, ...]:
+        """Return reporting-currency ledger realized P/L grouped by symbol."""
+        transactions = self._transactions.list_filtered(end_date=as_of)
+        actions = (
+            self._corporate_actions.list_filtered(end_date=as_of)
+            if self._corporate_actions is not None
+            else None
+        )
+        rates = self._historical_rates(as_of, transactions, [], [])
+        return self._engine.realized_pnl_by_symbol(as_of, transactions, rates, actions)
 
     def summary(
         self, *, year: int, as_of: date | None = None
