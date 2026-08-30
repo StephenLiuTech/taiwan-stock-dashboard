@@ -440,6 +440,103 @@ def test_non_future_fx_matching_latest_us_quote_is_complete() -> None:
     assert engine.requires_enrichment(valuation_date) is False
 
 
+def test_required_us_quote_coverage_accepts_all_active_symbols() -> None:
+    report_date = date(2026, 8, 5)
+    holdings = [
+        holding("MU", Market.US, Currency.USD),
+        holding("DRAM", Market.US, Currency.USD),
+    ]
+    quotes = tuple(
+        quote(item.symbol, Market.US, Currency.USD, "100", "99", report_date)
+        for item in holdings
+    )
+
+    GlobalMarketDataEngine._require_us_quote_coverage(holdings, quotes)
+
+
+def test_persisted_us_quote_fallback_is_degraded(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    report_date = date(2026, 8, 5)
+    mu = holding("MU", Market.US, Currency.USD)
+    quotes = (quote("MU", Market.US, Currency.USD, "100", "99", report_date),)
+
+    GlobalMarketDataEngine._require_us_quote_coverage(
+        [mu], quotes, fallback_symbols=("MU",)
+    )
+
+    assert "DEGRADED category=US_QUOTE_FALLBACK symbols=MU" in caplog.text
+
+
+def test_missing_required_us_quote_is_a_failed_state(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    holdings = [
+        holding("MU", Market.US, Currency.USD),
+        holding("DRAM", Market.US, Currency.USD),
+    ]
+    quotes = (quote("MU", Market.US, Currency.USD, "100", "99", date(2026, 8, 5)),)
+
+    with pytest.raises(ProviderDataError, match="DRAM"):
+        GlobalMarketDataEngine._require_us_quote_coverage(holdings, quotes)
+
+    assert "FAILED category=US_QUOTE_MISSING symbols=DRAM" in caplog.text
+
+
+def test_fx_live_success_is_healthy(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("INFO")
+    report_date = date(2026, 8, 5)
+    live = FxRate(
+        base_currency=Currency.USD,
+        quote_currency=Currency.TWD,
+        rate_date=report_date,
+        rate=Decimal("31.42"),
+        source="fixture",
+    )
+    engine = completeness_engine([], {}, None, set(), providers=False)
+    engine.fx_provider = SimpleNamespace(
+        source="fixture",
+        fetch=lambda *_args: live,
+    )
+
+    assert engine._resolve_fx(report_date) == live
+    assert "HEALTHY category=FX pair=USD/TWD" in caplog.text
+
+
+def test_fx_provider_failure_uses_persisted_fallback_as_degraded(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    report_date = date(2026, 8, 5)
+    persisted = FxRate(
+        base_currency=Currency.USD,
+        quote_currency=Currency.TWD,
+        rate_date=date(2026, 8, 4),
+        rate=Decimal("31.42"),
+        source="fixture",
+    )
+    engine = completeness_engine([], {}, persisted, set(), providers=False)
+
+    def fail(*_args: object) -> FxRate:
+        raise ProviderDataError("temporary")
+
+    engine.fx_provider = SimpleNamespace(source="fixture", fetch=fail)
+
+    assert engine._resolve_fx(report_date) == persisted
+    assert "DEGRADED category=FX_FALLBACK pair=USD/TWD" in caplog.text
+
+
+def test_fx_missing_without_fallback_is_failed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    report_date = date(2026, 8, 5)
+    engine = completeness_engine([], {}, None, set(), providers=False)
+
+    with pytest.raises(ProviderDataError, match="no non-future persisted rate"):
+        engine._resolve_fx(report_date)
+
+    assert "FAILED category=FX_MISSING pair=USD/TWD" in caplog.text
+
+
 def test_us_provider_uses_latest_two_completed_sessions() -> None:
     transport = DocumentTransport(
         {

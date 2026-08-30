@@ -117,6 +117,7 @@ from pams.application.send_daily_report import (
     DailyReportError,
     DailyReportSendResult,
     DailyReportSnapshotMissingError,
+    DailyReportValuationIncompleteError,
     SendDailyReportUseCase,
 )
 from pams.application.transactions import AddTransactionUseCase, ListTransactionsUseCase
@@ -165,6 +166,7 @@ __all__ = [
     "DailyReportError",
     "DailyReportSendResult",
     "DailyReportSnapshotMissingError",
+    "DailyReportValuationIncompleteError",
     "DatabaseMigrationError",
     "DatabaseMigrationResult",
     "DuplicateTransactionError",

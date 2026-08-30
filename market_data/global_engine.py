@@ -232,9 +232,13 @@ class GlobalMarketDataEngine:
         us_quotes: tuple = persisted_us_quotes if reuse_persisted_taiwan else ()
         if self.us_provider is not None and symbols_to_fetch:
             try:
-                us_quotes = tuple(
-                    [*us_quotes, *self.us_provider.fetch(symbols_to_fetch, trade_date)]
-                )
+                fetched_quotes = self.us_provider.fetch(symbols_to_fetch, trade_date)
+                us_quotes = tuple([*us_quotes, *fetched_quotes])
+                if fetched_quotes:
+                    _LOGGER.info(
+                        "HEALTHY category=US_QUOTES symbols=%s",
+                        ",".join(item.symbol for item in fetched_quotes),
+                    )
             except ProviderDataError as error:
                 _LOGGER.warning(
                     "US holdings remain unquoted: provider=%s error=%s",
@@ -255,35 +259,33 @@ class GlobalMarketDataEngine:
             )
             is not None
         )
-        if persisted_quotes:
-            _LOGGER.warning(
-                "Using persisted non-future US quotes: symbols=%s",
-                ",".join(item.symbol for item in persisted_quotes),
-            )
-        us_quotes = tuple([*us_quotes, *persisted_quotes])
-        try:
-            if (
-                reuse_persisted_taiwan
-                and self.fx_rates.get_latest_on_or_before(
-                    Currency.USD.value, Currency.TWD.value, trade_date
+        fallback_quotes = tuple(
+            {
+                (item.symbol, item.market): item
+                for item in (
+                    *persisted_quotes,
+                    *(persisted_us_quotes if reuse_persisted_taiwan else ()),
                 )
-                is None
-            ):
-                _LOGGER.info("Missing USD/TWD rate detected; fetching FX")
-            fx_rate = self._resolve_fx(trade_date)
-        except ProviderDataError as error:
-            _LOGGER.warning(
-                "US holdings remain untranslated: error=%s", type(error).__name__
+            }.values()
+        )
+        us_quotes = tuple([*us_quotes, *persisted_quotes])
+        self._require_us_quote_coverage(
+            us_holdings,
+            us_quotes,
+            fallback_symbols=tuple(item.symbol for item in fallback_quotes),
+        )
+        if (
+            reuse_persisted_taiwan
+            and self.fx_rates.get_latest_on_or_before(
+                Currency.USD.value, Currency.TWD.value, trade_date
             )
-            fx_rate = None
-        quoted_us_keys = {(item.symbol, item.market) for item in us_quotes}
+            is None
+        ):
+            _LOGGER.info("Missing USD/TWD rate detected; fetching FX")
+        fx_rate = self._resolve_fx(trade_date)
         valued_holdings = [
             *taiwan_holdings,
-            *(
-                item
-                for item in us_holdings
-                if fx_rate is not None and (item.symbol, item.market) in quoted_us_keys
-            ),
+            *us_holdings,
         ]
         valuation = self.valuation.valuate(
             trade_date, valued_holdings, [*taiwan_quotes, *us_quotes], fx_rate
@@ -356,7 +358,12 @@ class GlobalMarketDataEngine:
         )
         if self.fx_provider is not None:
             try:
-                return self.fx_provider.fetch(Currency.USD, Currency.TWD, report_date)
+                live = self.fx_provider.fetch(Currency.USD, Currency.TWD, report_date)
+                _LOGGER.info(
+                    "HEALTHY category=FX pair=USD/TWD rate_date=%s",
+                    live.rate_date,
+                )
+                return live
             except ProviderDataError as error:
                 _LOGGER.warning(
                     "Live FX refresh failed; checking persisted non-future rate: "
@@ -365,10 +372,44 @@ class GlobalMarketDataEngine:
                     type(error).__name__,
                 )
         if persisted is None:
+            _LOGGER.error("FAILED category=FX_MISSING pair=USD/TWD")
             raise ProviderDataError(
                 "USD/TWD FX rate is unavailable; no non-future persisted rate exists"
             )
+        _LOGGER.warning(
+            "DEGRADED category=FX_FALLBACK pair=USD/TWD rate_date=%s",
+            persisted.rate_date,
+        )
         return persisted
+
+    @staticmethod
+    def _require_us_quote_coverage(
+        holdings: list[Holding],
+        quotes: tuple,
+        *,
+        fallback_symbols: tuple[str, ...] = (),
+    ) -> None:
+        quoted_keys = {(item.symbol, item.market) for item in quotes}
+        missing_symbols = sorted(
+            item.symbol
+            for item in holdings
+            if (item.symbol, item.market) not in quoted_keys
+        )
+        if not missing_symbols:
+            if fallback_symbols:
+                _LOGGER.warning(
+                    "DEGRADED category=US_QUOTE_FALLBACK symbols=%s",
+                    ",".join(sorted(set(fallback_symbols))),
+                )
+            return
+        _LOGGER.error(
+            "FAILED category=US_QUOTE_MISSING symbols=%s",
+            ",".join(missing_symbols),
+        )
+        raise ProviderDataError(
+            "required US quotes are unavailable for active holdings: "
+            + ", ".join(missing_symbols)
+        )
 
     @staticmethod
     def _snapshots(result: MarketDataRefreshResult) -> list[PositionSnapshot]:

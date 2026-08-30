@@ -45,6 +45,10 @@ class DailyReportDeliveryError(DailyReportError):
     """The transport failed and the delivery remains retryable."""
 
 
+class DailyReportValuationIncompleteError(DailyReportError):
+    """Required position valuation inputs are absent from the report snapshot."""
+
+
 @dataclass(frozen=True)
 class ChartSource:
     """Transport-neutral HTML URI and optional MIME-related image."""
@@ -300,13 +304,22 @@ class SendDailyReportUseCase:
             verified_source_date or report_date,
             accounting_limit,
         )
+        self._ensure_complete_valuation(snapshot)
         rendered = self._renderer.render(report)
         if dry_run:
             return DailyReportSendResult(
                 report_date, self._recipient, rendered.subject, "dry_run"
             )
-        if not force:
-            self._deliveries.claim(REPORT_TYPE, report_date, self._recipient)
+        if not force and not self._deliveries.claim(
+            REPORT_TYPE, report_date, self._recipient
+        ):
+            _LOGGER.info(
+                "Daily Report already sent or claimed for %s; skipping delivery",
+                report_date,
+            )
+            return DailyReportSendResult(
+                report_date, self._recipient, rendered.subject, "already_sent"
+            )
         try:
             if self._asset_store is not None and rendered.inline_images:
                 published: dict[str, str] = {}
@@ -392,6 +405,45 @@ class SendDailyReportUseCase:
                 for holding_id, holding in active_holdings.items()
             )
         )
+
+    def _ensure_complete_valuation(self, snapshot: DailySnapshot) -> None:
+        """Fail before asset publication when an active position is unvalued."""
+        active_holdings = {
+            holding.id: holding
+            for holding in self._holdings.list_all()
+            if holding.quantity > 0
+        }
+        positions = self._positions.list_by_date(snapshot.snapshot_date)
+        positions_by_id = {position.holding_id: position for position in positions}
+        missing_positions = sorted(set(active_holdings) - set(positions_by_id))
+        invalid_us = sorted(
+            holding.symbol
+            for holding_id, holding in active_holdings.items()
+            if holding.market is Market.US
+            and (
+                holding_id not in positions_by_id
+                or positions_by_id[holding_id].quote_date is None
+                or positions_by_id[holding_id].fx_rate_date is None
+            )
+        )
+        if missing_positions or invalid_us:
+            symbols = sorted(
+                {
+                    active_holdings[item].symbol
+                    for item in missing_positions
+                    if item in active_holdings
+                }
+                | set(invalid_us)
+            )
+            _LOGGER.error(
+                "FAILED category=VALUATION_COMPLETENESS symbols=%s report_date=%s",
+                ",".join(symbols),
+                snapshot.snapshot_date,
+            )
+            raise DailyReportValuationIncompleteError(
+                "daily report valuation is incomplete for active positions: "
+                + ", ".join(symbols)
+            )
 
     def _build_report(
         self,

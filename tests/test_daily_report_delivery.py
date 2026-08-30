@@ -32,6 +32,7 @@ from pams.application import (
     DailyReportDeliveryError,
     DailyReportSendResult,
     DailyReportSnapshotMissingError,
+    DailyReportValuationIncompleteError,
     SendDailyReportUseCase,
 )
 from pams.application.send_daily_report import EmailEnvelope, InlineImage
@@ -144,7 +145,7 @@ class PositionStub:
         self.values = values if values is not None else positions()
 
     def list_by_date(self, report_date: date) -> list[PositionSnapshot]:
-        assert report_date == date(2026, 7, 22)
+        assert all(item.snapshot_date == report_date for item in self.values)
         return self.values
 
 
@@ -1102,7 +1103,9 @@ def test_html_table_numbers_follow_display_precision_rules() -> None:
             "unrealized_pnl": Decimal("105970.40"),
         }
     )
-    case, _, _, transport = use_case(value=snapshot(), position_values=[formatted])
+    case, _, _, transport = use_case(
+        value=snapshot(), position_values=[formatted, positions()[1]]
+    )
 
     case.execute(date(2026, 7, 22))
 
@@ -1349,12 +1352,62 @@ def test_one_snapshot_uses_clear_chart_fallback_without_attachment() -> None:
     assert message.inline_images == ()
 
 
-def test_repeated_delivery_sends_the_same_report_date_again() -> None:
+def test_repeated_delivery_is_a_successful_no_op() -> None:
     delivery = DeliveryStub()
-    case, _, _, transport = use_case(value=snapshot(), delivery=delivery)
+    assets = AssetStoreStub()
+    case, _, _, transport = use_case(
+        value=snapshot(), delivery=delivery, asset_store=assets
+    )
     assert case.execute(date(2026, 7, 22)).status == "sent"
-    assert case.execute(date(2026, 7, 22)).status == "sent"
-    assert len(transport.messages) == 2
+    first_asset_count = len(assets.calls)
+
+    assert case.execute(date(2026, 7, 22)).status == "already_sent"
+    assert len(transport.messages) == 1
+    assert len(assets.calls) == first_asset_count
+
+
+def test_double_claim_allows_only_one_sender() -> None:
+    delivery = DeliveryStub()
+    first, _, _, first_transport = use_case(value=snapshot(), delivery=delivery)
+    second, _, _, second_transport = use_case(value=snapshot(), delivery=delivery)
+
+    assert first.execute(date(2026, 7, 22)).status == "sent"
+    assert second.execute(date(2026, 7, 22)).status == "already_sent"
+    assert len(first_transport.messages) == 1
+    assert second_transport.messages == []
+
+
+def test_other_report_date_can_be_delivered() -> None:
+    delivery = DeliveryStub()
+    first, _, _, _ = use_case(value=snapshot(), delivery=delivery)
+    assert first.execute(date(2026, 7, 22)).status == "sent"
+
+    delivery.status = None
+    next_date = date(2026, 7, 23)
+    second, _, _, transport = use_case(
+        value=snapshot(next_date),
+        delivery=delivery,
+        position_values=[
+            item.model_copy(update={"snapshot_date": next_date}) for item in positions()
+        ],
+    )
+    assert second.execute(next_date).status == "sent"
+    assert len(transport.messages) == 1
+
+
+def test_incomplete_position_coverage_fails_before_asset_or_email() -> None:
+    assets = AssetStoreStub()
+    case, _, _, transport = use_case(
+        value=snapshot(),
+        position_values=[positions()[0]],
+        asset_store=assets,
+    )
+
+    with pytest.raises(DailyReportValuationIncompleteError, match="8299"):
+        case.execute(date(2026, 7, 22))
+
+    assert assets.calls == []
+    assert transport.messages == []
 
 
 def test_force_resends_a_sent_report() -> None:
