@@ -142,6 +142,7 @@ Baseline frozen: **2026-08-30**, schema **v13**.
 - Explicit `investment_cost_events`; no liability-note inference
 - Calendar-year flow reset with historical years retained
 - Historical non-future FX conversion for foreign-currency flows
+- Explicit realized-only annual performance separated from unrealized valuation
 - Bounded, insert-only historical USD/TWD provider backfill
 - `pnl realized`, `pnl summary`, and `pnl history` CLI queries
 - Portfolio Trend total, realized, unrealized, and dividend YTD series

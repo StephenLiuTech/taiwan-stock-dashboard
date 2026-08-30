@@ -19,6 +19,20 @@ Total P/L YTD = Realized P/L YTD + Unrealized P/L
                 - Financing Cost YTD - Other Cost YTD
 ```
 
+The Daily Report's explicit realized-performance metric is independent of
+portfolio valuation:
+
+```text
+Realized Total P/L YTD = Realized Trading P/L YTD
+                         + Recognized Dividend Income YTD
+                         - Margin Financing Interest YTD
+                         - Stock Pledge Interest YTD
+                         - Buy Brokerage Fees YTD
+```
+
+`Unrealized P/L` remains available in valuation and legacy annual snapshots,
+but never participates in `Realized Total P/L YTD`.
+
 BUY fees/taxes are excluded from broker-style holding cost and therefore enter
 `Other Cost YTD` once. SELL fees/taxes already reduce realized net proceeds and
 are not subtracted again. Financing costs come only from explicit dated

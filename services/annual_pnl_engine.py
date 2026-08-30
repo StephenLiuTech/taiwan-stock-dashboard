@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from domain import (
     AnnualPnlSnapshot,
+    AnnualRealizedPerformance,
     CorporateAction,
     Currency,
     DividendEvent,
@@ -21,6 +22,10 @@ from services.transaction_engine import TransactionEngine
 
 class AnnualPnlFxUnavailableError(ValueError):
     """A historical native-currency cash flow cannot be translated safely."""
+
+
+class AnnualPnlExpenseClassificationError(ValueError):
+    """A financing expense lacks an auditable economic category."""
 
 
 class AnnualPnlEngine:
@@ -140,6 +145,103 @@ class AnnualPnlEngine:
             for (market, symbol), amount in sorted(
                 totals.items(), key=lambda item: (-item[1], item[0][0], item[0][1])
             )
+        )
+
+    def realized_performance(
+        self,
+        snapshot_date: date,
+        valuation_date: date,
+        transactions: list[Transaction],
+        dividends: list[DividendEvent],
+        costs: list[InvestmentCostEvent],
+        exchange_rates: Mapping[tuple[Currency, date], Decimal],
+        corporate_actions: list[CorporateAction] | None = None,
+    ) -> AnnualRealizedPerformance:
+        """Calculate realized-only YTD performance without changing legacy totals."""
+        eligible = [item for item in transactions if item.trade_date <= snapshot_date]
+        eligible_actions = (
+            [item for item in corporate_actions if item.effective_date <= snapshot_date]
+            if corporate_actions is not None
+            else None
+        )
+        ledger = self.transactions.build_ledger(eligible, eligible_actions)
+        realized = sum(
+            (
+                self._convert(
+                    sale.realized_pnl,
+                    sale.currency,
+                    sale.trade_date,
+                    exchange_rates,
+                )
+                for sale in ledger.realized_sales
+                if sale.trade_date.year == snapshot_date.year
+            ),
+            Decimal("0"),
+        )
+        buy_fees = sum(
+            (
+                self._convert(
+                    item.fees + item.taxes,
+                    item.currency,
+                    item.trade_date,
+                    exchange_rates,
+                )
+                for item in eligible
+                if item.trade_date.year == snapshot_date.year
+                and item.transaction_type is TransactionType.BUY
+            ),
+            Decimal("0"),
+        )
+        margin = Decimal("0")
+        pledge = Decimal("0")
+        for event in costs:
+            if (
+                event.event_date.year != snapshot_date.year
+                or event.event_date > snapshot_date
+                or event.cost_type is not InvestmentCostType.FINANCING
+            ):
+                continue
+            amount = self._convert(
+                event.amount, event.currency, event.event_date, exchange_rates
+            )
+            category = self._financing_category(event)
+            if category == "margin":
+                margin += amount
+            else:
+                pledge += amount
+        dividends_ytd = self._dividends(
+            snapshot_date,
+            eligible,
+            dividends,
+            exchange_rates,
+            eligible_actions,
+        )
+        total = realized + dividends_ytd - margin - pledge - buy_fees
+        return AnnualRealizedPerformance(
+            snapshot_date,
+            valuation_date,
+            snapshot_date.year,
+            realized,
+            dividends_ytd,
+            margin,
+            pledge,
+            buy_fees,
+            total,
+        )
+
+    @staticmethod
+    def _financing_category(event: InvestmentCostEvent) -> str:
+        """Map persisted semantic financing IDs to their economic category."""
+        if "liability-margin-financing" in event.id or event.id.startswith(
+            "financing-catchup-margin-"
+        ):
+            return "margin"
+        if "liability-stock-pledge" in event.id or event.id.startswith(
+            "financing-catchup-stock-pledge-"
+        ):
+            return "stock_pledge"
+        raise AnnualPnlExpenseClassificationError(
+            f"financing expense category is unavailable for {event.id}"
         )
 
     def _dividends(

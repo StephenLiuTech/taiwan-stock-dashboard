@@ -845,6 +845,7 @@ def test_combined_report_preserves_native_prices_and_twd_totals() -> None:
     assert "US$158.3" in rendered.html
     assert ">31.42</td>" in rendered.html
     assert "2026-08-04" in rendered.html
-    assert "US Holdings" in rendered.plain_text
+    assert "US Holdings" not in rendered.plain_text
+    assert "Taiwan Holdings" not in rendered.plain_text
     holdings_html = rendered.html.split(">Holdings</h2>", 1)[1].split("</table>", 1)[0]
     assert "white-space:nowrap" in holdings_html

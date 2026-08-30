@@ -1,5 +1,6 @@
 """Plain-text and email-compatible HTML daily report rendering."""
 
+from datetime import date, timedelta
 from decimal import Decimal
 from html import escape
 from io import BytesIO
@@ -31,10 +32,9 @@ from pams.delivery.sections import DailyReportSectionRenderer
 
 CHART_CONTENT_ID = "pams-asset-change-chart"
 CHART_FILENAME = "pams-30-day-asset-change.png"
-PORTFOLIO_TREND_SERIES = (
-    "Total stock market value",
-    "Net stock equity",
-)
+ANNUAL_CHART_CONTENT_ID = "pams-realized-total-pnl-ytd-chart"
+ANNUAL_CHART_FILENAME = "pams-realized-total-pnl-ytd.png"
+PORTFOLIO_TREND_SERIES = ("Total stock market value",)
 CHART_FALLBACK = (
     "Only one portfolio snapshot is available; "
     "a trend chart requires at least two snapshots."
@@ -141,42 +141,42 @@ def _contributor_text(positions: tuple[DailyEmailPosition, ...]) -> list[str]:
 
 
 def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
-    """Render a high-resolution, email-compatible financial dashboard PNG."""
+    """Render every market-value observation with Monday timeline ticks."""
     width, height = 1200, 650
-    left, top, right, bottom = 160, 130, 48, 92
+    left, top, right, bottom = 160, 82, 48, 92
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
-    title_font = _chart_font(32, bold=True)
     legend_font = _chart_font(18)
     axis_font = _chart_font(16)
     chart_width = width - left - right
     chart_height = height - top - bottom
-    values = [
-        value
-        for point in history
-        for value in (point.total_market_value, point.net_asset_value)
-    ]
-    minimum = min(values)
-    maximum = max(values)
-    span = maximum - minimum
-    if span == 0:
-        span = abs(maximum) or Decimal("1")
-        minimum -= span / Decimal("2")
-        maximum += span / Decimal("2")
+
+    def scale(values: list[Decimal]) -> tuple[Decimal, Decimal, Decimal]:
+        minimum = min(values)
+        maximum = max(values)
         span = maximum - minimum
+        if span == 0:
+            span = abs(maximum) or Decimal("1")
+            minimum -= span / Decimal("2")
+            maximum += span / Decimal("2")
+            span = maximum - minimum
+        return minimum, maximum, span
 
-    def coordinates(index: int, value: Decimal) -> tuple[int, int]:
-        x = left + round(index * chart_width / (len(history) - 1))
-        ratio = float((value - minimum) / span)
-        return x, top + round((1 - ratio) * chart_height)
+    minimum, maximum, span = scale([point.total_market_value for point in history])
+    first_date = history[0].snapshot_date
+    last_date = history[-1].snapshot_date
+    date_span = max((last_date - first_date).days, 1)
 
-    draw.text(
-        (left, 30),
-        "Portfolio Trend",
-        fill="#0f172a",
-        font=title_font,
-    )
-    legend_y = 96
+    def x_coordinate(point_date: date) -> int:
+        return left + round((point_date - first_date).days * chart_width / date_span)
+
+    def coordinates(point: DailyEmailHistoryPoint) -> tuple[int, int]:
+        x = x_coordinate(point.snapshot_date)
+        value = point.total_market_value
+        ratio = (value - minimum) / span
+        return x, top + int(((Decimal("1") - ratio) * chart_height).to_integral_value())
+
+    legend_y = 40
     draw.line((left, legend_y, left + 44, legend_y), fill="#2563eb", width=7)
     draw.text(
         (left + 58, legend_y - 11),
@@ -184,51 +184,24 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
         fill="#334155",
         font=legend_font,
     )
-    second_legend_x = left + 410
-    draw.line(
-        (second_legend_x, legend_y, second_legend_x + 44, legend_y),
-        fill="#16a34a",
-        width=7,
-    )
-    draw.text(
-        (second_legend_x + 58, legend_y - 11),
-        PORTFOLIO_TREND_SERIES[1],
-        fill="#334155",
-        font=legend_font,
-    )
 
     for step in range(5):
         ratio = Decimal(step) / Decimal("4")
-        value = maximum - span * ratio
+        market_value = maximum - span * ratio
         y = top + round(step * chart_height / 4)
         draw.line((left, y, left + chart_width, y), fill="#eef2f7", width=2)
         draw.text(
             (12, y - 10),
-            f"NT${value:,.0f}",
-            fill="#64748b",
+            f"NT${market_value:,.0f}",
+            fill="#2563eb",
             font=axis_font,
         )
 
-    market_points = [
-        coordinates(index, point.total_market_value)
-        for index, point in enumerate(history)
-    ]
-    equity_points = [
-        coordinates(index, point.net_asset_value) for index, point in enumerate(history)
-    ]
-    draw.line(market_points, fill="#2563eb", width=5, joint="curve")
-    draw.line(equity_points, fill="#16a34a", width=5, joint="curve")
-
-    label_count = min(5, len(history))
-    label_indexes = sorted(
-        {
-            round(index * (len(history) - 1) / (label_count - 1))
-            for index in range(label_count)
-        }
-    )
-    for index in label_indexes:
-        label = history[index].snapshot_date.strftime("%m-%d")
-        x, _ = coordinates(index, minimum)
+    monday_ticks = _monday_ticks(first_date, last_date)
+    for monday in monday_ticks:
+        x = x_coordinate(monday)
+        draw.line((x, top, x, top + chart_height), fill="#eef2f7", width=2)
+        label = monday.strftime("%m-%d")
         label_width = draw.textlength(label, font=axis_font)
         draw.text(
             (x - label_width / 2, top + chart_height + 24),
@@ -237,9 +210,25 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
             font=axis_font,
         )
 
+    market_points = [coordinates(point) for point in history]
+    draw.line(market_points, fill="#2563eb", width=5, joint="curve")
+    for x, y in market_points:
+        draw.ellipse((x - 5, y - 5, x + 5, y + 5), fill="#2563eb")
+
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()
+
+
+def _monday_ticks(start: date, end: date) -> tuple[date, ...]:
+    """Return every Monday in an inclusive chart date range."""
+    first_monday = start + timedelta(days=(7 - start.weekday()) % 7)
+    ticks = []
+    current = first_monday
+    while current <= end:
+        ticks.append(current)
+        current += timedelta(days=7)
+    return tuple(ticks)
 
 
 def _chart_font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
@@ -295,6 +284,130 @@ def _annual_bar_chart(
     )
 
 
+def _annual_total_pnl_chart_png(report: DailyEmailReport) -> bytes:
+    """Render one realized-total YTD line from reproduced accounting facts."""
+    performance = report.annual_performance
+    if performance is None:  # pragma: no cover - guarded by caller
+        return b""
+    history = performance.history or (performance.realized,)
+    width, height = 1000, 420
+    left, top, right, bottom = 135, 58, 42, 82
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    title_font = _chart_font(25, bold=True)
+    label_font = _chart_font(15)
+    draw.text((left, 18), "Realized Total P/L YTD", fill="#0f172a", font=title_font)
+    values = [item.realized_total_pnl_ytd for item in history]
+    minimum = min(values)
+    maximum = max(values)
+    if minimum == maximum:
+        padding = abs(maximum) / Decimal("10") or Decimal("1")
+        minimum -= padding
+        maximum += padding
+    span = maximum - minimum
+    chart_width = width - left - right
+    chart_height = height - top - bottom
+    first_date = history[0].snapshot_date
+    last_date = history[-1].snapshot_date
+    date_span = (last_date - first_date).days
+
+    def coordinates(index: int, value: Decimal) -> tuple[int, int]:
+        x = (
+            left + chart_width // 2
+            if date_span == 0
+            else left
+            + int(
+                (
+                    Decimal((history[index].snapshot_date - first_date).days)
+                    * chart_width
+                    / Decimal(date_span)
+                ).to_integral_value()
+            )
+        )
+        ratio = (value - minimum) / span
+        return x, top + int(((Decimal("1") - ratio) * chart_height).to_integral_value())
+
+    for step in range(5):
+        ratio = Decimal(step) / Decimal("4")
+        value = maximum - span * ratio
+        y = top + round(step * chart_height / 4)
+        draw.line((left, y, left + chart_width, y), fill="#e5e7eb", width=1)
+        draw.text((8, y - 9), f"NT${value:,.0f}", fill="#64748b", font=label_font)
+    points = [
+        coordinates(index, item.realized_total_pnl_ytd)
+        for index, item in enumerate(history)
+    ]
+    if len(points) > 1:
+        draw.line(points, fill="#2563eb", width=5, joint="curve")
+    label_indices = (
+        {0}
+        if len(points) == 1
+        else {
+            round(step * (len(points) - 1) / min(len(points) - 1, 7))
+            for step in range(min(len(points) - 1, 7) + 1)
+        }
+    )
+    for index, (x, y) in enumerate(points):
+        draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill="#2563eb")
+        if index not in label_indices:
+            continue
+        date_label = history[index].snapshot_date.strftime("%m-%d")
+        label_width = draw.textlength(date_label, font=label_font)
+        draw.text(
+            (x - label_width / 2, top + chart_height + 24),
+            date_label,
+            fill="#64748b",
+            font=label_font,
+        )
+    latest_label = _money(history[-1].realized_total_pnl_ytd, signed=True)
+    latest_x, latest_y = points[-1]
+    latest_width = draw.textlength(latest_label, font=label_font)
+    draw.text(
+        (max(left, latest_x - latest_width - 10), max(top, latest_y - 28)),
+        latest_label,
+        fill="#2563eb",
+        font=label_font,
+    )
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def _annual_total_pnl_chart(
+    report: DailyEmailReport, chart_source: ChartSource | None
+) -> tuple[str, InlineImage | None]:
+    """Return the line chart HTML and optional CID image."""
+    performance = report.annual_performance
+    if performance is None:
+        return "", None
+    source = (
+        ChartSource(uri=chart_source.annual_uri)
+        if chart_source is not None and chart_source.annual_uri is not None
+        else ChartSource(
+            uri=f"cid:{ANNUAL_CHART_CONTENT_ID}",
+            attachment=InlineImage(
+                ANNUAL_CHART_CONTENT_ID,
+                ANNUAL_CHART_FILENAME,
+                "image/png",
+                _annual_total_pnl_chart_png(report),
+            ),
+        )
+    )
+    title = f"{performance.snapshot.year} 年度總損益走勢（YTD）"
+    html = (
+        f'<h3 style="font-size:16px;margin:20px 0 8px">{escape(title)}</h3>'
+        '<div style="font-size:11px;color:#4b5563;margin-bottom:8px">'
+        "Realized Total P/L YTD</div>"
+        f'<img class="pams-realized-total-pnl-ytd-chart" src="{escape(source.uri, quote=True)}" '
+        f'alt="{escape(title, quote=True)}" data-chart-type="line" '
+        'data-series="Realized Total P/L YTD" '
+        f'data-latest-label="{escape(_money(performance.realized.realized_total_pnl_ytd, signed=True), quote=True)}" '
+        'width="760" style="display:block;width:100%;max-width:760px;'
+        'height:auto;border:0">'
+    )
+    return html, source.attachment
+
+
 def _annual_performance_text(report: DailyEmailReport) -> str:
     performance = report.annual_performance
     if performance is None:
@@ -305,15 +418,22 @@ def _annual_performance_text(report: DailyEmailReport) -> str:
             )
         )
     snapshot = performance.snapshot
+    realized = performance.realized
     lines = [
         f"{snapshot.year} 年度投資績效（YTD）",
-        f"Accounting Date: {snapshot.snapshot_date}",
-        f"Valuation Date: {snapshot.valuation_date}",
-        f"Realized P/L YTD: {_money(snapshot.realized_pnl_ytd, signed=True)}",
-        f"Dividend Income YTD: {_money(snapshot.dividend_income_ytd)}",
-        f"Financing Cost YTD: {_money(snapshot.financing_cost_ytd)}",
-        f"Other Cost YTD: {_money(snapshot.other_cost_ytd)}",
-        f"Total P/L YTD: {_money(snapshot.total_pnl_ytd, signed=True)}",
+        f"Realized Trading P/L YTD: {_money(realized.realized_trading_pnl_ytd, signed=True)}",
+        f"Dividend Income YTD: {_money(realized.dividend_income_ytd, signed=True)}",
+        f"Margin Financing Interest YTD: {_money(-realized.margin_financing_interest_ytd, signed=True)}",
+        f"Stock Pledge Interest YTD: {_money(-realized.stock_pledge_interest_ytd, signed=True)}",
+        f"Buy Brokerage Fees YTD: {_money(-realized.buy_brokerage_fees_ytd, signed=True)}",
+        f"Realized Total P/L YTD: {_money(realized.realized_total_pnl_ytd, signed=True)}",
+        "",
+        f"{snapshot.year} 年度總損益走勢（YTD）",
+        "Accounting Date | Realized Total P/L YTD",
+        *(
+            f"{item.snapshot_date} | {_money(item.realized_total_pnl_ytd, signed=True)}"
+            for item in performance.history or (realized,)
+        ),
         "",
         "各股票 YTD 已實現損益",
     ]
@@ -326,7 +446,9 @@ def _annual_performance_text(report: DailyEmailReport) -> str:
     return "\n".join(lines)
 
 
-def _annual_performance_html(report: DailyEmailReport) -> str:
+def _annual_performance_html(
+    report: DailyEmailReport, annual_chart_html: str = ""
+) -> str:
     performance = report.annual_performance
     if performance is None:
         return (
@@ -336,6 +458,7 @@ def _annual_performance_html(report: DailyEmailReport) -> str:
             f'{escape(report.annual_warning or "Annual P/L data is unavailable.")}</p></div>'
         )
     snapshot = performance.snapshot
+    realized = performance.realized
     symbols = tuple(
         (f"{item.market} {item.symbol}", item.realized_pnl)
         for item in performance.realized_by_symbol
@@ -354,27 +477,48 @@ def _annual_performance_html(report: DailyEmailReport) -> str:
         )
     )
     metrics = (
-        ("Realized P/L YTD", snapshot.realized_pnl_ytd, True),
-        ("Dividend Income YTD", snapshot.dividend_income_ytd, False),
-        ("Financing Cost YTD", snapshot.financing_cost_ytd, False),
-        ("Other Cost YTD", snapshot.other_cost_ytd, False),
-        ("Total P/L YTD", snapshot.total_pnl_ytd, True),
+        ("Realized Trading P/L YTD", realized.realized_trading_pnl_ytd, None),
+        (
+            "Dividend Income YTD",
+            realized.dividend_income_ytd,
+            "#2563eb",
+        ),
+        (
+            "Margin Financing Interest YTD",
+            -realized.margin_financing_interest_ytd,
+            None,
+        ),
+        (
+            "Stock Pledge Interest YTD",
+            -realized.stock_pledge_interest_ytd,
+            None,
+        ),
+        (
+            "Buy Brokerage Fees YTD",
+            -realized.buy_brokerage_fees_ytd,
+            None,
+        ),
+        (
+            "Realized Total P/L YTD",
+            realized.realized_total_pnl_ytd,
+            None,
+        ),
     )
     metric_rows = "".join(
         '<tr><td style="padding:7px 8px;border-bottom:1px solid #e5e7eb">'
         f'{escape(label)}</td><td style="padding:7px 8px;border-bottom:1px solid #e5e7eb;'
-        f"text-align:right;white-space:nowrap;color:{_tone(value) if performance_value else NEUTRAL_COLOR};"
-        f'font-weight:600">{escape(_money(value, signed=performance_value))}</td></tr>'
-        for label, value, performance_value in metrics
+        f"text-align:right;white-space:nowrap;color:{color or _tone(display_value)};"
+        f'font-weight:600">{escape(_money(display_value, signed=True))}</td></tr>'
+        for label, display_value, color in metrics
     )
     return (
         '<div class="pams-annual-performance" style="margin-top:28px">'
         f'<h2 style="font-size:18px;margin:0 0 8px">{snapshot.year} 年度投資績效（YTD）</h2>'
-        '<p style="margin:0 0 12px;color:#4b5563">'
-        f"<strong>Accounting Date:</strong> {snapshot.snapshot_date}<br>"
-        f"<strong>Valuation Date:</strong> {snapshot.valuation_date}</p>"
         '<table class="pams-annual-metrics" width="100%" style="width:100%;'
-        f'border-collapse:collapse">{metric_rows}</table>' + symbol_chart + "</div>"
+        f'border-collapse:collapse">{metric_rows}</table>'
+        + annual_chart_html
+        + symbol_chart
+        + "</div>"
     )
 
 
@@ -440,34 +584,6 @@ class DailyEmailReportRenderer:
         subject = f"PAMS Daily Portfolio Report - {report.report_date}"
         contributors = _ranked_contributors(report.positions)
         ordered_holdings = _ordered_holdings(report.positions)
-        taiwan_market_value = sum(
-            (
-                item.market_value
-                for item in report.positions
-                if item.market is not Market.US and item.market_value is not None
-            ),
-            Decimal("0"),
-        )
-        us_market_value = sum(
-            (
-                item.market_value
-                for item in report.positions
-                if item.market is Market.US and item.market_value is not None
-            ),
-            Decimal("0"),
-        )
-        dividend_summary = report.sections.dividend_calendar
-        expected_dividend_text = (
-            [
-                "Expected Annual Dividend",
-                f"Estimated: {_whole_money(dividend_summary.estimated_annual_dividend)}",
-                f"Already Received: {_whole_money(dividend_summary.already_received)}",
-                "Remaining: "
-                f"{_whole_money(dividend_summary.estimated_annual_dividend - dividend_summary.already_received)}",
-            ]
-            if dividend_summary is not None and dividend_summary.items
-            else []
-        )
         text_lines = [
             "PAMS Daily Portfolio Report",
             f"Report date: {report.report_date}",
@@ -481,16 +597,12 @@ class DailyEmailReportRenderer:
                 f"{_percent(report.daily_profit_loss_percentage, signed=True)}"
             ),
             f"Net stock equity: {_money(report.net_asset_value)}",
-            f"Taiwan Holdings: {_money(taiwan_market_value)}",
-            f"US Holdings: {_money(us_market_value)}",
             f"Total stock market value: {_money(report.total_market_value)}",
             f"Total investment cost: {_money(report.total_cost_basis)}",
             f"Unrealized P/L: {_money(report.total_unrealized_pnl, signed=True)}",
             f"Total return: {_percent(report.total_return, signed=True)}",
             f"Liabilities: {_money(report.total_liabilities)}",
             f"Liability ratio: {_percent(report.liability_ratio)}",
-            f"Position count: {len(report.positions)}",
-            *expected_dividend_text,
             "",
             "Portfolio Trend",
             *_history_text(report.history),
@@ -648,7 +760,14 @@ class DailyEmailReportRenderer:
             )
             chart_html = (
                 f'<img src="{escape(source.uri, quote=True)}" '
-                'alt="30-day stock market value and net stock equity chart" '
+                'alt="30-day total stock market value chart" '
+                'data-chart-type="line" data-internal-title="none" '
+                'data-point-markers="visible" '
+                'data-primary-axis="Total stock market value" '
+                'data-series-count="1" data-horizontal-gridlines="visible" '
+                'data-vertical-gridlines="monday" '
+                f'data-observation-count="{len(report.history)}" '
+                f'data-x-axis-ticks="{escape(",".join(item.strftime("%m-%d") for item in _monday_ticks(report.history[0].snapshot_date, report.history[-1].snapshot_date)), quote=True)}" '
                 'width="760" style="display:block;width:100%;max-width:760px;'
                 'height:auto;border:0">'
             )
@@ -660,7 +779,12 @@ class DailyEmailReportRenderer:
                 f'<p style="color:{NEUTRAL_COLOR}">{escape(CHART_FALLBACK)}</p>'
             )
             inline_images = ()
-        daily_cards = (
+        annual_chart_html, annual_chart_image = _annual_total_pnl_chart(
+            report, chart_source
+        )
+        if annual_chart_image is not None:
+            inline_images += (annual_chart_image,)
+        summary_cards = (
             "<tr>"
             + _summary_card(
                 "Today's P/L",
@@ -672,14 +796,7 @@ class DailyEmailReportRenderer:
                 _percent(report.daily_profit_loss_percentage, signed=True),
                 color=_tone(report.daily_profit_loss),
             )
-            + '<td style="width:33%"></td>'
-            + "</tr>"
-        )
-        summary_cards = (
-            "<tr>"
-            + _summary_card("Net stock equity", _money(report.net_asset_value))
-            + _summary_card("Taiwan Holdings", _money(taiwan_market_value))
-            + _summary_card("US Holdings", _money(us_market_value))
+            + '<td class="pams-summary-empty" style="width:33.333%"></td>'
             + "</tr><tr>"
             + _summary_card(
                 "Total stock market value", _money(report.total_market_value)
@@ -689,28 +806,16 @@ class DailyEmailReportRenderer:
                 _money(report.total_unrealized_pnl, signed=True),
                 color=_tone(report.total_unrealized_pnl),
             )
-            + "</tr><tr>"
             + _summary_card(
                 "Total return",
                 _percent(report.total_return, signed=True),
                 color=_tone(report.total_return),
             )
-            + _summary_card("Liability ratio", _percent(report.liability_ratio))
-            + _summary_card("Liabilities", _money(report.total_liabilities))
             + "</tr><tr>"
-            + _summary_card("Position count", str(len(report.positions)))
-            + '<td style="width:33%"></td><td style="width:33%"></td>'
+            + _summary_card("Net stock equity", _money(report.net_asset_value))
+            + _summary_card("Liabilities", _money(report.total_liabilities))
+            + _summary_card("Liability ratio", _percent(report.liability_ratio))
             + "</tr>"
-            + (
-                "<tr>"
-                + _expected_dividend_card(
-                    dividend_summary.estimated_annual_dividend,
-                    dividend_summary.already_received,
-                )
-                + "</tr>"
-                if dividend_summary is not None and dividend_summary.items
-                else ""
-            )
         )
         html = f"""<!doctype html>
 <html>
@@ -722,8 +827,10 @@ class DailyEmailReportRenderer:
   .pams-container {{ width:100% !important; max-width:100% !important; }}
   .pams-wide-tables {{ width:760px !important; min-width:760px !important;
     max-width:none !important; }}
-  .pams-summary-card {{ display:block !important; width:100% !important;
-    box-sizing:border-box !important; }}
+  .pams-portfolio-summary {{ width:100% !important; table-layout:fixed !important; }}
+  .pams-summary-card {{ width:33.333% !important; padding:8px 5px !important; }}
+  .pams-summary-card div:first-child {{ font-size:10px !important; line-height:1.25 !important; }}
+  .pams-summary-card div:last-child {{ font-size:15px !important; line-height:1.25 !important; }}
   .pams-responsive-table {{ width:100% !important; table-layout:fixed !important;
     font-size:12px !important; }}
   .pams-responsive-table th, .pams-responsive-table td {{
@@ -740,9 +847,7 @@ class DailyEmailReportRenderer:
 {report.report_date}<br><strong>Verified market source date:</strong>
 {report.verified_source_date or "N/A"}</p>
 <h2 style="font-size:18px">Portfolio Summary</h2>
-<table role="presentation" style="border-collapse:collapse;width:100%;margin-bottom:24px">
-{daily_cards}</table>
-<table role="presentation" style="border-collapse:collapse;width:100%;margin-bottom:24px">
+<table role="presentation" class="pams-portfolio-summary" width="100%" style="border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:24px">
 {summary_cards}</table>
 <h2 style="font-size:18px">Portfolio Trend</h2>
 {chart_html}
@@ -757,7 +862,7 @@ class DailyEmailReportRenderer:
 <thead><tr>{headers((("Market", "6%", "left"), ("Symbol", "7%", "left"), ("Name", None, "left"), ("Currency", "7%", "left"), ("Quantity", "7%", "right"), ("Average Cost", "9%", "right"), ("Close", "7%", "right"), ("Quote Date", "9%", "right"), ("FX", "6%", "right"), ("Unrealized P/L", "9%", "right"), ("Return %", "6%", "right"), ("Market Value", "9%", "right")), font_size="13px")}</tr></thead>
 <tbody>{rows}</tbody></table>
 {DailyReportSectionRenderer().html(report.sections)}
-{_annual_performance_html(report)}
+{_annual_performance_html(report, annual_chart_html)}
 </td></tr></table>
 </div></body></html>"""
         section_text = DailyReportSectionRenderer().text(report.sections)

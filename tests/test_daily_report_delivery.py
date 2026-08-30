@@ -14,6 +14,7 @@ from PIL import Image
 
 from domain import (
     AnnualPnlSnapshot,
+    AnnualRealizedPerformance,
     Currency,
     DailyReportSections,
     DailySnapshot,
@@ -35,7 +36,7 @@ from pams.application import (
 )
 from pams.application.send_daily_report import EmailEnvelope, InlineImage
 from pams.delivery import DailyEmailReportRenderer, SMTPEmailTransport
-from pams.delivery.rendering import PORTFOLIO_TREND_SERIES
+from pams.delivery.rendering import PORTFOLIO_TREND_SERIES, _monday_ticks
 
 
 def snapshot(
@@ -329,7 +330,7 @@ def live_date_case(
     return case.execute(force=force), calls, transport
 
 
-def test_portfolio_summary_renders_expected_annual_dividend_card_and_text() -> None:
+def test_portfolio_summary_omits_expected_annual_dividend_card_and_text() -> None:
     case, _, _, _ = use_case(value=snapshot())
     report = case._build_report(snapshot(), date(2026, 7, 22))
     item = DividendCalendarItem(
@@ -354,12 +355,18 @@ def test_portfolio_summary_renders_expected_annual_dividend_card_and_text() -> N
         )
     )
     rendered = DailyEmailReportRenderer().render(replace(report, sections=sections))
-    assert "Expected Annual Dividend" in rendered.html
-    assert "Estimated<br><strong>NT$9,000</strong>" in rendered.html
-    assert "Already Received<br><strong>NT$6,000</strong>" in rendered.html
-    assert "Remaining<br><strong>NT$3,000</strong>" in rendered.html
-    assert "Expected Annual Dividend" in rendered.plain_text
-    assert "Remaining: NT$3,000" in rendered.plain_text
+    summary_html = rendered.html.split(
+        '<h2 style="font-size:18px">Portfolio Summary</h2>', 1
+    )[1].split('<h2 style="font-size:18px">Portfolio Trend</h2>', 1)[0]
+    summary_text = rendered.plain_text.split("Portfolio Summary\n", 1)[1].split(
+        "\n\nPortfolio Trend", 1
+    )[0]
+    assert "Expected Annual Dividend" not in summary_html
+    assert "Expected Annual Dividend" not in summary_text
+    assert "Taiwan Holdings" not in summary_html
+    assert "US Holdings" not in summary_html
+    assert "Taiwan Holdings" not in summary_text
+    assert "US Holdings" not in summary_text
     width_wrapper = rendered.html.split(
         '<table role="presentation" class="pams-wide-tables"', maxsplit=1
     )[1].rsplit("</td></tr></table>\n</div></body>", maxsplit=1)[0]
@@ -367,6 +374,44 @@ def test_portfolio_summary_renders_expected_annual_dividend_card_and_text() -> N
     assert ">Holdings</h2>" in width_wrapper
     assert ">Dividend Calendar</h2>" in width_wrapper
     assert width_wrapper.count('class="pams-responsive-table"') == 2
+
+
+def test_portfolio_summary_preserves_fixed_three_column_grid_on_mobile() -> None:
+    case, _, _, _ = use_case(value=snapshot())
+    report = case._build_report(snapshot(), date(2026, 7, 22))
+
+    rendered = DailyEmailReportRenderer().render(report)
+
+    table = rendered.html.split(
+        '<table role="presentation" class="pams-portfolio-summary"', 1
+    )[1].split("</table>", 1)[0]
+    rows = table.split("<tr>")[1:]
+    assert len(rows) == 3
+    assert all(row.count("<td") == 3 for row in rows)
+    assert "Today&#x27;s P/L" in rows[0]
+    assert "Today&#x27;s P/L %" in rows[0]
+    assert 'class="pams-summary-empty"' in rows[0]
+    assert rows[0].index("Today&#x27;s P/L") < rows[0].index("Today&#x27;s P/L %")
+    assert "Total stock market value" in rows[1]
+    assert "Total unrealized P/L" in rows[1]
+    assert "Total return" in rows[1]
+    assert (
+        rows[1].index("Total stock market value")
+        < rows[1].index("Total unrealized P/L")
+        < rows[1].index("Total return")
+    )
+    assert "Net stock equity" in rows[2]
+    assert "Liabilities" in rows[2]
+    assert "Liability ratio" in rows[2]
+    assert (
+        rows[2].index("Net stock equity")
+        < rows[2].index("Liabilities")
+        < rows[2].index("Liability ratio")
+    )
+    assert "table-layout:fixed" in table
+    assert ".pams-summary-card { display:block" not in rendered.html
+    assert "Position count" not in table
+    assert "Position count" not in rendered.plain_text
 
 
 def test_automatic_report_uses_newer_live_date_than_persisted_snapshot() -> None:
@@ -631,6 +676,17 @@ def test_html_and_plain_text_contain_correct_persisted_figures() -> None:
 
 
 def test_final_annual_performance_section_uses_persisted_dates_and_values() -> None:
+    prior_annual_snapshot = AnnualPnlSnapshot(
+        snapshot_date=date(2026, 7, 21),
+        valuation_date=date(2026, 7, 21),
+        year=2026,
+        realized_pnl_ytd=Decimal("80"),
+        unrealized_pnl=Decimal("-40"),
+        dividend_income_ytd=Decimal("20"),
+        financing_cost_ytd=Decimal("20"),
+        other_cost_ytd=Decimal("10"),
+        total_pnl_ytd=Decimal("30"),
+    )
     annual_snapshot = AnnualPnlSnapshot(
         snapshot_date=date(2026, 7, 23),
         valuation_date=date(2026, 7, 22),
@@ -645,7 +701,7 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
 
     class AnnualSnapshots:
         def __init__(self) -> None:
-            self.rows = (annual_snapshot,)
+            self.rows = (prior_annual_snapshot, annual_snapshot)
 
         def list_for_year(self, year: int) -> list[AnnualPnlSnapshot]:
             return [item for item in self.rows if item.year == year]
@@ -669,9 +725,44 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
                 RealizedPnlBySymbol("8299", "TPEx", Decimal("-25")),
             )
 
+        def realized_performance(self, *, as_of: date) -> AnnualRealizedPerformance:
+            assert as_of == date(2026, 7, 23)
+            return AnnualRealizedPerformance(
+                as_of,
+                date(2026, 7, 22),
+                2026,
+                Decimal("100"),
+                Decimal("20"),
+                Decimal("20"),
+                Decimal("10"),
+                Decimal("10"),
+                Decimal("80"),
+            )
+
+        def realized_performance_history(
+            self, *, year: int, through: date
+        ) -> tuple[AnnualRealizedPerformance, ...]:
+            assert year == 2026
+            assert through == date(2026, 7, 23)
+            return (
+                AnnualRealizedPerformance(
+                    date(2026, 7, 21),
+                    date(2026, 7, 21),
+                    2026,
+                    Decimal("80"),
+                    Decimal("20"),
+                    Decimal("10"),
+                    Decimal("10"),
+                    Decimal("10"),
+                    Decimal("70"),
+                ),
+                self.realized_performance(as_of=through),
+            )
+
     annual = AnnualPnl()
     repository = AnnualSnapshots()
     transport = TransportStub()
+    asset_store = AssetStoreStub()
     case = SendDailyReportUseCase(
         UpdateStub(),  # type: ignore[arg-type]
         SnapshotStub(snapshot()),  # type: ignore[arg-type]
@@ -683,6 +774,7 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
         "sender@example.com",
         "recipient@example.com",
         today=lambda: date(2026, 7, 23),
+        asset_store=asset_store,
         annual_pnl=annual,  # type: ignore[arg-type]
         annual_snapshots=repository,  # type: ignore[arg-type]
     )
@@ -711,28 +803,60 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
     legacy_existing_html, _ = legacy_message.html.split(annual_marker, 1)
     assert existing_html == legacy_existing_html
     assert message.inline_images == legacy_message.inline_images
+    assert len(asset_store.calls) == 1
+    chart_content, chart_type, chart_name = asset_store.calls[0]
+    assert chart_content.startswith(b"\x89PNG")
+    assert chart_type == "image/png"
+    assert chart_name == ("daily-report/2026-07-22/pams-realized-total-pnl-ytd.png")
     assert "pams-ytd-composition-chart" not in existing_html
     assert "pams-realized-symbol-chart" not in existing_html
     assert "pams-ytd-composition-chart" not in annual_html
     assert "pams-realized-symbol-chart" in annual_html
     assert "2026 年度投資績效（YTD）" in message.html
-    assert "Accounting Date:</strong> 2026-07-23" in message.html
-    assert "Valuation Date:</strong> 2026-07-22" in annual_html
+    summary_html = annual_html.split("pams-annual-metrics", 1)[0]
+    assert "Accounting Date:" not in summary_html
+    assert "Valuation Date:" not in summary_html
     for label, amount in (
-        ("Realized P/L YTD", "+NT$100"),
-        ("Dividend Income YTD", "NT$20"),
-        ("Financing Cost YTD", "NT$30"),
-        ("Other Cost YTD", "NT$10"),
-        ("Total P/L YTD", "+NT$30"),
+        ("Realized Trading P/L YTD", "+NT$100"),
+        ("Dividend Income YTD", "+NT$20"),
+        ("Margin Financing Interest YTD", "-NT$20"),
+        ("Stock Pledge Interest YTD", "-NT$10"),
+        ("Buy Brokerage Fees YTD", "-NT$10"),
+        ("Realized Total P/L YTD", "+NT$80"),
     ):
         assert label in annual_html
         assert amount in annual_html
         assert f"{label}: {amount}" in message.plain_text
     assert "Unrealized P/L" not in annual_html
+    assert "Financing Cost YTD" not in annual_html
+    assert "Other Cost YTD" not in annual_html
     assert "YTD P/L Composition" not in annual_html
     assert annual_html.count('role="img"') == 1
     assert 'class="pams-ytd-composition-chart"' not in message.html
+    assert 'class="pams-realized-total-pnl-ytd-chart"' in annual_html
     assert 'class="pams-realized-symbol-chart"' in message.html
+    total_chart = annual_html.split('class="pams-realized-total-pnl-ytd-chart"', 1)[
+        1
+    ].split('<h3 style="font-size:16px', 1)[0]
+    assert 'data-chart-type="line"' in total_chart
+    assert 'data-series="Realized Total P/L YTD"' in total_chart
+    assert 'data-latest-label="+NT$80"' in total_chart
+    assert f'src="{asset_store.url}"' in total_chart
+    assert "2026-07-21 | +NT$70" in message.plain_text
+    assert "2026-07-23 | +NT$80" in message.plain_text
+    assert "Unrealized P/L" not in total_chart
+    assert "Dividend Income" not in total_chart
+    assert "Financing Cost" not in total_chart
+    assert "Other Cost" not in total_chart
+    dividend_row = annual_html.split("Dividend Income YTD", 1)[1].split("</tr>", 1)[0]
+    assert "+NT$20" in dividend_row
+    assert "color:#2563eb" in dividend_row
+    assert annual_html.index('class="pams-annual-metrics"') < annual_html.index(
+        'class="pams-realized-total-pnl-ytd-chart"'
+    )
+    assert annual_html.index(
+        'class="pams-realized-total-pnl-ytd-chart"'
+    ) < annual_html.index('class="pams-realized-symbol-chart"')
     assert message.html.index("TWSE 2330") < message.html.index("TPEx 8299")
     assert "#b91c1c" in message.html
     assert "#15803d" in message.html
@@ -745,7 +869,7 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
     )
     assert "各股票 YTD 已實現損益" in message.plain_text
     assert "TWSE | 2330 | +NT$125" in message.plain_text
-    assert repository.rows == (annual_snapshot,)
+    assert repository.rows == (prior_annual_snapshot, annual_snapshot)
     assert annual.mutations == 0
 
 
@@ -1045,17 +1169,30 @@ def test_multiple_snapshots_create_embedded_png_and_readable_text_history() -> N
     assert "2026-07-21 | NT$1,100 | NT$1,000" in message.plain_text
 
 
-def test_portfolio_trend_contains_exactly_the_two_original_series() -> None:
-    assert PORTFOLIO_TREND_SERIES == (
-        "Total stock market value",
-        "Net stock equity",
+def test_portfolio_trend_chart_uses_one_marked_series_and_monday_ticks() -> None:
+    assert PORTFOLIO_TREND_SERIES == ("Total stock market value",)
+    assert _monday_ticks(date(2026, 7, 24), date(2026, 8, 28)) == (
+        date(2026, 7, 27),
+        date(2026, 8, 3),
+        date(2026, 8, 10),
+        date(2026, 8, 17),
+        date(2026, 8, 24),
     )
 
-    history = [snapshot(date(2026, 7, 21)), snapshot()]
-    case, _, _, transport = use_case(value=snapshot(), history=history)
-    case.execute(date(2026, 7, 22))
-
-    message = transport.messages[0]
+    history = [
+        snapshot(date(2026, 7, 24)),
+        snapshot(date(2026, 7, 27)),
+        snapshot(date(2026, 8, 3)),
+        snapshot(date(2026, 8, 10)),
+        snapshot(date(2026, 8, 17)),
+        snapshot(date(2026, 8, 24)),
+        snapshot(date(2026, 8, 28)),
+    ]
+    case, _, _, _ = use_case(value=snapshot())
+    report = replace(
+        case._build_report(snapshot(), date(2026, 7, 22)), history=tuple(history)
+    )
+    message = DailyEmailReportRenderer().render(report)
     trend_text = message.plain_text.split("Portfolio Trend\n", 1)[1].split(
         "\n\nToday's Contributors", 1
     )[0]
@@ -1064,6 +1201,19 @@ def test_portfolio_trend_contains_exactly_the_two_original_series() -> None:
     assert "Realized P/L YTD" not in trend_text
     assert "Unrealized P/L" not in trend_text
     assert "Dividend Income YTD" not in trend_text
+    trend_image = message.html.split('alt="30-day total stock market value chart"', 1)[
+        1
+    ].split(">", 1)[0]
+    assert 'data-chart-type="line"' in trend_image
+    assert 'data-internal-title="none"' in trend_image
+    assert 'data-point-markers="visible"' in trend_image
+    assert 'data-primary-axis="Total stock market value"' in trend_image
+    assert "data-secondary-axis" not in trend_image
+    assert 'data-series-count="1"' in trend_image
+    assert 'data-horizontal-gridlines="visible"' in trend_image
+    assert 'data-vertical-gridlines="monday"' in trend_image
+    assert 'data-observation-count="7"' in trend_image
+    assert 'data-x-axis-ticks="07-27,08-03,08-10,08-17,08-24"' in trend_image
 
 
 def test_resend_asset_flow_publishes_png_and_uses_https_without_attachment() -> None:

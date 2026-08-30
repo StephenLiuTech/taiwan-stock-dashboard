@@ -3,6 +3,7 @@
 from domain.analytics import DailyPortfolioReturn, PortfolioAnalytics
 from domain.annual_pnl import (
     AnnualPnlSnapshot,
+    AnnualRealizedPerformance,
     InvestmentCostEvent,
     RealizedPnlBySymbol,
     RealizedSale,
@@ -118,6 +119,7 @@ __all__ = [
     "PortfolioValuation",
     "PortfolioLedger",
     "AnnualPnlSnapshot",
+    "AnnualRealizedPerformance",
     "RealizedSale",
     "RealizedPnlBySymbol",
     "PortfolioAllocationSection",

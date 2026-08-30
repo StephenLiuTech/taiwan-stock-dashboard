@@ -6,7 +6,11 @@ from services.analytics_engine import (
     DuplicateSnapshotDateError,
     EmptySnapshotHistoryError,
 )
-from services.annual_pnl_engine import AnnualPnlEngine, AnnualPnlFxUnavailableError
+from services.annual_pnl_engine import (
+    AnnualPnlEngine,
+    AnnualPnlExpenseClassificationError,
+    AnnualPnlFxUnavailableError,
+)
 from services.bootstrap import BootstrapService
 from services.broker_reconciliation import BrokerReconciliationEngine
 from services.financing_interest import DailyFinancingInterest, FinancingInterestEngine
@@ -40,6 +44,7 @@ __all__ = [
     "AnalyticsEngine",
     "AnalyticsError",
     "AnnualPnlEngine",
+    "AnnualPnlExpenseClassificationError",
     "AnnualPnlFxUnavailableError",
     "DailyFinancingInterest",
     "FinancingInterestEngine",

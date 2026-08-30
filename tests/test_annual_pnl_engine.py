@@ -7,6 +7,7 @@ import pytest
 
 from domain import (
     Currency,
+    DividendEvent,
     InvestmentCostEvent,
     InvestmentCostType,
     Market,
@@ -184,3 +185,171 @@ def test_realized_pnl_by_symbol_uses_ledger_values_and_descending_order() -> Non
         ("2330", Decimal("250")),
         ("8299", Decimal("-100")),
     ]
+
+
+def test_realized_total_excludes_unrealized_and_splits_audited_expenses() -> None:
+    transactions = [
+        tx("buy", TransactionType.BUY, date(2026, 1, 1), "10", "100", fees="5"),
+        tx(
+            "sell",
+            TransactionType.SELL,
+            date(2026, 2, 1),
+            "5",
+            "120",
+            fees="2",
+            taxes="3",
+        ),
+    ]
+    dividends = [
+        DividendEvent(
+            source_event_id="dividend",
+            symbol="2330",
+            market=Market.TWSE,
+            name="TSMC",
+            dividend_year=2026,
+            ex_dividend_date=date(2026, 1, 2),
+            payment_date=date(2026, 3, 1),
+            cash_dividend_per_share=Decimal("2"),
+            source="official",
+        )
+    ]
+    costs = [
+        InvestmentCostEvent(
+            id="financing-interest:liability-margin-financing:2026-03-01",
+            event_date=date(2026, 3, 1),
+            cost_type=InvestmentCostType.FINANCING,
+            amount=Decimal("7"),
+            currency=Currency.TWD,
+        ),
+        InvestmentCostEvent(
+            id="financing-interest:liability-stock-pledge:2026-03-01",
+            event_date=date(2026, 3, 1),
+            cost_type=InvestmentCostType.FINANCING,
+            amount=Decimal("11"),
+            currency=Currency.TWD,
+        ),
+    ]
+
+    result = AnnualPnlEngine().realized_performance(
+        date(2026, 3, 2),
+        date(2026, 3, 2),
+        transactions,
+        dividends,
+        costs,
+        {},
+    )
+
+    assert result.realized_trading_pnl_ytd == Decimal("95")
+    assert result.dividend_income_ytd == Decimal("20")
+    assert result.margin_financing_interest_ytd == Decimal("7")
+    assert result.stock_pledge_interest_ytd == Decimal("11")
+    assert result.buy_brokerage_fees_ytd == Decimal("5")
+    assert result.realized_total_pnl_ytd == Decimal("92")
+
+
+def test_0050_payment_dates_produce_approved_2026_realized_total() -> None:
+    transactions = [
+        Transaction(
+            id="0050-opening",
+            symbol="0050",
+            market=Market.TWSE,
+            transaction_type=TransactionType.BUY,
+            trade_date=date(2026, 1, 1),
+            settlement_date=date(2026, 1, 1),
+            quantity=Decimal("2150"),
+            price=Decimal("1"),
+            currency=Currency.TWD,
+        ),
+        Transaction(
+            id="0050-additions",
+            symbol="0050",
+            market=Market.TWSE,
+            transaction_type=TransactionType.BUY,
+            trade_date=date(2026, 7, 1),
+            settlement_date=date(2026, 7, 1),
+            quantity=Decimal("3650"),
+            price=Decimal("1"),
+            currency=Currency.TWD,
+        ),
+        tx("realized-buy", TransactionType.BUY, date(2026, 1, 1), "1", "0"),
+        tx(
+            "realized-sell",
+            TransactionType.SELL,
+            date(2026, 8, 1),
+            "1",
+            "345393.4500000000000000000013",
+        ),
+        tx(
+            "fee-only-buy",
+            TransactionType.BUY,
+            date(2026, 8, 2),
+            "1",
+            "1",
+            fees="5839.154900",
+        ),
+    ]
+    dividends = [
+        DividendEvent(
+            source_event_id="existing-recognized-dividends",
+            symbol="2330",
+            market=Market.TWSE,
+            name="TSMC",
+            dividend_year=2026,
+            ex_dividend_date=date(2026, 1, 2),
+            payment_date=date(2026, 1, 31),
+            cash_dividend_per_share=Decimal("118044.64737350"),
+            source="existing recognized official events fixture",
+        ),
+        DividendEvent(
+            source_event_id="0050-january",
+            symbol="0050",
+            market=Market.TWSE,
+            name="Yuanta Taiwan 50",
+            dividend_year=2026,
+            ex_dividend_date=date(2026, 1, 22),
+            record_date=date(2026, 1, 28),
+            payment_date=date(2026, 2, 11),
+            cash_dividend_per_share=Decimal("1.00"),
+            source="TWSE ETF",
+        ),
+        DividendEvent(
+            source_event_id="0050-july",
+            symbol="0050",
+            market=Market.TWSE,
+            name="Yuanta Taiwan 50",
+            dividend_year=2026,
+            ex_dividend_date=date(2026, 7, 21),
+            record_date=date(2026, 7, 27),
+            payment_date=date(2026, 8, 10),
+            cash_dividend_per_share=Decimal("0.60"),
+            source="TWSE ETF",
+        ),
+    ]
+    costs = [
+        InvestmentCostEvent(
+            id="financing-catchup-margin-through-2026-08-29",
+            event_date=date(2026, 8, 29),
+            cost_type=InvestmentCostType.FINANCING,
+            amount=Decimal("8149.1194520547945205479452055"),
+            currency=Currency.TWD,
+        ),
+        InvestmentCostEvent(
+            id="financing-catchup-stock-pledge-through-2026-08-29",
+            event_date=date(2026, 8, 29),
+            cost_type=InvestmentCostType.FINANCING,
+            amount=Decimal("30837.6027397260273972602739797"),
+            currency=Currency.TWD,
+        ),
+    ]
+
+    result = AnnualPnlEngine().realized_performance(
+        date(2026, 8, 29),
+        date(2026, 8, 28),
+        transactions,
+        dividends,
+        costs,
+        {},
+    )
+
+    assert result.dividend_income_ytd == Decimal("123674.64737350")
+    assert result.realized_total_pnl_ytd == Decimal("424242.2202817191780821917821")

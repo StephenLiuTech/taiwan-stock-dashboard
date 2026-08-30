@@ -9,6 +9,7 @@ from typing import Protocol
 
 from domain import (
     AnnualPnlSnapshot,
+    AnnualRealizedPerformance,
     Currency,
     DailyReportSections,
     DailySnapshot,
@@ -50,6 +51,8 @@ class ChartSource:
 
     uri: str
     attachment: "InlineImage | None" = None
+    annual_uri: str | None = None
+    annual_attachment: "InlineImage | None" = None
 
 
 @dataclass(frozen=True)
@@ -90,7 +93,9 @@ class DailyEmailAnnualPerformance:
     """Persisted annual accounting truth prepared for email presentation."""
 
     snapshot: AnnualPnlSnapshot
+    realized: AnnualRealizedPerformance
     realized_by_symbol: tuple[RealizedPnlBySymbol, ...]
+    history: tuple[AnnualRealizedPerformance, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -304,17 +309,29 @@ class SendDailyReportUseCase:
             self._deliveries.claim(REPORT_TYPE, report_date, self._recipient)
         try:
             if self._asset_store is not None and rendered.inline_images:
-                chart = rendered.inline_images[0]
-                chart_url = self._asset_store.publish(
-                    chart.content,
-                    chart.content_type,
-                    (f"daily-report/{report_date.isoformat()}/" "asset-change.png"),
-                )
-                if not chart_url.startswith("https://"):
-                    raise ValueError("report asset store must return an HTTPS URL")
+                published: dict[str, str] = {}
+                for chart in rendered.inline_images:
+                    object_filename = (
+                        "asset-change.png"
+                        if chart.content_id == "pams-asset-change-chart"
+                        else chart.filename
+                    )
+                    chart_url = self._asset_store.publish(
+                        chart.content,
+                        chart.content_type,
+                        f"daily-report/{report_date.isoformat()}/{object_filename}",
+                    )
+                    if not chart_url.startswith("https://"):
+                        raise ValueError("report asset store must return an HTTPS URL")
+                    published[chart.content_id] = chart_url
                 rendered = self._renderer.render(
                     report,
-                    ChartSource(uri=chart_url),
+                    ChartSource(
+                        uri=published.get(
+                            "pams-asset-change-chart", "cid:pams-asset-change-chart"
+                        ),
+                        annual_uri=published.get("pams-realized-total-pnl-ytd-chart"),
+                    ),
                 )
             envelope = EmailEnvelope(
                 self._sender,
@@ -514,11 +531,16 @@ class SendDailyReportUseCase:
     ) -> tuple[DailyEmailAnnualPerformance | None, str | None]:
         if self._annual_snapshots is None or self._annual_pnl is None:
             return None, "Annual P/L data is unavailable for this report."
+        snapshot_history = sorted(
+            (
+                item
+                for item in self._annual_snapshots.list_for_year(accounting_limit.year)
+                if item.snapshot_date <= accounting_limit
+            ),
+            key=lambda item: item.snapshot_date,
+        )
         candidates = [
-            item
-            for item in self._annual_snapshots.list_for_year(accounting_limit.year)
-            if item.snapshot_date <= accounting_limit
-            and item.valuation_date == valuation_date
+            item for item in snapshot_history if item.valuation_date == valuation_date
         ]
         if not candidates:
             return (
@@ -527,10 +549,15 @@ class SendDailyReportUseCase:
                 "and valuation dates.",
             )
         snapshot = candidates[-1]
+        realized = self._annual_pnl.realized_performance(as_of=snapshot.snapshot_date)
         return (
             DailyEmailAnnualPerformance(
                 snapshot,
+                realized,
                 self._annual_pnl.realized_pnl_by_symbol(as_of=snapshot.snapshot_date),
+                self._annual_pnl.realized_performance_history(
+                    year=snapshot.year, through=snapshot.snapshot_date
+                ),
             ),
             None,
         )

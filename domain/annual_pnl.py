@@ -39,6 +39,21 @@ class RealizedPnlBySymbol:
     realized_pnl: Decimal
 
 
+@dataclass(frozen=True)
+class AnnualRealizedPerformance:
+    """Explicit realized-only calendar-year performance in reporting currency."""
+
+    snapshot_date: date
+    valuation_date: date
+    year: int
+    realized_trading_pnl_ytd: Decimal
+    dividend_income_ytd: Decimal
+    margin_financing_interest_ytd: Decimal
+    stock_pledge_interest_ytd: Decimal
+    buy_brokerage_fees_ytd: Decimal
+    realized_total_pnl_ytd: Decimal
+
+
 class InvestmentCostEvent(BaseModel):
     """One dated investment expense not represented in SELL realized P/L."""
 

@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from domain import (
     AnnualPnlSnapshot,
+    AnnualRealizedPerformance,
     Currency,
     DividendEvent,
     InvestmentCostEvent,
@@ -157,6 +158,77 @@ class AnnualPnlUseCase:
         )
         rates = self._historical_rates(as_of, transactions, [], [])
         return self._engine.realized_pnl_by_symbol(as_of, transactions, rates, actions)
+
+    def realized_performance(self, *, as_of: date) -> AnnualRealizedPerformance:
+        """Reproduce the explicit realized-only annual metric from source ledgers."""
+        persisted = self._annual_snapshots.get_by_date(as_of)
+        if persisted is None:
+            raise AnnualPnlApplicationError(
+                f"annual P/L snapshot does not exist for {as_of}"
+            )
+        transactions = self._transactions.list_filtered(end_date=as_of)
+        dividends = self._dividends.list_filtered()
+        costs = self._costs.list_between_dates(date(as_of.year, 1, 1), as_of)
+        rates = self._historical_rates(as_of, transactions, dividends, costs)
+        actions = (
+            self._corporate_actions.list_filtered(end_date=as_of)
+            if self._corporate_actions is not None
+            else None
+        )
+        return self._engine.realized_performance(
+            as_of,
+            persisted.valuation_date,
+            transactions,
+            dividends,
+            costs,
+            rates,
+            actions,
+        )
+
+    def realized_performance_history(
+        self, *, year: int, through: date
+    ) -> tuple[AnnualRealizedPerformance, ...]:
+        """Build recognition-date points from component-changing ledger events."""
+        start = date(year, 1, 1)
+        limit = min(through, date(year, 12, 31))
+        if limit < start:
+            return ()
+        transactions = self._transactions.list_filtered(end_date=limit)
+        dividends = self._dividends.list_filtered()
+        costs = self._costs.list_between_dates(start, limit)
+        actions = (
+            self._corporate_actions.list_filtered(end_date=limit)
+            if self._corporate_actions is not None
+            else None
+        )
+        rates = self._historical_rates(limit, transactions, dividends, costs)
+        event_dates = {start}
+        event_dates.update(
+            item.trade_date
+            for item in transactions
+            if item.trade_date >= start
+            and (item.transaction_type.value == "sell" or item.fees + item.taxes != 0)
+        )
+        event_dates.update(
+            item.payment_date
+            for item in dividends
+            if item.payment_date is not None
+            and start <= item.payment_date <= limit
+            and item.cash_dividend_per_share is not None
+        )
+        event_dates.update(item.event_date for item in costs)
+        return tuple(
+            self._engine.realized_performance(
+                point,
+                point,
+                transactions,
+                dividends,
+                costs,
+                rates,
+                actions,
+            )
+            for point in sorted(event_dates)
+        )
 
     def summary(
         self, *, year: int, as_of: date | None = None

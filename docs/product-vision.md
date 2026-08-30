@@ -329,6 +329,12 @@ derived facts, and explicit dated cost events are the only source of historical
 financing costs. PAMS does not fabricate cash-flow history from liability
 descriptions. Foreign-currency flows retain dated FX provenance and never use a
 future conversion rate.
+
+Annual reporting distinguishes portfolio valuation from realized investment
+performance. `Realized Total P/L YTD` combines ledger-derived realized trading
+P/L and recognized dividends, then deducts margin interest, stock-pledge
+interest, and BUY brokerage fees. Unrealized P/L remains a valuation fact and
+does not enter this realized-only metric.
 Missing historical coverage is repaired only through an explicit bounded
 provider backfill. Existing observations are preserved and market-closure
 dates are never filled with fabricated rates.

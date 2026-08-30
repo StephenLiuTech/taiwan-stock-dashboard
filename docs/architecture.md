@@ -770,6 +770,15 @@ report valuation. Its two email-safe charts render snapshot composition and
 TransactionEngine-derived realized P/L by symbol; they never consume broker
 reported performance or recalculate portfolio accounting in the renderer.
 
+The legacy persisted `total_pnl_ytd` keeps its original formula, including
+unrealized P/L. `AnnualPnlEngine.realized_performance` exposes a separate
+immutable `AnnualRealizedPerformance` DTO without redefining that historical
+field. It reproduces realized trading P/L, recognized dividends, separately
+classified margin and pledge interest, BUY brokerage fees, and the resulting
+realized-only total from existing ledgers. The Daily Report summary and its
+single annual line consume this DTO; Portfolio Trend remains limited to market
+value and net equity.
+
 Broker-style holding basis excludes BUY fees/taxes; those expenses enter
 `other_cost_ytd` once. SELL fees/taxes already reduce realized net proceeds and
 are not subtracted again. `investment_cost_events` contains explicit dated
