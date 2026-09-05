@@ -225,6 +225,11 @@ by `(effective_date, sequence, id)`. The sequence is explicit accounting order;
 timestamps and IDs never imply chronology. Events are effective inclusively on
 their date, so they change that date's opening/accruable principal. Replay
 rejects negative principal and validates optional resulting-principal facts.
+Historical and forced market snapshots resolve principal from that ledger with
+`effective_date <= snapshot_date`; the mutable current liability master is not
+valid evidence for an earlier valuation date. Snapshot high-water marks also
+consider only earlier-dated snapshots, preventing future execution state from
+leaking into a historical rebuild.
 
 The margin liability represents the brokerage margin debt account. Its
 financed-symbol fields remain a current-position summary; historical references
@@ -407,6 +412,20 @@ CLI owns terminal output and UTF-8 file writing.
 The former single reporting module is retained as
 `pams.reporting.legacy`; its functions are re-exported by the package for
 backward compatibility.
+
+The email Portfolio Trend combines aggregate snapshot values with historical
+Daily P/L derived from persisted `position_snapshots.daily_value_change`.
+`PortfolioService` performs the same position aggregation used by Today's P/L;
+the renderer only converts the resulting `Decimal` values at the chart boundary.
+If any position on a date lacks prior-close provenance (`daily_return` is
+unavailable), that date's Daily P/L remains null. Net-equity changes are never
+used as a substitute and old dates are never populated with fabricated zeros.
+
+The separate Stock Net Equity Trend reads aggregate `DailySnapshot.net_asset_value`
+from the fixed reporting-history boundary of 2022-05-05 through the report date.
+The Application Layer preserves missing calendar dates as null history points;
+the email renderer neither recalculates equity nor fills or interpolates gaps.
+This full-history section is appended after every other Daily Report section.
 
 ## Analytics boundary
 
@@ -795,3 +814,25 @@ multiplier changes only active quantity, preserves total cost basis exactly,
 and recalculates average cost. It creates no realized P/L, cash flow, fee, tax,
 expense, dividend, or financing change. An action against no active position
 is invalid; corporate actions never masquerade as BUY or SELL transactions.
+
+## Historical Stock Net Equity (schema v14)
+
+Controlled historical observations live in `stock_net_equity_history`, never
+in the immutable aggregate snapshot table. The insert-only import boundary
+preserves source provenance and classifies each date as `VERIFIED`,
+`ESTIMATED_LIABILITY`, or `UNKNOWN`. Daily reporting merges the imported range
+from 2023-08-07 with aggregate production snapshots from 2026-07-21 onward;
+qualified production facts have priority, while a documented liability-ledger
+mismatch remains an explicit gap. Estimated liability periods use a distinct
+dashed presentation and unknown periods are never zero-filled or interpolated.
+The controlled workbook's liability formulas are not accounting truth. For the
+2026-01-06 through 2026-07-20 rebuild window, Application takes market value
+directly from `資產趨勢` column H and asks `LiabilityPrincipalEngine` for each
+liability's `effective_date <= snapshot_date` balance. Verification requires a
+zero-based opening and internally reconciling event prefix; current liability
+master values are never projected backward. Later missing events do not
+invalidate an already complete earlier prefix.
+Absent weekends and officially confirmed market closures are timeline-only
+dates: no historical row is synthesized and the renderer skips them without
+breaking adjacent observations. An explicit `UNKNOWN` row or an unexplained
+missing trading date remains a hard line break.

@@ -29,7 +29,7 @@ class SnapshotService:
 
     def preview(self, summary: PortfolioSummary) -> DailySnapshot:
         """Calculate a snapshot without persisting it."""
-        highest = self.repository.get_highest()
+        highest = self.repository.get_highest_before(summary.valuation_date)
         previous_high = highest.high_water_mark if highest else summary.net_asset_value
         high_water_mark = max(previous_high, summary.net_asset_value)
         drawdown = (

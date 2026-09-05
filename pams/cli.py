@@ -45,6 +45,7 @@ from pams.application import (
     HoldingQueryError,
     InvalidAnalyticsPeriodError,
     PortfolioAnalyticsError,
+    StockNetEquityImportError,
     ValuationDataUnavailableError,
     ValuationRepositoryError,
     WatchlistError,
@@ -60,6 +61,7 @@ from pams.composition import (
     compose_fx_backfill,
     compose_ledger_operations,
     compose_operations,
+    compose_stock_net_equity_import,
     selected_email_transport,
 )
 from pams.reporting import (
@@ -170,6 +172,21 @@ def build_parser() -> argparse.ArgumentParser:
     fx_mode.add_argument("--apply", action="store_true")
     fx_backfill.add_argument("--database", type=Path)
     fx_backfill.add_argument("--verbose", action="store_true")
+    stock_equity = commands.add_parser(
+        "stock-net-equity", help="manage isolated historical Stock Net Equity"
+    )
+    stock_equity_commands = stock_equity.add_subparsers(
+        dest="stock_net_equity_command", required=True
+    )
+    stock_equity_import = stock_equity_commands.add_parser(
+        "import", help="preview or apply the approved Stock Net Equity workbook"
+    )
+    stock_equity_import.add_argument("--source", required=True, type=Path)
+    stock_equity_mode = stock_equity_import.add_mutually_exclusive_group()
+    stock_equity_mode.add_argument("--dry-run", action="store_true")
+    stock_equity_mode.add_argument("--apply", action="store_true")
+    stock_equity_import.add_argument("--database", type=Path)
+    stock_equity_import.add_argument("--verbose", action="store_true")
     broker = commands.add_parser(
         "broker", help="reconcile brokerage statements without database writes"
     )
@@ -478,6 +495,8 @@ def _error_exit_code(error: Exception) -> ExitCode:
         return ExitCode.SECURITY_ERROR
     if isinstance(error, BootstrapImportError):
         return ExitCode.SECURITY_ERROR
+    if isinstance(error, StockNetEquityImportError):
+        return ExitCode.SECURITY_ERROR
     if isinstance(error, CorporateActionError):
         return ExitCode.SECURITY_ERROR
     if isinstance(error, WatchlistError):
@@ -525,6 +544,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     apply=arguments.apply,
                 )
             print(_format_fx_backfill(result))
+            return int(ExitCode.SUCCESS)
+        if arguments.command == "stock-net-equity":
+            with compose_stock_net_equity_import(
+                arguments.database, verbose=arguments.verbose
+            ) as use_case:
+                result = use_case.execute(arguments.source, apply=arguments.apply)
+            print(_format_stock_net_equity_import(result))
             return int(ExitCode.SUCCESS)
         if (
             arguments.command == "transaction"
@@ -1014,6 +1040,29 @@ def _format_fx_backfill(result: object) -> str:
             f"Result: {'applied' if result.applied else 'dry-run; no database writes'}",
         )
     )
+    return "\n".join(lines)
+
+
+def _format_stock_net_equity_import(result: object) -> str:
+    """Render controlled history counts without exposing local source paths."""
+    from domain import StockNetEquityQuality
+    from pams.application import StockNetEquityImportResult
+
+    assert isinstance(result, StockNetEquityImportResult)
+    lines = [
+        "PAMS Stock Net Equity History Import",
+        f"Database: {result.database}",
+        f"Range: {result.start_date} to {result.end_date}",
+        f"Rows: {len(result.rows)}",
+        f"VERIFIED: {result.quality_count(StockNetEquityQuality.VERIFIED)}",
+        "ESTIMATED_LIABILITY: "
+        f"{result.quality_count(StockNetEquityQuality.ESTIMATED_LIABILITY)}",
+        f"UNKNOWN: {result.quality_count(StockNetEquityQuality.UNKNOWN)}",
+        f"Existing: {result.existing}",
+        f"Missing: {result.missing}",
+        f"Inserted: {result.inserted}",
+        f"Result: {'applied' if result.applied else 'dry-run; no database writes'}",
+    ]
     return "\n".join(lines)
 
 

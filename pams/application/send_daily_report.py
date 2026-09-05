@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 
@@ -16,6 +16,7 @@ from domain import (
     Market,
     PositionSnapshot,
     RealizedPnlBySymbol,
+    StockNetEquityQuality,
 )
 from market_calendar import MarketCalendarUnavailableError
 from pams.application.annual_pnl import AnnualPnlUseCase
@@ -26,10 +27,12 @@ from repositories import (
     HoldingRepository,
     PositionSnapshotRepository,
     SnapshotRepository,
+    StockNetEquityHistoryRepository,
 )
 from services import PortfolioService
 
 REPORT_TYPE = "daily_portfolio"
+STOCK_NET_EQUITY_HISTORY_START = date(2023, 8, 7)
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -55,6 +58,7 @@ class ChartSource:
 
     uri: str
     attachment: "InlineImage | None" = None
+    net_equity_uri: str | None = None
     annual_uri: str | None = None
     annual_attachment: "InlineImage | None" = None
 
@@ -85,11 +89,20 @@ class DailyEmailPosition:
 class DailyEmailHistoryPoint:
     snapshot_date: date
     total_market_value: Decimal
-    net_asset_value: Decimal
+    net_asset_value: Decimal | None
     total_pnl_ytd: Decimal | None = None
     realized_pnl_ytd: Decimal | None = None
     unrealized_pnl: Decimal | None = None
     dividend_income_ytd: Decimal | None = None
+    daily_profit_loss: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class StockNetEquityHistoryPoint:
+    snapshot_date: date
+    net_asset_value: Decimal | None
+    quality_status: StockNetEquityQuality | None = StockNetEquityQuality.VERIFIED
+    is_expected_market_closure: bool = False
 
 
 @dataclass(frozen=True)
@@ -120,6 +133,7 @@ class DailyEmailReport:
     sections: DailyReportSections = DailyReportSections()
     annual_performance: DailyEmailAnnualPerformance | None = None
     annual_warning: str | None = None
+    net_equity_history: tuple[StockNetEquityHistoryPoint, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -208,6 +222,8 @@ class SendDailyReportUseCase:
         today: Callable[[], date] = date.today,
         annual_pnl: AnnualPnlUseCase | None = None,
         annual_snapshots: AnnualPnlSnapshotRepository | None = None,
+        stock_net_equity_history: StockNetEquityHistoryRepository | None = None,
+        is_non_trading_day: Callable[[date], bool] | None = None,
     ) -> None:
         self._update_portfolio = update_portfolio
         self._snapshots = snapshots
@@ -223,6 +239,18 @@ class SendDailyReportUseCase:
         self._today = today
         self._annual_pnl = annual_pnl
         self._annual_snapshots = annual_snapshots
+        self._stock_net_equity_history = stock_net_equity_history
+        self._is_non_trading_day = is_non_trading_day
+
+    def _is_expected_market_closure(self, value: date) -> bool:
+        """Classify an absent date without fabricating a historical observation."""
+        if value.weekday() >= 5:
+            return True
+        return (
+            self._is_non_trading_day(value)
+            if self._is_non_trading_day is not None
+            else False
+        )
 
     def execute(
         self,
@@ -342,6 +370,9 @@ class SendDailyReportUseCase:
                     ChartSource(
                         uri=published.get(
                             "pams-asset-change-chart", "cid:pams-asset-change-chart"
+                        ),
+                        net_equity_uri=published.get(
+                            "pams-stock-net-equity-trend-chart"
                         ),
                         annual_uri=published.get("pams-realized-total-pnl-ytd-chart"),
                     ),
@@ -464,6 +495,13 @@ class SendDailyReportUseCase:
         )[-30:]
         if not historical_snapshots:
             historical_snapshots = [snapshot]
+        historical_positions = self._positions.list_between_dates(
+            historical_snapshots[0].snapshot_date,
+            historical_snapshots[-1].snapshot_date,
+        )
+        positions_by_date: dict[date, list[PositionSnapshot]] = {}
+        for position in historical_positions:
+            positions_by_date.setdefault(position.snapshot_date, []).append(position)
         annual_by_date = (
             {
                 item.snapshot_date: item
@@ -477,31 +515,79 @@ class SendDailyReportUseCase:
         )
         history = tuple(
             DailyEmailHistoryPoint(
-                item.snapshot_date,
-                item.total_market_value,
-                item.net_asset_value,
-                (
+                snapshot_date=item.snapshot_date,
+                total_market_value=item.total_market_value,
+                net_asset_value=item.net_asset_value,
+                daily_profit_loss=PortfolioService.calculate_complete_daily_profit_loss(
+                    positions_by_date.get(item.snapshot_date, [])
+                ),
+                total_pnl_ytd=(
                     annual_by_date[item.snapshot_date].total_pnl_ytd
                     if item.snapshot_date in annual_by_date
                     else None
                 ),
-                (
+                realized_pnl_ytd=(
                     annual_by_date[item.snapshot_date].realized_pnl_ytd
                     if item.snapshot_date in annual_by_date
                     else None
                 ),
-                (
+                unrealized_pnl=(
                     annual_by_date[item.snapshot_date].unrealized_pnl
                     if item.snapshot_date in annual_by_date
                     else None
                 ),
-                (
+                dividend_income_ytd=(
                     annual_by_date[item.snapshot_date].dividend_income_ytd
                     if item.snapshot_date in annual_by_date
                     else None
                 ),
             )
             for item in historical_snapshots
+        )
+        imported = (
+            self._stock_net_equity_history.list_between_dates(
+                STOCK_NET_EQUITY_HISTORY_START, snapshot.snapshot_date
+            )
+            if self._stock_net_equity_history is not None
+            else []
+        )
+        net_equity_snapshots = {
+            item.snapshot_date: (item.stock_net_equity, item.quality_status)
+            for item in imported
+        }
+        for item in self._snapshots.list_between_dates(
+            STOCK_NET_EQUITY_HISTORY_START, snapshot.snapshot_date
+        ):
+            existing = net_equity_snapshots.get(item.snapshot_date)
+            if existing is None or existing[1] is not StockNetEquityQuality.UNKNOWN:
+                net_equity_snapshots[item.snapshot_date] = (
+                    item.net_asset_value,
+                    StockNetEquityQuality.VERIFIED,
+                )
+        net_equity_history = tuple(
+            StockNetEquityHistoryPoint(
+                snapshot_date=current_date,
+                net_asset_value=(
+                    net_equity_snapshots[current_date][0]
+                    if current_date in net_equity_snapshots
+                    else None
+                ),
+                quality_status=(
+                    net_equity_snapshots[current_date][1]
+                    if current_date in net_equity_snapshots
+                    else None
+                ),
+                is_expected_market_closure=(
+                    current_date not in net_equity_snapshots
+                    and self._is_expected_market_closure(current_date)
+                ),
+            )
+            for offset in range(
+                (snapshot.snapshot_date - STOCK_NET_EQUITY_HISTORY_START).days + 1
+            )
+            for current_date in (
+                STOCK_NET_EQUITY_HISTORY_START + timedelta(days=offset),
+            )
         )
         quoted_positions = tuple(
             self._position(
@@ -576,6 +662,7 @@ class SendDailyReportUseCase:
             sections,
             annual_performance,
             annual_warning,
+            net_equity_history,
         )
 
     def _annual_performance(

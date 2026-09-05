@@ -3,7 +3,7 @@
 from datetime import date
 from decimal import Decimal
 
-from domain import LiabilityPrincipalEvent, LiabilityPrincipalPoint
+from domain import Liability, LiabilityPrincipalEvent, LiabilityPrincipalPoint
 
 
 class LiabilityPrincipalReplayError(ValueError):
@@ -53,3 +53,26 @@ class LiabilityPrincipalEngine:
             [event for event in events if event.effective_date <= as_of]
         )
         return points[-1].principal if points else Decimal("0")
+
+    def liabilities_as_of(
+        self,
+        liabilities: list[Liability],
+        events: list[LiabilityPrincipalEvent],
+        as_of: date,
+    ) -> list[Liability]:
+        """Return current liability identities with principal replayed as of a date."""
+        events_by_liability: dict[str, list[LiabilityPrincipalEvent]] = {}
+        for event in events:
+            events_by_liability.setdefault(event.liability_id, []).append(event)
+        return [
+            liability.model_copy(
+                update={
+                    "principal": (
+                        self.principal_as_of(events_by_liability[liability.id], as_of)
+                        if liability.id in events_by_liability
+                        else liability.principal
+                    )
+                }
+            )
+            for liability in liabilities
+        ]

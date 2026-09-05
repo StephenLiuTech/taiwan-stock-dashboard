@@ -350,3 +350,8 @@ free-form note conventions are not business truth.
 Schema-v13 broker imports remain transaction-first: reconciliation is the
 economic duplicate defense, provenance is the audit link, and atomic apply is
 permitted only when every accounting dependency is explicit.
+
+Historical Stock Net Equity begins only at the earliest controlled,
+calculable date. Schema v14 keeps imported historical values and their quality
+labels separate from production aggregate snapshots so estimates cannot
+become accounting truth.

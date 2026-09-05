@@ -67,8 +67,10 @@ from pams.application import (
     BuildReportSectionsUseCase,
     DemoDataUseCase,
     DividendEventUseCase,
+    ExcelV15StockNetEquitySource,
     FinancingInterestUseCase,
     ImportBrokerUseCase,
+    ImportStockNetEquityHistoryUseCase,
     LiabilityPrincipalUseCase,
     ListTransactionsUseCase,
     MigrateDatabaseUseCase,
@@ -161,6 +163,36 @@ def compose_database_migration() -> MigrateDatabaseUseCase:
     if not settings.migration_source_url:
         raise ValueError("PAMS_MIGRATION_SOURCE_URL is required for database migration")
     return MigrateDatabaseUseCase(settings.migration_source_url, settings.database_url)
+
+
+@contextmanager
+def compose_stock_net_equity_import(
+    database_override: Path | None = None,
+    *,
+    verbose: bool = False,
+) -> Iterator[ImportStockNetEquityHistoryUseCase]:
+    """Compose the controlled historical-equity importer."""
+    settings = get_settings()
+    configure_logging(
+        "DEBUG" if verbose else settings.log_level,
+        load_logging_config().format,
+    )
+    database_url = database_url_for_override(database_override, settings.database_url)
+    database = open_database(database_url)
+    database.initialize_schema()
+    repositories = create_repositories(database.backend, database.connection)
+    try:
+        yield ImportStockNetEquityHistoryUseCase(
+            ExcelV15StockNetEquitySource(),
+            repositories.stock_net_equity_history,
+            repositories.daily_snapshots,
+            repositories.liabilities.list_all(),
+            repositories.liability_principal_events.list_all(),
+            repositories.stock_net_equity_history_uow,
+            database.display_url,
+        )
+    finally:
+        database.connection.close()
 
 
 @contextmanager
@@ -385,6 +417,7 @@ def compose_daily_report(
             ),
             annual_pnl=context.annual_pnl,
             annual_snapshots=context.repositories.annual_pnl_snapshots,
+            stock_net_equity_history=(context.repositories.stock_net_equity_history),
         )
         yield replace(context, send_daily_report=use_case)
 
@@ -591,6 +624,7 @@ def _compose(
             holdings,
             liabilities,
             repositories.market_data_uow,
+            liability_principal_events=repositories.liability_principal_events,
         )
         alpha_key = (
             settings.alpha_vantage_api_key.get_secret_value()
@@ -642,6 +676,7 @@ def _compose(
                 repositories.fx_rates,
                 us_provider,
                 fx_provider,
+                repositories.liability_principal_events,
             )
 
         engine = global_engine(engine)
@@ -761,6 +796,9 @@ def _compose(
                     holdings,
                     liabilities,
                     repositories.market_data_uow,
+                    liability_principal_events=(
+                        repositories.liability_principal_events
+                    ),
                 )
             )
 

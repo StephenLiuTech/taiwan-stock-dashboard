@@ -13,6 +13,7 @@ from domain import (
     Dividend,
     DividendEvent,
     FxRate,
+    HistoricalStockNetEquity,
     Holding,
     InvestmentCostEvent,
     Liability,
@@ -22,6 +23,70 @@ from domain import (
     Transaction,
     WatchlistItem,
 )
+
+
+class SQLiteStockNetEquityHistoryRepository:
+    """Insert-only persistence for isolated historical equity observations."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def list_between_dates(
+        self, start: date, end: date
+    ) -> list[HistoricalStockNetEquity]:
+        rows = self.connection.execute(
+            """SELECT * FROM stock_net_equity_history
+            WHERE snapshot_date BETWEEN ? AND ? ORDER BY snapshot_date""",
+            (start.isoformat(), end.isoformat()),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def insert_many_if_absent(self, rows: list[HistoricalStockNetEquity]) -> int:
+        inserted = 0
+        for item in rows:
+            cursor = self.connection.execute(
+                """INSERT INTO stock_net_equity_history VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(snapshot_date) DO NOTHING""",
+                (
+                    item.snapshot_date.isoformat(),
+                    _optional_decimal(item.total_market_value),
+                    _optional_decimal(item.pledge_debt),
+                    _optional_decimal(item.margin_debt),
+                    _optional_decimal(item.total_liabilities),
+                    _optional_decimal(item.stock_net_equity),
+                    item.quality_status.value,
+                    item.source,
+                    item.source_reference,
+                    item.imported_at.isoformat(),
+                ),
+            )
+            inserted += max(cursor.rowcount, 0)
+        if self.auto_commit:
+            self.connection.commit()
+        return inserted
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> HistoricalStockNetEquity:
+        values = dict(row)
+        values["snapshot_date"] = date.fromisoformat(values["snapshot_date"])
+        values["imported_at"] = datetime.fromisoformat(values["imported_at"])
+        for key in (
+            "total_market_value",
+            "pledge_debt",
+            "margin_debt",
+            "total_liabilities",
+            "stock_net_equity",
+        ):
+            values[key] = _decimal(values[key]) if values[key] is not None else None
+        return HistoricalStockNetEquity.model_validate(values)
+
+
+def _optional_decimal(value: Decimal | None) -> str | None:
+    return str(value) if value is not None else None
 
 
 class SQLiteLiabilityPrincipalEventRepository:
@@ -869,6 +934,14 @@ class SQLiteSnapshotRepository:
         ).fetchone()
         return self._from_row(row) if row else None
 
+    def get_highest_before(self, snapshot_date: date) -> DailySnapshot | None:
+        row = self.connection.execute(
+            """SELECT * FROM daily_snapshots WHERE snapshot_date < ?
+            ORDER BY CAST(high_water_mark AS NUMERIC) DESC LIMIT 1""",
+            (snapshot_date.isoformat(),),
+        ).fetchone()
+        return self._from_row(row) if row else None
+
     def list_between_dates(self, start: date, end: date) -> list[DailySnapshot]:
         rows = self.connection.execute(
             """SELECT * FROM daily_snapshots
@@ -1175,6 +1248,16 @@ class SQLitePositionSnapshotRepository:
             """SELECT * FROM position_snapshots
             WHERE snapshot_date = ? ORDER BY symbol, holding_id""",
             (snapshot_date.isoformat(),),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def list_between_dates(self, start: date, end: date) -> list[PositionSnapshot]:
+        """Return persisted position movements for an inclusive date range."""
+        rows = self.connection.execute(
+            """SELECT * FROM position_snapshots
+            WHERE snapshot_date BETWEEN ? AND ?
+            ORDER BY snapshot_date, symbol, holding_id""",
+            (start.isoformat(), end.isoformat()),
         ).fetchall()
         return [self._from_row(row) for row in rows]
 

@@ -19,9 +19,11 @@ from market_data.providers import FXRateProvider, USMarketDataProvider
 from repositories.interfaces import (
     FxRateRepository,
     HoldingRepository,
+    LiabilityPrincipalEventRepository,
     LiabilityRepository,
     MarketDataUnitOfWork,
 )
+from services.liability_principal import LiabilityPrincipalEngine
 from services.multi_currency_valuation import MultiCurrencyValuationEngine
 from services.snapshot import DuplicateSnapshotError, SnapshotService
 
@@ -40,6 +42,7 @@ class GlobalMarketDataEngine:
         fx_rates: FxRateRepository,
         us_provider: USMarketDataProvider | None,
         fx_provider: FXRateProvider | None,
+        liability_principal_events: LiabilityPrincipalEventRepository | None = None,
     ) -> None:
         self.taiwan_engine = taiwan_engine
         self.holdings = holdings
@@ -48,6 +51,8 @@ class GlobalMarketDataEngine:
         self.fx_rates = fx_rates
         self.us_provider = us_provider
         self.fx_provider = fx_provider
+        self.liability_principal_events = liability_principal_events
+        self.liability_principal_engine = LiabilityPrincipalEngine()
         self.valuation = MultiCurrencyValuationEngine()
 
     def dependency_graph_ready(self) -> bool:
@@ -291,6 +296,12 @@ class GlobalMarketDataEngine:
             trade_date, valued_holdings, [*taiwan_quotes, *us_quotes], fx_rate
         )
         liabilities = self.liabilities.list_all()
+        if self.liability_principal_events is not None:
+            liabilities = self.liability_principal_engine.liabilities_as_of(
+                liabilities,
+                self.liability_principal_events.list_all(),
+                trade_date,
+            )
         if any(item.currency is not Currency.TWD for item in liabilities):
             raise ValueError("Global portfolio liabilities must be denominated in TWD")
         principal = sum((item.principal for item in liabilities), Decimal("0"))

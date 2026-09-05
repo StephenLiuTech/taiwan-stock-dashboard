@@ -250,6 +250,17 @@ CREATE TABLE IF NOT EXISTS broker_import_records (
 );
 CREATE INDEX IF NOT EXISTS ix_broker_import_domain_entity
     ON broker_import_records(domain_entity_type, domain_entity_id);
+CREATE TABLE IF NOT EXISTS stock_net_equity_history (
+    snapshot_date TEXT PRIMARY KEY, total_market_value TEXT,
+    pledge_debt TEXT, margin_debt TEXT, total_liabilities TEXT,
+    stock_net_equity TEXT,
+    quality_status TEXT NOT NULL CHECK (
+        quality_status IN ('VERIFIED', 'ESTIMATED_LIABILITY', 'UNKNOWN')
+    ), source TEXT NOT NULL, source_reference TEXT NOT NULL,
+    imported_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_stock_net_equity_history_quality_date
+    ON stock_net_equity_history(quality_status, snapshot_date);
 """
 
 
@@ -286,6 +297,8 @@ def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
             _migrate_postgresql_v11_to_v12(connection)
         if 0 < current_version <= 12:
             _migrate_postgresql_v12_to_v13(connection)
+        if 0 < current_version <= 13:
+            _migrate_postgresql_v13_to_v14(connection)
 
         for version in range(current_version + 1, SCHEMA_VERSION + 1):
             connection.execute(
@@ -390,4 +403,11 @@ def _migrate_postgresql_v12_to_v13(connection: PostgreSQLConnection) -> None:
     """Add structured broker-source provenance without touching accounting rows."""
     for statement in POSTGRESQL_SCHEMA.split(";"):
         if "broker_import_records" in statement:
+            connection.execute(statement)
+
+
+def _migrate_postgresql_v13_to_v14(connection: PostgreSQLConnection) -> None:
+    """Add isolated historical Stock Net Equity facts."""
+    for statement in POSTGRESQL_SCHEMA.split(";"):
+        if "stock_net_equity_history" in statement:
             connection.execute(statement)

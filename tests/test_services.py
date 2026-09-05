@@ -125,6 +125,28 @@ def test_snapshot_calculates_drawdown(connection: sqlite3.Connection) -> None:
     assert snapshot.drawdown == Decimal("-0.25")
 
 
+def test_historical_snapshot_preview_ignores_future_high_water_mark(
+    connection: sqlite3.Connection,
+) -> None:
+    service = SnapshotService(SQLiteSnapshotRepository(connection))
+    first = value_summary().model_copy(
+        update={"valuation_date": date(2026, 8, 9), "net_asset_value": Decimal("800")}
+    )
+    future = value_summary().model_copy(
+        update={"valuation_date": date(2026, 8, 11), "net_asset_value": Decimal("1000")}
+    )
+    service.create(first)
+    service.create(future)
+    corrected = value_summary().model_copy(
+        update={"valuation_date": date(2026, 8, 10), "net_asset_value": Decimal("900")}
+    )
+
+    preview = service.preview(corrected)
+
+    assert preview.high_water_mark == Decimal("900")
+    assert preview.drawdown == Decimal("0")
+
+
 def test_snapshot_rejects_duplicate_date(connection: sqlite3.Connection) -> None:
     service = SnapshotService(SQLiteSnapshotRepository(connection))
     service.create(value_summary())

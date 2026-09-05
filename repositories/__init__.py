@@ -24,11 +24,16 @@ from repositories.interfaces import (
     PriceQuoteRepository,
     ReportDeliveryRepository,
     SnapshotRepository,
+    StockNetEquityHistoryRepository,
+    StockNetEquityHistoryUnitOfWork,
     TransactionLedgerRepository,
     TransactionRepository,
     WatchlistRepository,
 )
-from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
+from repositories.market_data_uow import (
+    SQLiteMarketDataUnitOfWork,
+    SQLiteStockNetEquityHistoryUnitOfWork,
+)
 from repositories.postgresql import (
     PostgreSQLAnnualPnlSnapshotRepository,
     PostgreSQLBrokerImportRecordRepository,
@@ -43,6 +48,7 @@ from repositories.postgresql import (
     PostgreSQLPriceQuoteRepository,
     PostgreSQLReportDeliveryRepository,
     PostgreSQLSnapshotRepository,
+    PostgreSQLStockNetEquityHistoryRepository,
     PostgreSQLTransactionRepository,
     PostgreSQLWatchlistRepository,
 )
@@ -51,6 +57,7 @@ from repositories.postgresql_uow import (
     PostgreSQLHoldingRebuildUnitOfWork,
     PostgreSQLMarginTransactionUnitOfWork,
     PostgreSQLMarketDataUnitOfWork,
+    PostgreSQLStockNetEquityHistoryUnitOfWork,
 )
 from repositories.sqlite import (
     SQLiteAnnualPnlSnapshotRepository,
@@ -66,6 +73,7 @@ from repositories.sqlite import (
     SQLitePriceQuoteRepository,
     SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
+    SQLiteStockNetEquityHistoryRepository,
     SQLiteTransactionRepository,
     SQLiteWatchlistRepository,
 )
@@ -127,6 +135,12 @@ __all__ = [
     "SQLiteTransactionRepository",
     "SQLiteWatchlistRepository",
     "SnapshotRepository",
+    "StockNetEquityHistoryRepository",
+    "StockNetEquityHistoryUnitOfWork",
+    "SQLiteStockNetEquityHistoryRepository",
+    "SQLiteStockNetEquityHistoryUnitOfWork",
+    "PostgreSQLStockNetEquityHistoryRepository",
+    "PostgreSQLStockNetEquityHistoryUnitOfWork",
     "TransactionRepository",
     "TransactionLedgerRepository",
     "WatchlistRepository",

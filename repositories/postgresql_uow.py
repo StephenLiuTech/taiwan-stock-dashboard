@@ -12,8 +12,29 @@ from repositories.postgresql import (
     PostgreSQLPositionSnapshotRepository,
     PostgreSQLPriceQuoteRepository,
     PostgreSQLSnapshotRepository,
+    PostgreSQLStockNetEquityHistoryRepository,
     PostgreSQLTransactionRepository,
 )
+
+
+class PostgreSQLStockNetEquityHistoryUnitOfWork:
+    """Atomically insert historical equity observations without replacement."""
+
+    def __init__(self, connection: object) -> None:
+        self.connection = connection
+        self.history = PostgreSQLStockNetEquityHistoryRepository(
+            connection, auto_commit=False
+        )
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        try:
+            yield
+        except Exception:
+            self.connection.rollback()
+            raise
+        else:
+            self.connection.commit()
 
 
 class PostgreSQLMarketDataUnitOfWork:

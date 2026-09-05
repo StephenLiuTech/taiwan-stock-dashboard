@@ -26,10 +26,15 @@ from repositories.interfaces import (
     PriceQuoteRepository,
     ReportDeliveryRepository,
     SnapshotRepository,
+    StockNetEquityHistoryRepository,
+    StockNetEquityHistoryUnitOfWork,
     TransactionRepository,
     WatchlistRepository,
 )
-from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
+from repositories.market_data_uow import (
+    SQLiteMarketDataUnitOfWork,
+    SQLiteStockNetEquityHistoryUnitOfWork,
+)
 from repositories.postgresql import (
     PostgreSQLAnnualPnlSnapshotRepository,
     PostgreSQLBrokerImportRecordRepository,
@@ -45,6 +50,7 @@ from repositories.postgresql import (
     PostgreSQLPriceQuoteRepository,
     PostgreSQLReportDeliveryRepository,
     PostgreSQLSnapshotRepository,
+    PostgreSQLStockNetEquityHistoryRepository,
     PostgreSQLTransactionRepository,
     PostgreSQLWatchlistRepository,
 )
@@ -53,6 +59,7 @@ from repositories.postgresql_uow import (
     PostgreSQLHoldingRebuildUnitOfWork,
     PostgreSQLMarginTransactionUnitOfWork,
     PostgreSQLMarketDataUnitOfWork,
+    PostgreSQLStockNetEquityHistoryUnitOfWork,
 )
 from repositories.sqlite import (
     SQLiteAnnualPnlSnapshotRepository,
@@ -69,6 +76,7 @@ from repositories.sqlite import (
     SQLitePriceQuoteRepository,
     SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
+    SQLiteStockNetEquityHistoryRepository,
     SQLiteTransactionRepository,
     SQLiteWatchlistRepository,
 )
@@ -98,6 +106,8 @@ class RepositoryBundle:
     liability_principal_events: LiabilityPrincipalEventRepository
     broker_import_records: BrokerImportRecordRepository
     broker_import_uow: BrokerImportUnitOfWork
+    stock_net_equity_history: StockNetEquityHistoryRepository
+    stock_net_equity_history_uow: StockNetEquityHistoryUnitOfWork
 
 
 def create_repositories(backend: str, connection: object) -> RepositoryBundle:
@@ -124,6 +134,8 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             SQLiteLiabilityPrincipalEventRepository(connection),
             SQLiteBrokerImportRecordRepository(connection),
             SQLiteBrokerImportUnitOfWork(connection),
+            SQLiteStockNetEquityHistoryRepository(connection),
+            SQLiteStockNetEquityHistoryUnitOfWork(connection),
         )
     if backend == "postgresql":
         return RepositoryBundle(
@@ -147,5 +159,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             PostgreSQLLiabilityPrincipalEventRepository(connection),
             PostgreSQLBrokerImportRecordRepository(connection),
             PostgreSQLBrokerImportUnitOfWork(connection),
+            PostgreSQLStockNetEquityHistoryRepository(connection),
+            PostgreSQLStockNetEquityHistoryUnitOfWork(connection),
         )
     raise ValueError(f"Unsupported database backend: {backend}")

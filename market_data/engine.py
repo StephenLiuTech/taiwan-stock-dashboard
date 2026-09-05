@@ -22,9 +22,11 @@ from market_data.normalizer import QuoteNormalizer
 from market_data.providers import MarketDataProvider
 from repositories.interfaces import (
     HoldingRepository,
+    LiabilityPrincipalEventRepository,
     LiabilityRepository,
     MarketDataUnitOfWork,
 )
+from services.liability_principal import LiabilityPrincipalEngine
 from services.portfolio import PortfolioService
 from services.snapshot import DuplicateSnapshotError, SnapshotService
 
@@ -53,6 +55,7 @@ class MarketDataEngine:
         unit_of_work: MarketDataUnitOfWork,
         normalizer: QuoteNormalizer | None = None,
         portfolio: PortfolioService | None = None,
+        liability_principal_events: LiabilityPrincipalEventRepository | None = None,
     ) -> None:
         self.providers = {provider.market: provider for provider in providers}
         self.holdings = holdings
@@ -60,6 +63,8 @@ class MarketDataEngine:
         self.unit_of_work = unit_of_work
         self.normalizer = normalizer or QuoteNormalizer()
         self.portfolio = portfolio or PortfolioService()
+        self.liability_principal_events = liability_principal_events
+        self.liability_principal_engine = LiabilityPrincipalEngine()
 
     def dependency_graph_ready(self) -> bool:
         """Return whether every concrete dependency required to run is wired."""
@@ -193,8 +198,15 @@ class MarketDataEngine:
                 for symbol in sorted(symbols)
             )
 
+        liabilities = self.liabilities.list_all()
+        if self.liability_principal_events is not None:
+            liabilities = self.liability_principal_engine.liabilities_as_of(
+                liabilities,
+                self.liability_principal_events.list_all(),
+                trade_date,
+            )
         summary = self.portfolio.value_portfolio(
-            taiwan_holdings, quotes, self.liabilities.list_all(), trade_date
+            taiwan_holdings, quotes, liabilities, trade_date
         )
         snapshot = SnapshotService(self.unit_of_work.daily_snapshots).preview(summary)
         return MarketDataRefreshResult(

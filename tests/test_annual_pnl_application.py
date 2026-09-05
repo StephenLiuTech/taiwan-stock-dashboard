@@ -504,7 +504,8 @@ def test_daily_report_portfolio_trend_excludes_annual_pnl_series() -> None:
     trend_text = rendered.plain_text.split("Portfolio Trend\n", 1)[1].split(
         "\n\nToday's Contributors", 1
     )[0]
-    assert "Date | Total stock market value | Net stock equity" in trend_text
+    assert "Date | Total stock market value | Daily P/L" in trend_text
+    assert "Net stock equity" not in trend_text
     assert "Total P/L YTD" not in trend_text
     assert "Realized P/L YTD" not in trend_text
     assert "Unrealized P/L" not in trend_text

@@ -7,7 +7,16 @@ from decimal import Decimal
 
 import pytest
 
-from domain import Currency, Holding, Market, PriceQuote
+from domain import (
+    Currency,
+    Holding,
+    Liability,
+    LiabilityPrincipalEvent,
+    LiabilityPrincipalEventType,
+    LiabilityType,
+    Market,
+    PriceQuote,
+)
 from market_data import (
     MarketDataEngine,
     ProviderDataError,
@@ -22,6 +31,7 @@ from market_data import (
 from market_data.transport import JSONRecord
 from repositories import (
     SQLiteHoldingRepository,
+    SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
     SQLiteMarketDataUnitOfWork,
     SQLitePriceQuoteRepository,
@@ -261,6 +271,95 @@ def test_engine_persists_quotes_and_portfolio_snapshot(
     assert len(positions) == 2
     with pytest.raises(sqlite3.IntegrityError):
         position_repository.add_many([positions[0]])
+
+
+@pytest.mark.parametrize(
+    ("valuation_date", "source_date", "expected_principal"),
+    [
+        (date(2026, 8, 10), "1150810", Decimal("595000")),
+        (date(2026, 9, 3), "1150903", Decimal("1031720")),
+    ],
+)
+def test_historical_snapshot_replays_liability_principal_as_of_valuation_date(
+    connection: sqlite3.Connection,
+    valuation_date: date,
+    source_date: str,
+    expected_principal: Decimal,
+) -> None:
+    holdings = SQLiteHoldingRepository(connection)
+    holdings.upsert(_holding("h1", "2330", Market.TWSE))
+    liabilities = SQLiteLiabilityRepository(connection)
+    liabilities.upsert(
+        Liability(
+            id="margin",
+            liability_type=LiabilityType.MARGIN_FINANCING,
+            principal=Decimal("1090880"),
+            currency=Currency.TWD,
+        )
+    )
+    principal_events = SQLiteLiabilityPrincipalEventRepository(connection)
+    principal_events.insert_many_if_absent(
+        [
+            LiabilityPrincipalEvent(
+                id="margin-2026-08-05",
+                liability_id="margin",
+                effective_date=date(2026, 8, 5),
+                sequence=10,
+                event_type=LiabilityPrincipalEventType.OPENING,
+                principal_delta=Decimal("595000"),
+                resulting_principal=Decimal("595000"),
+                source="fixture",
+            ),
+            LiabilityPrincipalEvent(
+                id="margin-2026-08-31",
+                liability_id="margin",
+                effective_date=date(2026, 8, 31),
+                sequence=10,
+                event_type=LiabilityPrincipalEventType.INCREASE,
+                principal_delta=Decimal("381720"),
+                resulting_principal=Decimal("1031720"),
+                source="fixture",
+            ),
+            LiabilityPrincipalEvent(
+                id="margin-2026-09-04",
+                liability_id="margin",
+                effective_date=date(2026, 9, 4),
+                sequence=10,
+                event_type=LiabilityPrincipalEventType.INCREASE,
+                principal_delta=Decimal("59160"),
+                resulting_principal=Decimal("1090880"),
+                source="fixture",
+            ),
+            LiabilityPrincipalEvent(
+                id="margin-2026-08-11",
+                liability_id="margin",
+                effective_date=date(2026, 8, 11),
+                sequence=10,
+                event_type=LiabilityPrincipalEventType.INCREASE,
+                principal_delta=Decimal("55000"),
+                resulting_principal=Decimal("650000"),
+                source="fixture",
+            ),
+        ]
+    )
+    engine = MarketDataEngine(
+        (
+            StaticProvider(
+                Market.TWSE,
+                "twse-test",
+                [{"Date": source_date, "Code": "2330", "ClosingPrice": "200000"}],
+            ),
+        ),
+        holdings,
+        liabilities,
+        SQLiteMarketDataUnitOfWork(connection),
+        liability_principal_events=principal_events,
+    )
+
+    result = engine.preview(valuation_date)
+
+    assert result.summary.total_liabilities == expected_principal
+    assert result.summary.net_asset_value == Decimal("2000000") - expected_principal
 
 
 def test_engine_fails_before_persistence_when_requested_symbol_is_missing(

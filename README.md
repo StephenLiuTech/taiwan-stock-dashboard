@@ -498,6 +498,24 @@ python -m pams fx backfill --pair USD/TWD --from 2026-06-26 --to 2026-08-04 --dr
 python -m pams fx backfill --pair USD/TWD --from 2026-06-26 --to 2026-08-04 --apply
 ```
 
+### Historical Stock Net Equity import
+
+The controlled `股票歷史資產.xlsx` workbook is imported into a separate schema-v14 history
+table. Omit both mode flags (or pass `--dry-run`) to preview; only `--apply`
+writes insert-only rows. The accepted history begins on 2023-08-07.
+
+```powershell
+python -m pams stock-net-equity import --source 股票歷史資產.xlsx
+python -m pams stock-net-equity import --source 股票歷史資產.xlsx --apply
+```
+
+From 2026-01-06 through 2026-07-20, the importer takes total market value from
+the workbook's `資產趨勢` H column and replaces modeled debt with principal-event
+ledger balances effective on each date. It marks the rebuilt values `VERIFIED`
+only when both liability histories prove a zero-based opening and reconcile at
+every replayed event. `UNKNOWN` dates are chart gaps, and imported history never
+overwrites aggregate snapshots.
+
 The Alpha Vantage adapter makes one compact `FX_DAILY` request when it covers
 the requested range and one bounded full-series fallback only when necessary.
 Only actual provider observations inside the range are considered. Apply runs

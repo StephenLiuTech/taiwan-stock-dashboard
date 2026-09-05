@@ -86,6 +86,19 @@ class PortfolioService:
         )
 
     @staticmethod
+    def calculate_complete_daily_profit_loss(
+        positions: list[PositionSnapshot],
+    ) -> Decimal | None:
+        """Aggregate daily P/L only when every persisted movement is complete."""
+        if not positions or any(
+            position.daily_return is None for position in positions
+        ):
+            return None
+        return sum(
+            (position.daily_value_change for position in positions), Decimal("0")
+        )
+
+    @staticmethod
     def calculate_daily_performance(
         positions: list[PositionSnapshot],
     ) -> DailyPortfolioPerformance:

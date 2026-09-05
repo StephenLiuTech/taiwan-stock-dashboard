@@ -110,6 +110,7 @@ def test_schema_initialization_creates_market_data_version(
     assert "financing_type" in transaction_columns
     assert {"financed_symbol", "financed_quantity"} <= liability_columns
     assert "liability_principal_events" in tables
+    assert "stock_net_equity_history" in tables
     assert {
         "price_quotes",
         "daily_snapshots",
@@ -214,7 +215,7 @@ def test_sqlite_schema_10_to_11_preserves_existing_rows() -> None:
 
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 13
+        == 14
     )
     assert tuple(connection.execute("SELECT * FROM preserved").fetchone()) == (
         "one",
@@ -267,7 +268,7 @@ def test_sqlite_schema_11_to_12_backfills_valuation_provenance() -> None:
     assert row["unrealized_pnl"] == "123"
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 13
+        == 14
     )
     columns = {
         item[1]: item[3]
@@ -316,7 +317,7 @@ def test_sqlite_schema_12_to_13_preserves_rows_and_adds_empty_provenance() -> No
 
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 13
+        == 14
     )
     assert tuple(connection.execute("SELECT * FROM preserved").fetchone()) == (
         "one",

@@ -12,6 +12,7 @@ from domain import (
     Dividend,
     DividendEvent,
     FxRate,
+    HistoricalStockNetEquity,
     Holding,
     InvestmentCostEvent,
     Liability,
@@ -21,6 +22,13 @@ from domain import (
     Transaction,
     WatchlistItem,
 )
+
+
+class StockNetEquityHistoryRepository(Protocol):
+    def list_between_dates(
+        self, start: date, end: date
+    ) -> list[HistoricalStockNetEquity]: ...
+    def insert_many_if_absent(self, rows: list[HistoricalStockNetEquity]) -> int: ...
 
 
 class LiabilityPrincipalEventRepository(Protocol):
@@ -139,6 +147,7 @@ class SnapshotRepository(Protocol):
     def get_latest(self) -> DailySnapshot | None: ...
     def get_latest_on_or_before(self, snapshot_date: date) -> DailySnapshot | None: ...
     def get_highest(self) -> DailySnapshot | None: ...
+    def get_highest_before(self, snapshot_date: date) -> DailySnapshot | None: ...
     def list_between_dates(self, start: date, end: date) -> list[DailySnapshot]: ...
     def add(self, snapshot: DailySnapshot) -> None: ...
     def replace(self, snapshot: DailySnapshot) -> None: ...
@@ -184,6 +193,7 @@ class PositionSnapshotRepository(Protocol):
 
     def add_many(self, snapshots: list[PositionSnapshot]) -> None: ...
     def list_by_date(self, snapshot_date: date) -> list[PositionSnapshot]: ...
+    def list_between_dates(self, start: date, end: date) -> list[PositionSnapshot]: ...
     def get_latest_date(self) -> date | None: ...
     def replace_many(
         self, snapshot_date: date, snapshots: list[PositionSnapshot]
@@ -218,6 +228,12 @@ class MarketDataUnitOfWork(Protocol):
     fx_rates: FxRateRepository
     daily_snapshots: SnapshotRepository
     position_snapshots: PositionSnapshotRepository
+
+    def transaction(self) -> AbstractContextManager[None]: ...
+
+
+class StockNetEquityHistoryUnitOfWork(Protocol):
+    history: StockNetEquityHistoryRepository
 
     def transaction(self) -> AbstractContextManager[None]: ...
 

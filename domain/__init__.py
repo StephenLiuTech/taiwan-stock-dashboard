@@ -75,6 +75,10 @@ from domain.report_sections import (
     WatchlistSection,
     WatchlistView,
 )
+from domain.stock_net_equity import (
+    HistoricalStockNetEquity,
+    StockNetEquityQuality,
+)
 from domain.valuation import HoldingValuation, PortfolioValuation
 
 __all__ = [
@@ -102,6 +106,7 @@ __all__ = [
     "Holding",
     "HoldingType",
     "HoldingValuation",
+    "HistoricalStockNetEquity",
     "Liability",
     "LiabilityType",
     "LiabilityPrincipalEventType",
@@ -130,6 +135,7 @@ __all__ = [
     "RiskItem",
     "RiskMonitorSection",
     "StockPledgeSection",
+    "StockNetEquityQuality",
     "Transaction",
     "TransactionPosition",
     "TransactionExpenseSummary",

@@ -3,6 +3,7 @@
 import json
 import re
 import smtplib
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
@@ -20,10 +21,12 @@ from domain import (
     DailySnapshot,
     DividendCalendarItem,
     DividendCalendarSection,
+    HistoricalStockNetEquity,
     Holding,
     Market,
     PositionSnapshot,
     RealizedPnlBySymbol,
+    StockNetEquityQuality,
 )
 from market_calendar import MarketAvailability, MarketCalendarUnavailableError
 from market_data import ProviderDataError
@@ -35,9 +38,23 @@ from pams.application import (
     DailyReportValuationIncompleteError,
     SendDailyReportUseCase,
 )
-from pams.application.send_daily_report import EmailEnvelope, InlineImage
+from pams.application.send_daily_report import (
+    STOCK_NET_EQUITY_HISTORY_START,
+    DailyEmailHistoryPoint,
+    EmailEnvelope,
+    InlineImage,
+    StockNetEquityHistoryPoint,
+)
 from pams.delivery import DailyEmailReportRenderer, SMTPEmailTransport
-from pams.delivery.rendering import PORTFOLIO_TREND_SERIES, _monday_ticks
+from pams.delivery.rendering import (
+    DAILY_PNL_LOSS_BAR,
+    DAILY_PNL_PROFIT_BAR,
+    PORTFOLIO_TREND_SERIES,
+    _daily_pnl_bar_specs,
+    _long_range_ticks,
+    _monday_ticks,
+    _net_equity_chart_segments,
+)
 
 
 def snapshot(
@@ -145,8 +162,10 @@ class PositionStub:
         self.values = values if values is not None else positions()
 
     def list_by_date(self, report_date: date) -> list[PositionSnapshot]:
-        assert all(item.snapshot_date == report_date for item in self.values)
-        return self.values
+        return [item for item in self.values if item.snapshot_date == report_date]
+
+    def list_between_dates(self, start: date, end: date) -> list[PositionSnapshot]:
+        return [item for item in self.values if start <= item.snapshot_date <= end]
 
 
 class HoldingStub:
@@ -171,6 +190,16 @@ class HoldingStub:
                 average_cost=Decimal("100"),
             ),
         ]
+
+
+class StockNetEquityHistoryStub:
+    def __init__(self, values: list[HistoricalStockNetEquity]) -> None:
+        self.values = values
+
+    def list_between_dates(
+        self, start: date, end: date
+    ) -> list[HistoricalStockNetEquity]:
+        return [item for item in self.values if start <= item.snapshot_date <= end]
 
 
 class DeliveryStub:
@@ -233,6 +262,8 @@ def use_case(
     history: list[DailySnapshot] | None = None,
     position_values: list[PositionSnapshot] | None = None,
     asset_store: AssetStoreStub | None = None,
+    stock_history: list[HistoricalStockNetEquity] | None = None,
+    is_non_trading_day: Callable[[date], bool] | None = None,
 ) -> tuple[SendDailyReportUseCase, UpdateStub, DeliveryStub, TransportStub]:
     update = UpdateStub()
     deliveries = delivery or DeliveryStub()
@@ -249,6 +280,8 @@ def use_case(
             "sender@example.com",
             "recipient@example.com",
             asset_store,
+            stock_net_equity_history=StockNetEquityHistoryStub(stock_history or []),
+            is_non_trading_day=is_non_trading_day,
         ),
         update,
         deliveries,
@@ -313,6 +346,14 @@ def live_date_case(
         def list_by_date(self, report_date: date) -> list[PositionSnapshot]:
             return [
                 value.model_copy(update={"snapshot_date": report_date})
+                for value in positions()
+            ]
+
+        def list_between_dates(self, start: date, end: date) -> list[PositionSnapshot]:
+            return [
+                value.model_copy(update={"snapshot_date": report_date})
+                for report_date in sorted(snapshots_by_date)
+                if start <= report_date <= end
                 for value in positions()
             ]
 
@@ -1163,17 +1204,23 @@ def test_multiple_snapshots_create_embedded_png_and_readable_text_history() -> N
 
     message = transport.messages[0]
     assert 'src="cid:pams-asset-change-chart"' in message.html
-    assert len(message.inline_images) == 1
-    assert message.inline_images[0].content.startswith(b"\x89PNG\r\n\x1a\n")
-    with Image.open(BytesIO(message.inline_images[0].content)) as chart:
-        assert chart.format == "PNG"
-        assert chart.size == (1200, 650)
+    assert 'src="cid:pams-stock-net-equity-trend-chart"' in message.html
+    assert len(message.inline_images) == 2
+    for inline_image in message.inline_images:
+        assert inline_image.content.startswith(b"\x89PNG\r\n\x1a\n")
+        with Image.open(BytesIO(inline_image.content)) as chart:
+            assert chart.format == "PNG"
+            assert chart.size == (1200, 650)
     assert "2026-07-20 to 2026-07-22 (3 available snapshots)" in message.plain_text
-    assert "2026-07-21 | NT$1,100 | NT$1,000" in message.plain_text
+    assert "2026-07-21 | NT$1,100 | N/A" in message.plain_text
+    assert "2026-07-21 | NT$1,000" in message.plain_text
 
 
-def test_portfolio_trend_chart_uses_one_marked_series_and_monday_ticks() -> None:
-    assert PORTFOLIO_TREND_SERIES == ("Total stock market value",)
+def test_portfolio_trend_chart_uses_market_line_absolute_pnl_bars_and_mondays() -> None:
+    assert PORTFOLIO_TREND_SERIES == (
+        "Total stock market value",
+        "Daily P/L",
+    )
     assert _monday_ticks(date(2026, 7, 24), date(2026, 8, 28)) == (
         date(2026, 7, 27),
         date(2026, 8, 3),
@@ -1193,30 +1240,385 @@ def test_portfolio_trend_chart_uses_one_marked_series_and_monday_ticks() -> None
     ]
     case, _, _, _ = use_case(value=snapshot())
     report = replace(
-        case._build_report(snapshot(), date(2026, 7, 22)), history=tuple(history)
+        case._build_report(snapshot(), date(2026, 7, 22)),
+        history=tuple(
+            DailyEmailHistoryPoint(
+                snapshot_date=item.snapshot_date,
+                total_market_value=item.total_market_value,
+                net_asset_value=item.net_asset_value,
+            )
+            for item in history
+        ),
     )
     message = DailyEmailReportRenderer().render(report)
     trend_text = message.plain_text.split("Portfolio Trend\n", 1)[1].split(
         "\n\nToday's Contributors", 1
     )[0]
-    assert "Date | Total stock market value | Net stock equity" in trend_text
+    assert "Date | Total stock market value | Daily P/L" in trend_text
+    assert "Net stock equity" not in trend_text
     assert "Total P/L YTD" not in trend_text
     assert "Realized P/L YTD" not in trend_text
     assert "Unrealized P/L" not in trend_text
     assert "Dividend Income YTD" not in trend_text
-    trend_image = message.html.split('alt="30-day total stock market value chart"', 1)[
-        1
-    ].split(">", 1)[0]
-    assert 'data-chart-type="line"' in trend_image
+    trend_image = message.html.split(
+        'alt="30-day total stock market value and daily profit or loss chart"', 1
+    )[1].split(">", 1)[0]
+    assert 'data-chart-type="mixed-line-bar"' in trend_image
     assert 'data-internal-title="none"' in trend_image
     assert 'data-point-markers="visible"' in trend_image
     assert 'data-primary-axis="Total stock market value"' in trend_image
-    assert "data-secondary-axis" not in trend_image
-    assert 'data-series-count="1"' in trend_image
+    assert "Net stock equity" not in trend_image
+    assert 'data-secondary-axis="Daily P/L absolute amount"' in trend_image
+    assert 'data-secondary-axis-range="nonnegative"' in trend_image
+    assert 'data-daily-pnl-baseline="zero"' in trend_image
+    assert 'data-daily-pnl-height="absolute"' in trend_image
+    assert 'data-daily-pnl-colors="profit:red,loss:green,zero:neutral"' in trend_image
+    assert 'data-layer-order="daily-pnl-bars,portfolio-lines"' in trend_image
+    assert 'data-series-count="2"' in trend_image
     assert 'data-horizontal-gridlines="visible"' in trend_image
     assert 'data-vertical-gridlines="monday"' in trend_image
     assert 'data-observation-count="7"' in trend_image
     assert 'data-x-axis-ticks="07-27,08-03,08-10,08-17,08-24"' in trend_image
+
+
+def test_daily_pnl_bars_use_absolute_height_sign_color_and_skip_null() -> None:
+    history = (
+        DailyEmailHistoryPoint(
+            date(2026, 7, 20),
+            Decimal("1000"),
+            Decimal("900"),
+            daily_profit_loss=Decimal("40"),
+        ),
+        DailyEmailHistoryPoint(
+            date(2026, 7, 21),
+            Decimal("1100"),
+            Decimal("1000"),
+            daily_profit_loss=Decimal("-35"),
+        ),
+        DailyEmailHistoryPoint(
+            date(2026, 7, 22),
+            Decimal("1200"),
+            Decimal("1100"),
+            daily_profit_loss=None,
+        ),
+    )
+
+    assert _daily_pnl_bar_specs(history) == (
+        (date(2026, 7, 20), Decimal("40"), DAILY_PNL_PROFIT_BAR),
+        (date(2026, 7, 21), Decimal("35"), DAILY_PNL_LOSS_BAR),
+    )
+    assert history[1].daily_profit_loss == Decimal("-35")
+
+
+def test_stock_net_equity_trend_preserves_missing_history_without_zero_fill() -> None:
+    case, _, _, _ = use_case(value=snapshot())
+    report = replace(
+        case._build_report(snapshot(), date(2026, 7, 22)),
+        history=(
+            DailyEmailHistoryPoint(date(2026, 7, 20), Decimal("1000"), Decimal("900")),
+            DailyEmailHistoryPoint(date(2026, 7, 21), Decimal("1100"), None),
+            DailyEmailHistoryPoint(date(2026, 7, 22), Decimal("1200"), Decimal("1050")),
+        ),
+        net_equity_history=(
+            StockNetEquityHistoryPoint(date(2022, 5, 5), Decimal("900")),
+            StockNetEquityHistoryPoint(date(2022, 5, 6), None),
+            StockNetEquityHistoryPoint(date(2026, 7, 22), Decimal("1050")),
+        ),
+    )
+
+    message = DailyEmailReportRenderer().render(report)
+    net_equity_image = message.html.split('alt="Stock Net Equity Trend"', 1)[1].split(
+        ">", 1
+    )[0]
+
+    assert 'data-history-start="2022-05-05"' in net_equity_image
+    assert 'data-history-end="2026-07-22"' in net_equity_image
+    assert 'data-missing-count="1"' in net_equity_image
+    assert 'data-observation-count="2"' in net_equity_image
+    assert 'data-series="Stock Net Equity"' in net_equity_image
+    assert 'data-series-count="1"' in net_equity_image
+    assert "cash" not in net_equity_image.lower()
+    assert "invested capital" not in net_equity_image.lower()
+
+
+def test_stock_net_equity_trend_exposes_quality_styles_and_unknown_gap() -> None:
+    case, _, _, _ = use_case(value=snapshot())
+    report = replace(
+        case._build_report(snapshot(), date(2026, 7, 22)),
+        net_equity_history=(
+            StockNetEquityHistoryPoint(
+                date(2023, 8, 7), Decimal("100"), StockNetEquityQuality.VERIFIED
+            ),
+            StockNetEquityHistoryPoint(
+                date(2023, 8, 8),
+                Decimal("101"),
+                StockNetEquityQuality.ESTIMATED_LIABILITY,
+            ),
+            StockNetEquityHistoryPoint(
+                date(2023, 8, 9), None, StockNetEquityQuality.UNKNOWN
+            ),
+        ),
+    )
+
+    rendered = DailyEmailReportRenderer().render(report)
+
+    assert "VERIFIED:blue-solid" in rendered.html
+    assert "ESTIMATED_LIABILITY:orange-dashed" in rendered.html
+    assert "UNKNOWN:gap" in rendered.html
+
+
+def test_stock_net_equity_trend_omits_estimated_series_when_none_exist() -> None:
+    case, _, _, _ = use_case(value=snapshot())
+    report = replace(
+        case._build_report(snapshot(), date(2026, 7, 22)),
+        net_equity_history=(
+            StockNetEquityHistoryPoint(
+                date(2023, 8, 7), Decimal("100"), StockNetEquityQuality.VERIFIED
+            ),
+            StockNetEquityHistoryPoint(
+                date(2023, 8, 8), Decimal("101"), StockNetEquityQuality.VERIFIED
+            ),
+        ),
+    )
+
+    rendered = DailyEmailReportRenderer().render(report)
+    chart = rendered.html.split('alt="Stock Net Equity Trend"', 1)[1].split(">", 1)[0]
+
+    assert 'data-series="Stock Net Equity"' in chart
+    assert 'data-series-count="1"' in chart
+    assert "Verified,Estimated Liability" not in chart
+
+
+def test_stock_net_equity_weekend_missing_row_does_not_break_line() -> None:
+    history = (
+        StockNetEquityHistoryPoint(date(2026, 8, 7), Decimal("100")),
+        StockNetEquityHistoryPoint(
+            date(2026, 8, 8), None, None, is_expected_market_closure=True
+        ),
+        StockNetEquityHistoryPoint(
+            date(2026, 8, 9), None, None, is_expected_market_closure=True
+        ),
+        StockNetEquityHistoryPoint(date(2026, 8, 10), Decimal("102")),
+    )
+
+    segments = _net_equity_chart_segments(history)
+
+    assert [[point.snapshot_date for point in segment] for _, segment in segments] == [
+        [date(2026, 8, 7), date(2026, 8, 10)]
+    ]
+
+
+def test_stock_net_equity_confirmed_holiday_missing_row_does_not_break_line() -> None:
+    history = (
+        StockNetEquityHistoryPoint(date(2026, 2, 27), Decimal("100")),
+        StockNetEquityHistoryPoint(
+            date(2026, 3, 2), None, None, is_expected_market_closure=True
+        ),
+        StockNetEquityHistoryPoint(date(2026, 3, 3), Decimal("103")),
+    )
+
+    segments = _net_equity_chart_segments(history)
+
+    assert [[point.snapshot_date for point in segment] for _, segment in segments] == [
+        [date(2026, 2, 27), date(2026, 3, 3)]
+    ]
+
+
+@pytest.mark.parametrize(
+    "gap",
+    [
+        StockNetEquityHistoryPoint(
+            date(2026, 8, 10), None, StockNetEquityQuality.UNKNOWN
+        ),
+        StockNetEquityHistoryPoint(date(2026, 8, 11), None, None),
+    ],
+)
+def test_stock_net_equity_unknown_or_unexplained_trading_gap_breaks_line(
+    gap: StockNetEquityHistoryPoint,
+) -> None:
+    history = (
+        StockNetEquityHistoryPoint(
+            gap.snapshot_date.replace(day=gap.snapshot_date.day - 1), Decimal("100")
+        ),
+        gap,
+        StockNetEquityHistoryPoint(
+            gap.snapshot_date.replace(day=gap.snapshot_date.day + 1), Decimal("102")
+        ),
+    )
+
+    segments = _net_equity_chart_segments(history)
+
+    assert len(segments) == 2
+    assert all(len(segment) == 1 for _, segment in segments)
+
+
+def test_qualified_production_snapshot_has_priority_but_unknown_is_preserved() -> None:
+    imported = [
+        HistoricalStockNetEquity(
+            snapshot_date=date(2026, 7, 21),
+            total_market_value=Decimal("1000"),
+            pledge_debt=Decimal("0"),
+            margin_debt=Decimal("0"),
+            total_liabilities=Decimal("0"),
+            stock_net_equity=Decimal("800"),
+            quality_status=StockNetEquityQuality.ESTIMATED_LIABILITY,
+            source="fixture",
+            source_reference="fixture:estimated",
+        ),
+        HistoricalStockNetEquity(
+            snapshot_date=date(2026, 7, 22),
+            stock_net_equity=Decimal("999"),
+            quality_status=StockNetEquityQuality.UNKNOWN,
+            source="fixture",
+            source_reference="fixture:mismatch",
+        ),
+    ]
+    history = [
+        snapshot(date(2026, 7, 21), net_asset_value="900"),
+        snapshot(date(2026, 7, 22), net_asset_value="1100"),
+    ]
+    case, _, _, _ = use_case(value=history[-1], history=history, stock_history=imported)
+
+    report = case._build_report(history[-1], date(2026, 7, 22))
+    by_date = {item.snapshot_date: item for item in report.net_equity_history}
+
+    assert by_date[date(2026, 7, 21)].net_asset_value == Decimal("900")
+    assert by_date[date(2026, 7, 21)].quality_status is StockNetEquityQuality.VERIFIED
+    assert by_date[date(2026, 7, 22)].quality_status is StockNetEquityQuality.UNKNOWN
+
+
+def test_stock_net_equity_history_uses_fixed_cross_year_range_and_report_end() -> None:
+    report_date = date(2026, 7, 22)
+    history = [
+        snapshot(date(2023, 12, 29), net_asset_value="800"),
+        snapshot(date(2025, 1, 2), net_asset_value="900"),
+        snapshot(report_date, net_asset_value="1100"),
+    ]
+    case, _, _, _ = use_case(value=history[-1], history=history)
+
+    report = case._build_report(history[-1], report_date)
+    available = {
+        item.snapshot_date: item.net_asset_value
+        for item in report.net_equity_history
+        if item.net_asset_value is not None
+    }
+
+    assert report.net_equity_history[0].snapshot_date == STOCK_NET_EQUITY_HISTORY_START
+    assert report.net_equity_history[-1].snapshot_date == report_date
+    missing = next(
+        item
+        for item in report.net_equity_history
+        if item.snapshot_date == date(2023, 12, 30)
+    )
+    assert missing.net_asset_value is None
+    assert missing.quality_status is None
+    assert missing.is_expected_market_closure is True
+    assert available == {
+        date(2023, 12, 29): Decimal("800"),
+        date(2025, 1, 2): Decimal("900"),
+        report_date: Decimal("1100"),
+    }
+    assert _long_range_ticks(STOCK_NET_EQUITY_HISTORY_START, report_date) == (
+        (date(2023, 8, 7), "2023-08-07"),
+        (date(2024, 1, 1), "2024"),
+        (date(2025, 1, 1), "2025"),
+        (date(2026, 1, 1), "2026"),
+    )
+
+
+def test_stock_net_equity_trend_is_the_final_email_section() -> None:
+    history = [snapshot(date(2026, 7, 21)), snapshot()]
+    case, _, _, _ = use_case(value=snapshot(), history=history)
+
+    rendered = DailyEmailReportRenderer().render(
+        case._build_report(snapshot(), date(2026, 7, 22))
+    )
+
+    heading = '<h2 style="font-size:18px;margin-top:24px">Stock Net Equity Trend</h2>'
+    assert rendered.html.rfind("<h2") == rendered.html.index(heading)
+    assert rendered.plain_text.rstrip().endswith("2026-07-22 | NT$1,100 | VERIFIED")
+
+
+def test_portfolio_trend_uses_persisted_position_daily_pnl_and_preserves_null() -> None:
+    dates = (date(2026, 7, 20), date(2026, 7, 21), date(2026, 7, 22))
+    history = [
+        snapshot(dates[0], market_value="1000", net_asset_value="900"),
+        snapshot(dates[1], market_value="1100", net_asset_value="1000"),
+        snapshot(dates[2], market_value="1200", net_asset_value="1100"),
+    ]
+    historical_positions = [
+        positions()[0].model_copy(
+            update={
+                "snapshot_date": dates[0],
+                "daily_value_change": Decimal("25"),
+                "daily_return": Decimal("0.025"),
+            }
+        ),
+        positions()[1].model_copy(
+            update={
+                "snapshot_date": dates[0],
+                "daily_value_change": Decimal("15"),
+                "daily_return": Decimal("0.075"),
+            }
+        ),
+        positions()[0].model_copy(
+            update={
+                "snapshot_date": dates[1],
+                "daily_value_change": Decimal("-30"),
+                "daily_return": Decimal("-0.03"),
+            }
+        ),
+        positions()[1].model_copy(
+            update={
+                "snapshot_date": dates[1],
+                "daily_value_change": Decimal("-5"),
+                "daily_return": Decimal("-0.025"),
+            }
+        ),
+        positions()[0].model_copy(
+            update={
+                "snapshot_date": dates[2],
+                "daily_value_change": Decimal("0"),
+                "daily_return": None,
+            }
+        ),
+        positions()[1].model_copy(
+            update={
+                "snapshot_date": dates[2],
+                "daily_value_change": Decimal("0"),
+                "daily_return": Decimal("0"),
+            }
+        ),
+    ]
+    case, _, _, _ = use_case(
+        value=history[-1], history=history, position_values=historical_positions
+    )
+
+    report = case._build_report(history[-1], dates[-1])
+    message = DailyEmailReportRenderer().render(report)
+
+    assert [item.total_market_value for item in report.history] == [
+        Decimal("1000"),
+        Decimal("1100"),
+        Decimal("1200"),
+    ]
+    assert [item.net_asset_value for item in report.history] == [
+        Decimal("900"),
+        Decimal("1000"),
+        Decimal("1100"),
+    ]
+    assert [item.daily_profit_loss for item in report.history] == [
+        Decimal("40"),
+        Decimal("-35"),
+        None,
+    ]
+    assert 'data-daily-pnl-values="40,-35,null"' in message.html
+    assert "2026-07-20 | NT$1,000 | +NT$40" in message.plain_text
+    assert "2026-07-21 | NT$1,100 | -NT$35" in message.plain_text
+    assert "2026-07-22 | NT$1,200 | N/A" in message.plain_text
+    assert "2026-07-20 | NT$900" in message.plain_text
+    assert "2026-07-21 | NT$1,000" in message.plain_text
+    assert "2026-07-22 | NT$1,100" in message.plain_text
 
 
 def test_resend_asset_flow_publishes_png_and_uses_https_without_attachment() -> None:
@@ -1231,16 +1633,19 @@ def test_resend_asset_flow_publishes_png_and_uses_https_without_attachment() -> 
 
     case.execute(date(2026, 7, 22))
 
-    assert len(store.calls) == 1
-    content, content_type, object_name = store.calls[0]
-    assert content.startswith(b"\x89PNG\r\n\x1a\n")
-    assert content_type == "image/png"
-    assert object_name == "daily-report/2026-07-22/asset-change.png"
+    assert len(store.calls) == 2
+    assert all(call[0].startswith(b"\x89PNG\r\n\x1a\n") for call in store.calls)
+    assert all(call[1] == "image/png" for call in store.calls)
+    assert [call[2] for call in store.calls] == [
+        "daily-report/2026-07-22/asset-change.png",
+        "daily-report/2026-07-22/pams-stock-net-equity-trend.png",
+    ]
     message = transport.messages[0]
     assert f'src="{store.url}"' in message.html
     assert "cid:" not in message.html
     assert message.inline_images == ()
-    assert "2026-07-21 | NT$1,100 | NT$1,000" in message.plain_text
+    assert "2026-07-21 | NT$1,100 | N/A" in message.plain_text
+    assert "2026-07-21 | NT$1,000" in message.plain_text
 
 
 def test_forced_resend_upserts_the_same_date_object_path() -> None:
@@ -1260,7 +1665,9 @@ def test_forced_resend_upserts_the_same_date_object_path() -> None:
 
     assert [call[2] for call in store.calls] == [
         "daily-report/2026-07-22/asset-change.png",
+        "daily-report/2026-07-22/pams-stock-net-equity-trend.png",
         "daily-report/2026-07-22/asset-change.png",
+        "daily-report/2026-07-22/pams-stock-net-equity-trend.png",
     ]
     assert len(transport.messages) == 2
 
@@ -1307,7 +1714,7 @@ def test_fewer_than_thirty_snapshots_are_rendered_without_padding() -> None:
     case.execute(date(2026, 7, 22))
 
     assert "(2 available snapshots)" in transport.messages[0].plain_text
-    assert len(transport.messages[0].inline_images) == 1
+    assert len(transport.messages[0].inline_images) == 2
 
 
 def test_history_is_limited_to_most_recent_thirty_snapshots() -> None:
@@ -1332,9 +1739,12 @@ def test_history_is_limited_to_most_recent_thirty_snapshots() -> None:
     case.execute(date(2026, 7, 22))
 
     text = transport.messages[0].plain_text
-    assert "(30 available snapshots)" in text
-    assert "2026-06-19 |" not in text
-    assert "2026-06-23 |" in text
+    portfolio_trend_text = text.split("Portfolio Trend\n", 1)[1].split(
+        "\n\nToday's Contributors", 1
+    )[0]
+    assert "(30 available snapshots)" in portfolio_trend_text
+    assert "2026-06-19 |" not in portfolio_trend_text
+    assert "2026-06-23 |" in portfolio_trend_text
 
 
 def test_one_snapshot_uses_clear_chart_fallback_without_attachment() -> None:

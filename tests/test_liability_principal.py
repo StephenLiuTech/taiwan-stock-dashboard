@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -292,3 +293,43 @@ def test_liability_history_and_principal_cli(
     output = capsys.readouterr().out
     assert "pledge" in output
     assert "Count: 6" in output
+
+
+def test_missing_margin_events_are_idempotent_and_effective_date_bounded(
+    connection: sqlite3.Connection,
+) -> None:
+    repository = SQLiteLiabilityPrincipalEventRepository(connection)
+    events = [
+        LiabilityPrincipalEvent(
+            id="principal-liability-margin-financing-2026-08-31-010",
+            liability_id=MARGIN_ID,
+            effective_date=date(2026, 8, 31),
+            sequence=10,
+            event_type=LiabilityPrincipalEventType.INCREASE,
+            principal_delta=Decimal("57720"),
+            resulting_principal=Decimal("57720"),
+            source="approved correction",
+            reference="3ff94121-69ea-4f8c-b8db-2d0b874286d0",
+        ),
+        LiabilityPrincipalEvent(
+            id="principal-liability-margin-financing-2026-09-04-010",
+            liability_id=MARGIN_ID,
+            effective_date=date(2026, 9, 4),
+            sequence=10,
+            event_type=LiabilityPrincipalEventType.INCREASE,
+            principal_delta=Decimal("59160"),
+            resulting_principal=Decimal("116880"),
+            source="approved correction",
+            reference="b9d01371-8eca-417b-98c5-f687c097bbb8",
+        ),
+    ]
+
+    assert repository.insert_many_if_absent(events) == 2
+    assert repository.insert_many_if_absent(events) == 0
+    engine = LiabilityPrincipalEngine()
+    assert engine.principal_as_of(repository.list_all(), date(2026, 9, 3)) == Decimal(
+        "57720"
+    )
+    assert engine.principal_as_of(repository.list_all(), date(2026, 9, 4)) == Decimal(
+        "116880"
+    )

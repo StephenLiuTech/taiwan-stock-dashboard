@@ -17,6 +17,7 @@
 | schema v10 | Complete locally | Replayable stock/ETF quantity conversions |
 | schema v11 | Complete locally | Replayable liability principal event ledger |
 | schema v12 | Complete locally | Calendar-day financing accrual and Annual P/L valuation provenance |
+| schema v14 | Complete locally | Isolated, quality-labelled historical Stock Net Equity import |
 
 ## v0.8.0 — Portfolio valuation and reporting
 

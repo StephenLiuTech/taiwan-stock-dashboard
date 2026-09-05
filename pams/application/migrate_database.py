@@ -22,6 +22,7 @@ MIGRATION_TABLES = (
     "annual_pnl_snapshots",
     "liability_principal_events",
     "broker_import_records",
+    "stock_net_equity_history",
     "schema_version",
 )
 

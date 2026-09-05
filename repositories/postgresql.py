@@ -15,9 +15,14 @@ from repositories.sqlite import (
     SQLitePriceQuoteRepository,
     SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
+    SQLiteStockNetEquityHistoryRepository,
     SQLiteTransactionRepository,
     SQLiteWatchlistRepository,
 )
+
+
+class PostgreSQLStockNetEquityHistoryRepository(SQLiteStockNetEquityHistoryRepository):
+    """Persist isolated Stock Net Equity history in PostgreSQL."""
 
 
 class PostgreSQLLiabilityPrincipalEventRepository(

@@ -22,6 +22,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 TABLES = (
+    "stock_net_equity_history",
     "report_deliveries",
     "position_snapshots",
     "daily_snapshots",

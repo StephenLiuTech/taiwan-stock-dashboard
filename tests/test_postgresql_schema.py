@@ -159,8 +159,22 @@ def test_postgresql_schema_upgrade_rolls_back_on_failure() -> None:
     assert connection.rollbacks == 1
 
 
+def test_schema_13_to_14_adds_only_stock_net_equity_history() -> None:
+    connection = PostgreSQLConnectionStub(13)
+
+    initialize_postgresql_schema(connection)  # type: ignore[arg-type]
+
+    sql = [statement for statement, _ in connection.statements]
+    assert any(
+        "CREATE TABLE IF NOT EXISTS stock_net_equity_history" in item for item in sql
+    )
+    assert any("ix_stock_net_equity_history_quality_date" in item for item in sql)
+    assert any(parameters == (14,) for _, parameters in connection.statements)
+    assert connection.commits == 1
+
+
 def test_newer_postgresql_schema_is_rejected_without_commit() -> None:
-    connection = PostgreSQLConnectionStub(14)
+    connection = PostgreSQLConnectionStub(15)
 
     with pytest.raises(RuntimeError, match="newer than supported"):
         initialize_postgresql_schema(connection)  # type: ignore[arg-type]

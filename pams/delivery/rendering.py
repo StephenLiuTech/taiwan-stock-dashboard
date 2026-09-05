@@ -7,7 +7,7 @@ from io import BytesIO
 
 from PIL import Image, ImageDraw, ImageFont
 
-from domain import Currency, Market
+from domain import Currency, Market, StockNetEquityQuality
 from pams.application.send_daily_report import (
     ChartSource,
     DailyEmailHistoryPoint,
@@ -15,6 +15,7 @@ from pams.application.send_daily_report import (
     DailyEmailReport,
     InlineImage,
     RenderedEmail,
+    StockNetEquityHistoryPoint,
 )
 from pams.delivery.formatting import (
     format_compact_decimal,
@@ -32,15 +33,23 @@ from pams.delivery.sections import DailyReportSectionRenderer
 
 CHART_CONTENT_ID = "pams-asset-change-chart"
 CHART_FILENAME = "pams-30-day-asset-change.png"
+NET_EQUITY_CHART_CONTENT_ID = "pams-stock-net-equity-trend-chart"
+NET_EQUITY_CHART_FILENAME = "pams-stock-net-equity-trend.png"
 ANNUAL_CHART_CONTENT_ID = "pams-realized-total-pnl-ytd-chart"
 ANNUAL_CHART_FILENAME = "pams-realized-total-pnl-ytd.png"
-PORTFOLIO_TREND_SERIES = ("Total stock market value",)
+PORTFOLIO_TREND_SERIES = (
+    "Total stock market value",
+    "Daily P/L",
+)
 CHART_FALLBACK = (
     "Only one portfolio snapshot is available; "
     "a trend chart requires at least two snapshots."
 )
 POSITIVE_COLOR = TAIWAN_GAIN_COLOR
 NEGATIVE_COLOR = TAIWAN_LOSS_COLOR
+DAILY_PNL_PROFIT_BAR = (220, 38, 38, 105)
+DAILY_PNL_LOSS_BAR = (22, 163, 74, 105)
+DAILY_PNL_NEUTRAL_BAR = (107, 114, 128, 105)
 
 
 def _money(value: Decimal | None, *, signed: bool = False) -> str:
@@ -77,12 +86,37 @@ def _history_text(history: tuple[DailyEmailHistoryPoint, ...]) -> list[str]:
             f"Period: {history[0].snapshot_date} to {history[-1].snapshot_date} "
             f"({len(history)} available snapshots)"
         ),
-        "Date | Total stock market value | Net stock equity",
+        "Date | Total stock market value | Daily P/L",
     ]
     lines.extend(
         f"{point.snapshot_date} | {_money(point.total_market_value)} | "
-        f"{_money(point.net_asset_value)}"
+        f"{_money(point.daily_profit_loss, signed=True)}"
         for point in history
+    )
+    return lines
+
+
+def _net_equity_history_text(
+    history: tuple[StockNetEquityHistoryPoint, ...],
+) -> list[str]:
+    available = [
+        point
+        for point in history
+        if point.net_asset_value is not None
+        and point.quality_status is not StockNetEquityQuality.UNKNOWN
+    ]
+    if len(available) <= 1:
+        return [CHART_FALLBACK]
+    lines = [
+        f"Requested period: {history[0].snapshot_date} to {history[-1].snapshot_date}",
+        f"Earliest available: {available[0].snapshot_date}",
+        "Date | Stock net equity | Quality",
+    ]
+    lines.extend(
+        f"{point.snapshot_date} | {_money(point.net_asset_value)} | "
+        f"{point.quality_status.value}"
+        for point in available
+        if point.quality_status is not None
     )
     return lines
 
@@ -140,11 +174,34 @@ def _contributor_text(positions: tuple[DailyEmailPosition, ...]) -> list[str]:
     return lines
 
 
+def _daily_pnl_bar_specs(
+    history: tuple[DailyEmailHistoryPoint, ...],
+) -> tuple[tuple[date, Decimal, tuple[int, int, int, int]], ...]:
+    """Map available signed P/L to absolute-height, sign-colored bars."""
+    return tuple(
+        (
+            point.snapshot_date,
+            abs(point.daily_profit_loss),
+            (
+                DAILY_PNL_PROFIT_BAR
+                if point.daily_profit_loss > 0
+                else (
+                    DAILY_PNL_LOSS_BAR
+                    if point.daily_profit_loss < 0
+                    else DAILY_PNL_NEUTRAL_BAR
+                )
+            ),
+        )
+        for point in history
+        if point.daily_profit_loss is not None
+    )
+
+
 def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
-    """Render every market-value observation with Monday timeline ticks."""
+    """Render portfolio value lines and persisted daily P/L bars."""
     width, height = 1200, 650
-    left, top, right, bottom = 160, 82, 48, 92
-    image = Image.new("RGB", (width, height), "white")
+    left, top, right, bottom = 170, 92, 170, 92
+    image = Image.new("RGBA", (width, height), "white")
     draw = ImageDraw.Draw(image)
     legend_font = _chart_font(18)
     axis_font = _chart_font(16)
@@ -163,6 +220,9 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
         return minimum, maximum, span
 
     minimum, maximum, span = scale([point.total_market_value for point in history])
+    daily_bars = _daily_pnl_bar_specs(history)
+    daily_values = [value for _, value, _ in daily_bars]
+    daily_maximum = max([Decimal("0"), *daily_values]) or Decimal("1")
     first_date = history[0].snapshot_date
     last_date = history[-1].snapshot_date
     date_span = max((last_date - first_date).days, 1)
@@ -170,11 +230,14 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
     def x_coordinate(point_date: date) -> int:
         return left + round((point_date - first_date).days * chart_width / date_span)
 
-    def coordinates(point: DailyEmailHistoryPoint) -> tuple[int, int]:
-        x = x_coordinate(point.snapshot_date)
-        value = point.total_market_value
+    def line_coordinates(point_date: date, value: Decimal) -> tuple[int, int]:
+        x = x_coordinate(point_date)
         ratio = (value - minimum) / span
         return x, top + int(((Decimal("1") - ratio) * chart_height).to_integral_value())
+
+    def daily_y(value: Decimal) -> int:
+        ratio = abs(value) / daily_maximum
+        return top + int(((Decimal("1") - ratio) * chart_height).to_integral_value())
 
     legend_y = 40
     draw.line((left, legend_y, left + 44, legend_y), fill="#2563eb", width=7)
@@ -183,6 +246,34 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
         PORTFOLIO_TREND_SERIES[0],
         fill="#334155",
         font=legend_font,
+    )
+    pnl_legend_x = left + 410
+    draw.rectangle(
+        (pnl_legend_x, legend_y - 9, pnl_legend_x + 13, legend_y + 9),
+        fill=TAIWAN_GAIN_COLOR,
+    )
+    draw.rectangle(
+        (pnl_legend_x + 13, legend_y - 9, pnl_legend_x + 26, legend_y + 9),
+        fill=TAIWAN_LOSS_COLOR,
+    )
+    draw.text(
+        (pnl_legend_x + 40, legend_y - 11),
+        f"{PORTFOLIO_TREND_SERIES[1]} (Profit: red; Loss: green)",
+        fill="#334155",
+        font=legend_font,
+    )
+    draw.text(
+        (12, top - 34),
+        "Total Stock Market Value / TWD",
+        fill="#64748b",
+        font=axis_font,
+    )
+    right_axis_title = "Daily P/L Absolute Amount / TWD"
+    draw.text(
+        (width - 12 - draw.textlength(right_axis_title, font=axis_font), top - 34),
+        right_axis_title,
+        fill="#64748b",
+        font=axis_font,
     )
 
     for step in range(5):
@@ -193,7 +284,14 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
         draw.text(
             (12, y - 10),
             f"NT${market_value:,.0f}",
-            fill="#2563eb",
+            fill="#64748b",
+            font=axis_font,
+        )
+        daily_axis_value = daily_maximum * (Decimal("1") - ratio)
+        draw.text(
+            (width - right + 14, y - 10),
+            f"NT${daily_axis_value:,.0f}",
+            fill="#64748b",
             font=axis_font,
         )
 
@@ -210,14 +308,224 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
             font=axis_font,
         )
 
-    market_points = [coordinates(point) for point in history]
+    x_positions = [x_coordinate(point.snapshot_date) for point in history]
+    gaps = [
+        later - earlier
+        for earlier, later in zip(x_positions, x_positions[1:], strict=False)
+        if later > earlier
+    ]
+    bar_half_width = max(4, min(18, min(gaps) // 3 if gaps else 12))
+    zero_y = top + chart_height
+    bar_layer = Image.new("RGBA", image.size, (255, 255, 255, 0))
+    bar_draw = ImageDraw.Draw(bar_layer)
+    for point_date, absolute_value, color in daily_bars:
+        x = x_coordinate(point_date)
+        value_y = daily_y(absolute_value)
+        bar_draw.rectangle(
+            (
+                x - bar_half_width,
+                min(value_y, zero_y),
+                x + bar_half_width,
+                max(value_y, zero_y),
+            ),
+            fill=color,
+        )
+    image = Image.alpha_composite(image, bar_layer)
+    draw = ImageDraw.Draw(image)
+    draw.line((left, zero_y, left + chart_width, zero_y), fill="#94a3b8", width=3)
+
+    market_points = [
+        line_coordinates(point.snapshot_date, point.total_market_value)
+        for point in history
+    ]
     draw.line(market_points, fill="#2563eb", width=5, joint="curve")
     for x, y in market_points:
         draw.ellipse((x - 5, y - 5, x + 5, y + 5), fill="#2563eb")
 
     output = BytesIO()
+    image.convert("RGB").save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def _net_equity_chart_png(history: tuple[StockNetEquityHistoryPoint, ...]) -> bytes:
+    """Render available persisted Stock Net Equity points on the shared timeline."""
+    width, height = 1200, 650
+    left, top, right, bottom = 170, 92, 48, 92
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    legend_font = _chart_font(18)
+    axis_font = _chart_font(16)
+    chart_width = width - left - right
+    chart_height = height - top - bottom
+    available = [
+        point
+        for point in history
+        if point.net_asset_value is not None
+        and point.quality_status is not StockNetEquityQuality.UNKNOWN
+    ]
+    values = [point.net_asset_value for point in available]
+    minimum = min(values)
+    maximum = max(values)
+    span = maximum - minimum
+    if span == 0:
+        padding = abs(maximum) or Decimal("1")
+        minimum -= padding / Decimal("2")
+        maximum += padding / Decimal("2")
+        span = maximum - minimum
+    first_date = history[0].snapshot_date
+    last_date = history[-1].snapshot_date
+    date_span = max((last_date - first_date).days, 1)
+
+    def x_coordinate(point_date: date) -> int:
+        return left + round((point_date - first_date).days * chart_width / date_span)
+
+    def coordinates(point: StockNetEquityHistoryPoint) -> tuple[int, int]:
+        assert point.net_asset_value is not None
+        ratio = (point.net_asset_value - minimum) / span
+        return (
+            x_coordinate(point.snapshot_date),
+            top + int(((Decimal("1") - ratio) * chart_height).to_integral_value()),
+        )
+
+    qualities = {
+        point.quality_status for point in available if point.quality_status is not None
+    }
+    has_estimated = StockNetEquityQuality.ESTIMATED_LIABILITY in qualities
+    legend_y = 40
+    draw.line((left, legend_y, left + 44, legend_y), fill="#2563eb", width=7)
+    draw.text(
+        (left + 58, legend_y - 11),
+        "Verified" if has_estimated else "Stock Net Equity",
+        fill="#334155",
+        font=legend_font,
+    )
+    if has_estimated:
+        estimated_x = left + 190
+        _draw_dashed_line(
+            draw, (estimated_x, legend_y), (estimated_x + 44, legend_y), "#f59e0b", 5
+        )
+        draw.text(
+            (estimated_x + 58, legend_y - 11),
+            "Estimated Liability",
+            fill="#334155",
+            font=legend_font,
+        )
+    draw.text((12, top - 34), "Stock Net Equity / TWD", fill="#64748b", font=axis_font)
+    for step in range(5):
+        ratio = Decimal(step) / Decimal("4")
+        value = maximum - span * ratio
+        y = top + round(step * chart_height / 4)
+        draw.line((left, y, left + chart_width, y), fill="#eef2f7", width=2)
+        draw.text((12, y - 10), f"NT${value:,.0f}", fill="#64748b", font=axis_font)
+    for tick_date, label in _long_range_ticks(first_date, last_date):
+        x = x_coordinate(tick_date)
+        draw.line((x, top, x, top + chart_height), fill="#eef2f7", width=2)
+        label_width = draw.textlength(label, font=axis_font)
+        draw.text(
+            (x - label_width / 2, top + chart_height + 24),
+            label,
+            fill="#64748b",
+            font=axis_font,
+        )
+    segments = _net_equity_chart_segments(history)
+    for quality, segment in segments:
+        points = [coordinates(point) for point in segment]
+        color = "#2563eb" if quality == "VERIFIED" else "#f59e0b"
+        if len(points) > 1:
+            if quality == "VERIFIED":
+                draw.line(points, fill=color, width=5, joint="curve")
+            else:
+                for start, end in zip(points, points[1:], strict=False):
+                    _draw_dashed_line(draw, start, end, color, 5)
+        for x, y in points:
+            draw.ellipse((x - 5, y - 5, x + 5, y + 5), fill=color)
+    output = BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()
+
+
+def _net_equity_chart_segments(
+    history: tuple[StockNetEquityHistoryPoint, ...],
+) -> tuple[tuple[str, tuple[StockNetEquityHistoryPoint, ...]], ...]:
+    """Split lines at real data gaps while skipping confirmed market closures."""
+    segments: list[tuple[str, tuple[StockNetEquityHistoryPoint, ...]]] = []
+    current_segment: list[StockNetEquityHistoryPoint] = []
+    current_quality: str | None = None
+    for point in history:
+        if point.net_asset_value is None and point.is_expected_market_closure:
+            continue
+        quality = (
+            point.quality_status.value if point.quality_status is not None else None
+        )
+        if point.net_asset_value is None or quality in (None, "UNKNOWN"):
+            if current_segment:
+                assert current_quality is not None
+                segments.append((current_quality, tuple(current_segment)))
+                current_segment = []
+                current_quality = None
+            continue
+        if current_quality is not None and quality != current_quality:
+            segments.append((current_quality, tuple(current_segment)))
+            current_segment = []
+        current_quality = quality
+        current_segment.append(point)
+    if current_segment:
+        assert current_quality is not None
+        segments.append((current_quality, tuple(current_segment)))
+    return tuple(segments)
+
+
+def _draw_dashed_line(
+    draw: ImageDraw.ImageDraw,
+    start: tuple[int, int],
+    end: tuple[int, int],
+    color: str,
+    width: int,
+) -> None:
+    """Draw a conservative email-chart dashed segment."""
+    x1, y1 = start
+    x2, y2 = end
+    distance = max(abs(x2 - x1), abs(y2 - y1), 1)
+    for offset in range(0, distance, 16):
+        finish = min(offset + 9, distance)
+        draw.line(
+            (
+                x1 + (x2 - x1) * offset / distance,
+                y1 + (y2 - y1) * offset / distance,
+                x1 + (x2 - x1) * finish / distance,
+                y1 + (y2 - y1) * finish / distance,
+            ),
+            fill=color,
+            width=width,
+        )
+
+
+def _long_range_ticks(start: date, end: date) -> tuple[tuple[date, str], ...]:
+    """Return readable monthly, quarterly, or annual ticks for a long timeline."""
+    days = (end - start).days
+    if days > 730:
+        ticks = [(start, start.strftime("%Y-%m-%d"))]
+        current = date(start.year + 1, 1, 1)
+        while current <= end:
+            ticks.append((current, current.strftime("%Y")))
+            current = date(current.year + 1, 1, 1)
+        return tuple(ticks)
+    if days <= 120:
+        month_step = 1
+        label_format = "%m-%d"
+    else:
+        month_step = 3
+        label_format = "%Y-%m"
+    current = date(start.year, start.month, 1)
+    if current < start:
+        month = current.month - 1 + month_step
+        current = date(current.year + month // 12, month % 12 + 1, 1)
+    ticks = []
+    while current <= end:
+        ticks.append((current, current.strftime(label_format)))
+        month = current.month - 1 + month_step
+        current = date(current.year + month // 12, month % 12 + 1, 1)
+    return tuple(ticks)
 
 
 def _monday_ticks(start: date, end: date) -> tuple[date, ...]:
@@ -760,13 +1068,19 @@ class DailyEmailReportRenderer:
             )
             chart_html = (
                 f'<img src="{escape(source.uri, quote=True)}" '
-                'alt="30-day total stock market value chart" '
-                'data-chart-type="line" data-internal-title="none" '
+                'alt="30-day total stock market value and daily profit or loss chart" '
+                'data-chart-type="mixed-line-bar" data-internal-title="none" '
                 'data-point-markers="visible" '
                 'data-primary-axis="Total stock market value" '
-                'data-series-count="1" data-horizontal-gridlines="visible" '
+                'data-secondary-axis="Daily P/L absolute amount" '
+                'data-secondary-axis-range="nonnegative" '
+                'data-daily-pnl-baseline="zero" data-daily-pnl-height="absolute" '
+                'data-daily-pnl-colors="profit:red,loss:green,zero:neutral" '
+                'data-layer-order="daily-pnl-bars,portfolio-lines" '
+                'data-series-count="2" data-horizontal-gridlines="visible" '
                 'data-vertical-gridlines="monday" '
                 f'data-observation-count="{len(report.history)}" '
+                f'data-daily-pnl-values="{escape(",".join("null" if item.daily_profit_loss is None else str(item.daily_profit_loss) for item in report.history), quote=True)}" '
                 f'data-x-axis-ticks="{escape(",".join(item.strftime("%m-%d") for item in _monday_ticks(report.history[0].snapshot_date, report.history[-1].snapshot_date)), quote=True)}" '
                 'width="760" style="display:block;width:100%;max-width:760px;'
                 'height:auto;border:0">'
@@ -779,6 +1093,63 @@ class DailyEmailReportRenderer:
                 f'<p style="color:{NEUTRAL_COLOR}">{escape(CHART_FALLBACK)}</p>'
             )
             inline_images = ()
+        available_net_equity = tuple(
+            item
+            for item in report.net_equity_history
+            if item.net_asset_value is not None
+            and item.quality_status is not StockNetEquityQuality.UNKNOWN
+        )
+        if len(available_net_equity) > 1:
+            net_equity_qualities = {
+                item.quality_status
+                for item in available_net_equity
+                if item.quality_status is not None
+            }
+            has_estimated_net_equity = (
+                StockNetEquityQuality.ESTIMATED_LIABILITY in net_equity_qualities
+            )
+            net_equity_series = (
+                "Verified,Estimated Liability"
+                if has_estimated_net_equity
+                else "Stock Net Equity"
+            )
+            net_equity_source = (
+                ChartSource(uri=chart_source.net_equity_uri)
+                if chart_source is not None and chart_source.net_equity_uri is not None
+                else ChartSource(
+                    uri=f"cid:{NET_EQUITY_CHART_CONTENT_ID}",
+                    attachment=InlineImage(
+                        NET_EQUITY_CHART_CONTENT_ID,
+                        NET_EQUITY_CHART_FILENAME,
+                        "image/png",
+                        _net_equity_chart_png(report.net_equity_history),
+                    ),
+                )
+            )
+            net_equity_chart_html = (
+                f'<img src="{escape(net_equity_source.uri, quote=True)}" '
+                'alt="Stock Net Equity Trend" data-chart-type="line" '
+                f'data-series="{net_equity_series}" '
+                f'data-series-count="{2 if has_estimated_net_equity else 1}" '
+                'data-quality-styles="VERIFIED:blue-solid,ESTIMATED_LIABILITY:orange-dashed,UNKNOWN:gap" '
+                'data-primary-axis="Stock Net Equity" '
+                'data-y-axis="Stock Net Equity / TWD" '
+                'data-vertical-gridlines="adaptive" '
+                f'data-observation-count="{len(available_net_equity)}" '
+                f'data-history-start="{report.net_equity_history[0].snapshot_date}" '
+                f'data-history-end="{report.net_equity_history[-1].snapshot_date}" '
+                f'data-missing-count="{len(report.net_equity_history) - len(available_net_equity)}" '
+                f'data-expected-closure-count="{sum(item.is_expected_market_closure for item in report.net_equity_history)}" '
+                f'data-x-axis-ticks="{escape(",".join(label for _, label in _long_range_ticks(report.net_equity_history[0].snapshot_date, report.net_equity_history[-1].snapshot_date)), quote=True)}" '
+                'width="760" style="display:block;width:100%;max-width:760px;'
+                'height:auto;border:0">'
+            )
+            if net_equity_source.attachment is not None:
+                inline_images += (net_equity_source.attachment,)
+        else:
+            net_equity_chart_html = (
+                f'<p style="color:{NEUTRAL_COLOR}">{escape(CHART_FALLBACK)}</p>'
+            )
         annual_chart_html, annual_chart_image = _annual_total_pnl_chart(
             report, chart_source
         )
@@ -863,6 +1234,8 @@ class DailyEmailReportRenderer:
 <tbody>{rows}</tbody></table>
 {DailyReportSectionRenderer().html(report.sections)}
 {_annual_performance_html(report, annual_chart_html)}
+<h2 style="font-size:18px;margin-top:24px">Stock Net Equity Trend</h2>
+{net_equity_chart_html}
 </td></tr></table>
 </div></body></html>"""
         section_text = DailyReportSectionRenderer().text(report.sections)
@@ -873,6 +1246,8 @@ class DailyEmailReportRenderer:
             + ("\n\n" + section_text if section_text else "")
             + "\n\n"
             + annual_text
+            + "\n\nStock Net Equity Trend\n"
+            + "\n".join(_net_equity_history_text(report.net_equity_history))
             + "\n",
             html,
             inline_images,
