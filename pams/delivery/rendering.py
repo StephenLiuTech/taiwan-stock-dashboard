@@ -5,6 +5,9 @@ from decimal import Decimal
 from html import escape
 from io import BytesIO
 
+from matplotlib import dates as mdates
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 from PIL import Image, ImageDraw, ImageFont
 
 from domain import Currency, Market, StockNetEquityQuality
@@ -50,6 +53,13 @@ NEGATIVE_COLOR = TAIWAN_LOSS_COLOR
 DAILY_PNL_PROFIT_BAR = (220, 38, 38, 105)
 DAILY_PNL_LOSS_BAR = (22, 163, 74, 105)
 DAILY_PNL_NEUTRAL_BAR = (107, 114, 128, 105)
+NET_EQUITY_Y_TICK_INTERVAL = Decimal("500000")
+NET_EQUITY_MILESTONES = tuple(
+    Decimal(value) for value in ("1000000", "1500000", "2000000", "2500000", "3000000")
+)
+REPORT_WIDTH_STYLE = "border-collapse:collapse;width:100%;max-width:100%;"
+REPORT_CHART_STYLE = "display:block;width:100%;max-width:100%;height:auto;border:0;"
+REPORT_CONTENT_MAX_WIDTH = "1000px"
 
 
 def _money(value: Decimal | None, *, signed: bool = False) -> str:
@@ -280,7 +290,7 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
         ratio = Decimal(step) / Decimal("4")
         market_value = maximum - span * ratio
         y = top + round(step * chart_height / 4)
-        draw.line((left, y, left + chart_width, y), fill="#eef2f7", width=2)
+        draw.line((left, y, left + chart_width, y), fill="#d8dee8", width=2)
         draw.text(
             (12, y - 10),
             f"NT${market_value:,.0f}",
@@ -350,7 +360,7 @@ def _chart_png(history: tuple[DailyEmailHistoryPoint, ...]) -> bytes:
 def _net_equity_chart_png(history: tuple[StockNetEquityHistoryPoint, ...]) -> bytes:
     """Render available persisted Stock Net Equity points on the shared timeline."""
     width, height = 1200, 650
-    left, top, right, bottom = 170, 92, 48, 92
+    left, top, right, bottom = 170, 92, 48, 110
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
     legend_font = _chart_font(18)
@@ -364,16 +374,13 @@ def _net_equity_chart_png(history: tuple[StockNetEquityHistoryPoint, ...]) -> by
         and point.quality_status is not StockNetEquityQuality.UNKNOWN
     ]
     values = [point.net_asset_value for point in available]
-    minimum = min(values)
-    maximum = max(values)
-    span = maximum - minimum
-    if span == 0:
-        padding = abs(maximum) or Decimal("1")
-        minimum -= padding / Decimal("2")
-        maximum += padding / Decimal("2")
-        span = maximum - minimum
+    y_ticks = _net_equity_y_axis_ticks(tuple(values))
+    minimum = Decimal("0")
+    maximum = y_ticks[-1]
+    span = maximum
     first_date = history[0].snapshot_date
-    last_date = history[-1].snapshot_date
+    report_date = history[-1].snapshot_date
+    last_date = date(report_date.year, 12, 31)
     date_span = max((last_date - first_date).days, 1)
 
     def x_coordinate(point_date: date) -> int:
@@ -411,21 +418,17 @@ def _net_equity_chart_png(history: tuple[StockNetEquityHistoryPoint, ...]) -> by
             font=legend_font,
         )
     draw.text((12, top - 34), "Stock Net Equity / TWD", fill="#64748b", font=axis_font)
-    for step in range(5):
-        ratio = Decimal(step) / Decimal("4")
-        value = maximum - span * ratio
-        y = top + round(step * chart_height / 4)
+    for value in reversed(y_ticks):
+        ratio = value / maximum
+        y = top + int(((Decimal("1") - ratio) * chart_height).to_integral_value())
         draw.line((left, y, left + chart_width, y), fill="#eef2f7", width=2)
         draw.text((12, y - 10), f"NT${value:,.0f}", fill="#64748b", font=axis_font)
-    for tick_date, label in _long_range_ticks(first_date, last_date):
+    for tick_date, _ in _monthly_ticks(first_date, last_date):
         x = x_coordinate(tick_date)
-        draw.line((x, top, x, top + chart_height), fill="#eef2f7", width=2)
-        label_width = draw.textlength(label, font=axis_font)
-        draw.text(
-            (x - label_width / 2, top + chart_height + 24),
-            label,
-            fill="#64748b",
-            font=axis_font,
+        draw.line(
+            (x, top, x, top + chart_height),
+            fill="#b8c2d1" if tick_date.month == 1 else "#d8dee8",
+            width=3 if tick_date.month == 1 else 2,
         )
     segments = _net_equity_chart_segments(history)
     for quality, segment in segments:
@@ -438,10 +441,355 @@ def _net_equity_chart_png(history: tuple[StockNetEquityHistoryPoint, ...]) -> by
                 for start, end in zip(points, points[1:], strict=False):
                     _draw_dashed_line(draw, start, end, color, 5)
         for x, y in points:
-            draw.ellipse((x - 5, y - 5, x + 5, y + 5), fill=color)
+            draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=color)
+    _draw_net_equity_milestones(
+        draw,
+        _net_equity_milestones(history),
+        coordinates,
+        tuple(coordinates(point) for point in available),
+        tuple(
+            (start, end)
+            for _, segment in segments
+            for start, end in zip(
+                (coordinates(point) for point in segment),
+                (coordinates(point) for point in segment[1:]),
+                strict=False,
+            )
+        ),
+        x_coordinate(report_date),
+        left,
+        top,
+        left + chart_width,
+        top + chart_height,
+    )
+    _draw_two_level_date_axis(
+        image,
+        first_date,
+        last_date,
+        left,
+        chart_width,
+        top + chart_height,
+    )
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()
+
+
+def _net_equity_y_axis_ticks(values: tuple[Decimal, ...]) -> tuple[Decimal, ...]:
+    """Return zero-based Stock Net Equity ticks in fixed NT$500,000 steps."""
+    maximum = max(values, default=Decimal("0"))
+    top = max(
+        Decimal("5000000"),
+        (maximum / NET_EQUITY_Y_TICK_INTERVAL).to_integral_value(
+            rounding="ROUND_CEILING"
+        )
+        * NET_EQUITY_Y_TICK_INTERVAL,
+    )
+    count = int(top / NET_EQUITY_Y_TICK_INTERVAL)
+    return tuple(NET_EQUITY_Y_TICK_INTERVAL * step for step in range(count + 1))
+
+
+def _monthly_ticks(start: date, end: date) -> tuple[tuple[date, str], ...]:
+    """Return one compact tick for every calendar month in the chart range."""
+    ticks = [(start, start.strftime("%Y-%m"))]
+    current = date(start.year + (start.month == 12), start.month % 12 + 1, 1)
+    while current <= end:
+        label = (
+            current.strftime("%Y-%m") if current.month == 1 else current.strftime("%m")
+        )
+        ticks.append((current, label))
+        current = date(current.year + (current.month == 12), current.month % 12 + 1, 1)
+    return tuple(ticks)
+
+
+def _draw_two_level_date_axis(
+    image: Image.Image,
+    start: date,
+    end: date,
+    left: int,
+    chart_width: int,
+    axis_top: int,
+) -> None:
+    """Composite horizontal month and centered year axes below the Pillow chart."""
+    width = image.width
+    band_height = image.height - axis_top
+    figure = Figure(figsize=(width / 100, band_height / 100), dpi=100, facecolor="none")
+    FigureCanvasAgg(figure)
+    month_axis = figure.add_axes(
+        [left / width, 0.48, chart_width / width, 0.45], facecolor="none"
+    )
+    month_axis.set_xlim(mdates.date2num(start), mdates.date2num(end))
+    month_dates = tuple(tick_date for tick_date, _ in _monthly_ticks(start, end))
+    month_axis.set_xticks([mdates.date2num(value) for value in month_dates])
+    month_axis.set_xticklabels(
+        [str(value.month) for value in month_dates], color="#64748b", fontsize=10
+    )
+    month_axis.tick_params(axis="x", length=0, pad=2)
+    month_axis.set_yticks([])
+    for spine in month_axis.spines.values():
+        spine.set_visible(False)
+
+    year_axis = month_axis.twiny()
+    year_axis.set_xlim(month_axis.get_xlim())
+    year_centers = []
+    year_labels = []
+    for year in range(start.year, end.year + 1):
+        visible_start = max(start, date(year, 1, 1))
+        visible_end = min(end, date(year, 12, 31))
+        midpoint = visible_start + (visible_end - visible_start) / 2
+        year_centers.append(mdates.date2num(midpoint))
+        year_labels.append(str(year))
+    year_axis.set_xticks(year_centers)
+    year_axis.set_xticklabels(year_labels, color="#475569", fontsize=11)
+    year_axis.xaxis.set_ticks_position("bottom")
+    year_axis.xaxis.set_label_position("bottom")
+    year_axis.spines["bottom"].set_position(("axes", -0.62))
+    year_axis.tick_params(axis="x", length=0, pad=1)
+    year_axis.set_yticks([])
+    for spine in year_axis.spines.values():
+        spine.set_visible(False)
+
+    buffer = BytesIO()
+    figure.savefig(buffer, format="png", dpi=100, transparent=True, pad_inches=0)
+    buffer.seek(0)
+    axis_image = Image.open(buffer).convert("RGBA")
+    image.paste(axis_image, (0, axis_top), axis_image)
+
+
+def _net_equity_milestones(
+    history: tuple[StockNetEquityHistoryPoint, ...],
+) -> tuple[tuple[Decimal, StockNetEquityHistoryPoint], ...]:
+    """Select the first persisted qualifying observation for each milestone."""
+    available = sorted(
+        (
+            point
+            for point in history
+            if point.net_asset_value is not None
+            and point.quality_status is not StockNetEquityQuality.UNKNOWN
+        ),
+        key=lambda point: point.snapshot_date,
+    )
+    reached = []
+    for threshold in NET_EQUITY_MILESTONES:
+        point = (
+            _first_sustained_net_equity_breakthrough(history, threshold)
+            if threshold in (Decimal("2500000"), Decimal("3000000"))
+            else next(
+                (point for point in available if point.net_asset_value >= threshold),
+                None,
+            )
+        )
+        if point is not None:
+            reached.append((threshold, point))
+    return tuple(reached)
+
+
+def _first_sustained_net_equity_breakthrough(
+    history: tuple[StockNetEquityHistoryPoint, ...], threshold: Decimal
+) -> StockNetEquityHistoryPoint | None:
+    """Return the first of three consecutive verified trading-day threshold hits."""
+    qualifying: list[StockNetEquityHistoryPoint] = []
+    for point in sorted(history, key=lambda item: item.snapshot_date):
+        if point.is_expected_market_closure or point.snapshot_date.weekday() >= 5:
+            continue
+        if (
+            point.net_asset_value is None
+            or point.quality_status is not StockNetEquityQuality.VERIFIED
+            or point.net_asset_value < threshold
+        ):
+            qualifying = []
+            continue
+        qualifying.append(point)
+        if len(qualifying) == 3:
+            return qualifying[0]
+    return None
+
+
+def _draw_net_equity_milestones(
+    draw: ImageDraw.ImageDraw,
+    milestones: tuple[tuple[Decimal, StockNetEquityHistoryPoint], ...],
+    coordinates: object,
+    line_points: tuple[tuple[int, int], ...],
+    line_segments: tuple[tuple[tuple[int, int], tuple[int, int]], ...],
+    latest_data_x: int,
+    left: int,
+    top: int,
+    right: int,
+    bottom: int,
+) -> None:
+    """Place milestone callouts near their points without obscuring chart data."""
+    font = _chart_font(13)
+    occupied_boxes: list[tuple[int, int, int, int]] = []
+    leader_lines: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    fallback_lane = 0
+    for threshold, point in milestones:
+        x, y = coordinates(point)
+        amount = f"NT${threshold / Decimal('1000000'):.1f}M"
+        label = f"{amount}\n{point.snapshot_date}"
+        text_box = draw.multiline_textbbox((0, 0), label, font=font, spacing=2)
+        label_width = text_box[2] - text_box[0] + 12
+        label_height = text_box[3] - text_box[1] + 10
+        placement = _nearby_milestone_callout(
+            (x, y),
+            label_width,
+            label_height,
+            line_points,
+            line_segments,
+            occupied_boxes,
+            leader_lines,
+            left,
+            top,
+            right,
+            bottom,
+        )
+        if placement is None:
+            label_x = min(max(latest_data_x + 18, left), right - label_width)
+            label_y = top + 24 + fallback_lane * (label_height + 14)
+            fallback_lane += 1
+            label_box = (
+                label_x,
+                label_y,
+                label_x + label_width,
+                label_y + label_height,
+            )
+            leader_end = (label_x, label_y + label_height // 2)
+        else:
+            label_box, leader_end = placement
+            label_x, label_y = label_box[:2]
+        occupied_boxes.append(label_box)
+        leader_lines.append(((x, y), leader_end))
+        draw.line((x, y, *leader_end), fill="#94a3b8", width=2)
+        draw.rounded_rectangle(
+            label_box, radius=4, fill="white", outline="#94a3b8", width=1
+        )
+        draw.multiline_text(
+            (label_x + 6, label_y + 4),
+            label,
+            fill="#334155",
+            font=font,
+            spacing=2,
+        )
+        draw.ellipse(
+            (x - 5, y - 5, x + 5, y + 5), fill="white", outline="#2563eb", width=2
+        )
+
+
+def _nearby_milestone_callout(
+    point: tuple[int, int],
+    width: int,
+    height: int,
+    line_points: tuple[tuple[int, int], ...],
+    line_segments: tuple[tuple[tuple[int, int], tuple[int, int]], ...],
+    occupied_boxes: list[tuple[int, int, int, int]],
+    leader_lines: list[tuple[tuple[int, int], tuple[int, int]]],
+    left: int,
+    top: int,
+    right: int,
+    bottom: int,
+) -> tuple[tuple[int, int, int, int], tuple[int, int]] | None:
+    """Return the first collision-free nearby callout using actual label bounds."""
+    point_x, point_y = point
+    clearance = 8
+    for distance in (18, 28, 40, 54, 70):
+        for horizontal, vertical in ((1, -1), (-1, -1), (1, 1), (-1, 1)):
+            label_x = (
+                point_x + distance if horizontal > 0 else point_x - width - distance
+            )
+            label_y = (
+                point_y - height - distance if vertical < 0 else point_y + distance
+            )
+            box = (label_x, label_y, label_x + width, label_y + height)
+            protected = _expand_annotation_box(box, clearance)
+            if (
+                box[0] < left
+                or box[1] < top
+                or box[2] > right
+                or box[3] > bottom
+                or any(
+                    _annotation_boxes_overlap(protected, existing)
+                    for existing in occupied_boxes
+                )
+                or any(
+                    protected[0] <= x <= protected[2]
+                    and protected[1] <= y <= protected[3]
+                    for x, y in line_points
+                )
+                or any(
+                    _chart_segment_intersects_box(start, end, protected)
+                    for start, end in line_segments
+                )
+            ):
+                continue
+            leader_end = (
+                label_x if horizontal > 0 else label_x + width,
+                label_y + height if vertical < 0 else label_y,
+            )
+            if any(
+                _chart_segments_cross((point, leader_end), existing)
+                for existing in leader_lines
+            ):
+                continue
+            return box, leader_end
+    return None
+
+
+def _expand_annotation_box(
+    box: tuple[int, int, int, int], clearance: int
+) -> tuple[int, int, int, int]:
+    return (
+        box[0] - clearance,
+        box[1] - clearance,
+        box[2] + clearance,
+        box[3] + clearance,
+    )
+
+
+def _annotation_boxes_overlap(
+    first: tuple[int, int, int, int], second: tuple[int, int, int, int]
+) -> bool:
+    return not (
+        first[2] <= second[0]
+        or first[0] >= second[2]
+        or first[3] <= second[1]
+        or first[1] >= second[3]
+    )
+
+
+def _chart_segment_intersects_box(
+    start: tuple[int, int], end: tuple[int, int], box: tuple[int, int, int, int]
+) -> bool:
+    x1, y1 = start
+    x2, y2 = end
+    box_left, box_top, box_right, box_bottom = box
+    if max(x1, x2) < box_left or min(x1, x2) > box_right:
+        return False
+    if max(y1, y2) < box_top or min(y1, y2) > box_bottom:
+        return False
+    if x1 == x2:
+        return box_left <= x1 <= box_right
+    low_x = max(min(x1, x2), box_left)
+    high_x = min(max(x1, x2), box_right)
+    for test_x in (low_x, high_x):
+        ratio = (test_x - x1) / (x2 - x1)
+        test_y = y1 + (y2 - y1) * ratio
+        if box_top <= test_y <= box_bottom:
+            return True
+    return False
+
+
+def _chart_segments_cross(
+    first: tuple[tuple[int, int], tuple[int, int]],
+    second: tuple[tuple[int, int], tuple[int, int]],
+) -> bool:
+    def orientation(a: tuple[int, int], b: tuple[int, int], c: tuple[int, int]) -> int:
+        value = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
+        return (value > 0) - (value < 0)
+
+    return orientation(first[0], first[1], second[0]) != orientation(
+        first[0], first[1], second[1]
+    ) and orientation(second[0], second[1], first[0]) != orientation(
+        second[0], second[1], first[1]
+    )
 
 
 def _net_equity_chart_segments(
@@ -703,15 +1051,18 @@ def _annual_total_pnl_chart(
     )
     title = f"{performance.snapshot.year} 年度總損益走勢（YTD）"
     html = (
+        f'<table role="presentation" class="pams-report-width pams-chart-container" '
+        f'width="100%" style="{REPORT_WIDTH_STYLE}"><tr><td width="100%" '
+        'style="width:100%;padding:0;vertical-align:top;">'
         f'<h3 style="font-size:16px;margin:20px 0 8px">{escape(title)}</h3>'
         '<div style="font-size:11px;color:#4b5563;margin-bottom:8px">'
         "Realized Total P/L YTD</div>"
-        f'<img class="pams-realized-total-pnl-ytd-chart" src="{escape(source.uri, quote=True)}" '
+        f'<img class="pams-report-chart pams-realized-total-pnl-ytd-chart" '
+        f'src="{escape(source.uri, quote=True)}" '
         f'alt="{escape(title, quote=True)}" data-chart-type="line" '
         'data-series="Realized Total P/L YTD" '
         f'data-latest-label="{escape(_money(performance.realized.realized_total_pnl_ytd, signed=True), quote=True)}" '
-        'width="760" style="display:block;width:100%;max-width:760px;'
-        'height:auto;border:0">'
+        f'style="{REPORT_CHART_STYLE}"></td></tr></table>'
     )
     return html, source.attachment
 
@@ -1067,7 +1418,7 @@ class DailyEmailReportRenderer:
                 ),
             )
             chart_html = (
-                f'<img src="{escape(source.uri, quote=True)}" '
+                f'<img class="pams-report-chart" src="{escape(source.uri, quote=True)}" '
                 'alt="30-day total stock market value and daily profit or loss chart" '
                 'data-chart-type="mixed-line-bar" data-internal-title="none" '
                 'data-point-markers="visible" '
@@ -1082,8 +1433,7 @@ class DailyEmailReportRenderer:
                 f'data-observation-count="{len(report.history)}" '
                 f'data-daily-pnl-values="{escape(",".join("null" if item.daily_profit_loss is None else str(item.daily_profit_loss) for item in report.history), quote=True)}" '
                 f'data-x-axis-ticks="{escape(",".join(item.strftime("%m-%d") for item in _monday_ticks(report.history[0].snapshot_date, report.history[-1].snapshot_date)), quote=True)}" '
-                'width="760" style="display:block;width:100%;max-width:760px;'
-                'height:auto;border:0">'
+                f'style="{REPORT_CHART_STYLE}">'
             )
             inline_images = (
                 (source.attachment,) if source.attachment is not None else ()
@@ -1127,7 +1477,8 @@ class DailyEmailReportRenderer:
                 )
             )
             net_equity_chart_html = (
-                f'<img src="{escape(net_equity_source.uri, quote=True)}" '
+                f'<img class="pams-report-chart" '
+                f'src="{escape(net_equity_source.uri, quote=True)}" '
                 'alt="Stock Net Equity Trend" data-chart-type="line" '
                 f'data-series="{net_equity_series}" '
                 f'data-series-count="{2 if has_estimated_net_equity else 1}" '
@@ -1140,9 +1491,11 @@ class DailyEmailReportRenderer:
                 f'data-history-end="{report.net_equity_history[-1].snapshot_date}" '
                 f'data-missing-count="{len(report.net_equity_history) - len(available_net_equity)}" '
                 f'data-expected-closure-count="{sum(item.is_expected_market_closure for item in report.net_equity_history)}" '
-                f'data-x-axis-ticks="{escape(",".join(label for _, label in _long_range_ticks(report.net_equity_history[0].snapshot_date, report.net_equity_history[-1].snapshot_date)), quote=True)}" '
-                'width="760" style="display:block;width:100%;max-width:760px;'
-                'height:auto;border:0">'
+                f'data-x-axis-ticks="{escape(",".join(label for _, label in _monthly_ticks(report.net_equity_history[0].snapshot_date, date(report.net_equity_history[-1].snapshot_date.year, 12, 31))), quote=True)}" '
+                'data-x-axis-interval="monthly" '
+                'data-y-tick-interval="500000" '
+                f'data-milestones="{escape(",".join(f"{threshold:.0f}:{point.snapshot_date}" for threshold, point in _net_equity_milestones(report.net_equity_history)), quote=True)}" '
+                f'style="{REPORT_CHART_STYLE}">'
             )
             if net_equity_source.attachment is not None:
                 inline_images += (net_equity_source.attachment,)
@@ -1196,8 +1549,16 @@ class DailyEmailReportRenderer:
 @media only screen and (max-width:600px) {{
   .pams-report {{ padding:10px !important; }}
   .pams-container {{ width:100% !important; max-width:100% !important; }}
-  .pams-wide-tables {{ width:760px !important; min-width:760px !important;
-    max-width:none !important; }}
+  .pams-report-width {{ width:100% !important; min-width:0 !important;
+    max-width:100% !important; }}
+  .pams-wide-tables, .pams-holdings-table {{ width:100% !important;
+    min-width:0 !important; max-width:100% !important;
+    table-layout:fixed !important; }}
+  .pams-holdings-table th, .pams-holdings-table td {{
+    white-space:normal !important; overflow-wrap:anywhere !important;
+    word-break:break-word !important; }}
+  .pams-report-chart {{ display:block !important; width:100% !important;
+    max-width:100% !important; height:auto !important; }}
   .pams-portfolio-summary {{ width:100% !important; table-layout:fixed !important; }}
   .pams-summary-card {{ width:33.333% !important; padding:8px 5px !important; }}
   .pams-summary-card div:first-child {{ font-size:10px !important; line-height:1.25 !important; }}
@@ -1212,7 +1573,7 @@ class DailyEmailReportRenderer:
 </style>
 </head>
 <body class="pams-report" style="margin:0;padding:16px;font-family:Arial,sans-serif;color:#111827">
-<div class="pams-container" style="max-width:760px;margin:0 auto">
+<div class="pams-container" style="width:100%;max-width:{REPORT_CONTENT_MAX_WIDTH};margin:0 auto">
 <h1 style="color:#1f4e78;margin-bottom:8px">PAMS Daily Portfolio Report</h1>
 <p style="margin-top:0;color:#4b5563"><strong>Report date:</strong>
 {report.report_date}<br><strong>Verified market source date:</strong>
@@ -1221,15 +1582,16 @@ class DailyEmailReportRenderer:
 <table role="presentation" class="pams-portfolio-summary" width="100%" style="border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:24px">
 {summary_cards}</table>
 <h2 style="font-size:18px">Portfolio Trend</h2>
-{chart_html}
-<table role="presentation" class="pams-wide-tables" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto"><tr><td style="padding:0;vertical-align:top">
+<table role="presentation" class="pams-report-width pams-chart-container" width="100%" style="{REPORT_WIDTH_STYLE}"><tr><td width="100%" style="width:100%;padding:0;vertical-align:top">
+{chart_html}</td></tr></table>
+<table role="presentation" class="pams-report-width pams-wide-tables" width="100%" style="{REPORT_WIDTH_STYLE}table-layout:auto"><tr><td width="100%" style="width:100%;padding:0;vertical-align:top">
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
 <table class="pams-canonical-report-table" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto">
 <thead><tr>{headers((("Rank", "5%", "right"), ("Market", "8%", "left"), ("Symbol", "9%", "left"), ("Name", "38%", "left"), ("Quote Date", "12%", "left"), ("Today's P/L", "15%", "right"), ("Today's P/L %", "13%", "right")), font_size="14px")}</tr></thead>
 <tbody>{contributor_rows}</tbody></table>
 <p style="font-size:12px;line-height:1.5;margin:10px 0 24px;color:{NEUTRAL_COLOR}">Ranked by Today's P/L from highest to lowest.</p>
 <h2 style="font-size:18px;margin-top:24px">Holdings</h2>
-<table class="pams-canonical-report-table" style="border-collapse:collapse;width:100%;table-layout:auto">
+<table class="pams-canonical-report-table pams-holdings-table" width="100%" style="border-collapse:collapse;width:100%;max-width:100%;table-layout:auto">
 <thead><tr>{headers((("Market", "6%", "left"), ("Symbol", "7%", "left"), ("Name", None, "left"), ("Currency", "7%", "left"), ("Quantity", "7%", "right"), ("Average Cost", "9%", "right"), ("Close", "7%", "right"), ("Quote Date", "9%", "right"), ("FX", "6%", "right"), ("Unrealized P/L", "9%", "right"), ("Return %", "6%", "right"), ("Market Value", "9%", "right")), font_size="13px")}</tr></thead>
 <tbody>{rows}</tbody></table>
 {DailyReportSectionRenderer().html(report.sections)}

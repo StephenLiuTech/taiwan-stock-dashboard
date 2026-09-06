@@ -70,7 +70,7 @@ def test_desktop_holdings_retains_reduced_twelve_columns(
     html = DailyEmailReportRenderer().render(multi_market_mobile_report).html
     holdings = (
         html.split(">Holdings</h2>", 1)[1]
-        .split('<table class="pams-canonical-report-table"', 1)[1]
+        .split('<table class="pams-canonical-report-table ', 1)[1]
         .split("</table>", 1)[0]
     )
     labels = (
@@ -154,7 +154,7 @@ def test_holdings_use_one_canonical_complete_table_without_mobile_cards(
     html = DailyEmailReportRenderer().render(multi_market_mobile_report).html
     holdings = (
         html.split(">Holdings</h2>", 1)[1]
-        .split('<table class="pams-canonical-report-table"', 1)[1]
+        .split('<table class="pams-canonical-report-table ', 1)[1]
         .split("</table>", 1)[0]
     )
     assert "pams-mobile-holding-card" not in html
@@ -189,7 +189,7 @@ def test_canonical_holdings_use_unrealized_pnl_order(
 
     html = DailyEmailReportRenderer().render(report).html
     holdings_section = html.split(">Holdings</h2>", 1)[1]
-    canonical = holdings_section.split('<table class="pams-canonical-report-table"', 1)[
+    canonical = holdings_section.split('<table class="pams-canonical-report-table ', 1)[
         1
     ].split("</table>", 1)[0]
     expected = ("0050", "3293", "2330", "2027", "MU", "DRAM", "8299")
@@ -213,7 +213,7 @@ def test_holdings_order_ties_by_market_then_symbol_and_places_unavailable_last(
 
     html = DailyEmailReportRenderer().render(report).html
     holdings_section = html.split(">Holdings</h2>", 1)[1]
-    canonical = holdings_section.split('<table class="pams-canonical-report-table"', 1)[
+    canonical = holdings_section.split('<table class="pams-canonical-report-table ', 1)[
         1
     ].split("</table>", 1)[0]
     expected = ("3293", "8299", "0050", "2027", "2330", "DRAM", "MU")
@@ -231,7 +231,7 @@ def test_responsive_css_preserves_flow_and_avoids_overlap_constructs(
     assert "pams-mobile-holding-card" not in html
     assert "display:none" not in html.replace(" ", "").lower()
     assert "mso-hide" not in html.lower()
-    assert "min-width:760px" in html
+    assert ".pams-report-width { width:100% !important; min-width:0 !important;" in html
     assert ".pams-responsive-table" in html
     assert "position:absolute" not in html.replace(" ", "").lower()
     assert "position:fixed" not in html.replace(" ", "").lower()

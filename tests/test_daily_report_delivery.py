@@ -51,9 +51,12 @@ from pams.delivery.rendering import (
     DAILY_PNL_PROFIT_BAR,
     PORTFOLIO_TREND_SERIES,
     _daily_pnl_bar_specs,
-    _long_range_ticks,
+    _first_sustained_net_equity_breakthrough,
     _monday_ticks,
+    _monthly_ticks,
     _net_equity_chart_segments,
+    _net_equity_milestones,
+    _net_equity_y_axis_ticks,
 )
 
 
@@ -410,7 +413,8 @@ def test_portfolio_summary_omits_expected_annual_dividend_card_and_text() -> Non
     assert "Taiwan Holdings" not in summary_text
     assert "US Holdings" not in summary_text
     width_wrapper = rendered.html.split(
-        '<table role="presentation" class="pams-wide-tables"', maxsplit=1
+        '<table role="presentation" class="pams-report-width pams-wide-tables"',
+        maxsplit=1,
     )[1].rsplit("</td></tr></table>\n</div></body>", maxsplit=1)[0]
     assert ">Today's Contributors</h2>" in width_wrapper
     assert ">Holdings</h2>" in width_wrapper
@@ -875,11 +879,11 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
     assert "YTD P/L Composition" not in annual_html
     assert annual_html.count('role="img"') == 1
     assert 'class="pams-ytd-composition-chart"' not in message.html
-    assert 'class="pams-realized-total-pnl-ytd-chart"' in annual_html
+    assert "pams-realized-total-pnl-ytd-chart" in annual_html
     assert 'class="pams-realized-symbol-chart"' in message.html
-    total_chart = annual_html.split('class="pams-realized-total-pnl-ytd-chart"', 1)[
-        1
-    ].split('<h3 style="font-size:16px', 1)[0]
+    total_chart = annual_html.split("pams-realized-total-pnl-ytd-chart", 1)[1].split(
+        '<h3 style="font-size:16px', 1
+    )[0]
     assert 'data-chart-type="line"' in total_chart
     assert 'data-series="Realized Total P/L YTD"' in total_chart
     assert 'data-latest-label="+NT$80"' in total_chart
@@ -894,11 +898,11 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
     assert "+NT$20" in dividend_row
     assert "color:#2563eb" in dividend_row
     assert annual_html.index('class="pams-annual-metrics"') < annual_html.index(
-        'class="pams-realized-total-pnl-ytd-chart"'
+        "pams-realized-total-pnl-ytd-chart"
     )
-    assert annual_html.index(
-        'class="pams-realized-total-pnl-ytd-chart"'
-    ) < annual_html.index('class="pams-realized-symbol-chart"')
+    assert annual_html.index("pams-realized-total-pnl-ytd-chart") < annual_html.index(
+        'class="pams-realized-symbol-chart"'
+    )
     assert message.html.index("TWSE 2330") < message.html.index("TPEx 8299")
     assert "#b91c1c" in message.html
     assert "#15803d" in message.html
@@ -1116,15 +1120,16 @@ def test_html_contributor_columns_and_readable_alignment_are_preserved() -> None
         html.split(
             '<h2 style="font-size:18px;margin-top:24px">Holdings</h2>', maxsplit=1
         )[1]
-        .split('<table class="pams-canonical-report-table"', maxsplit=1)[1]
+        .split('<table class="pams-canonical-report-table ', maxsplit=1)[1]
         .split(">", maxsplit=1)[0]
     )
     assert "width:100%" in contributor_table
     assert "width:100%" in holdings_table
     assert 'width="100%"' in contributor_table
     width_reference = (
-        '<table role="presentation" class="pams-wide-tables" width="100%" '
-        'style="border-collapse:collapse;width:100%;table-layout:auto">'
+        '<table role="presentation" class="pams-report-width pams-wide-tables" '
+        'width="100%" style="border-collapse:collapse;width:100%;max-width:100%;'
+        'table-layout:auto">'
     )
     wrapper_start = html.index(width_reference)
     contributors_start = html.index(">Today's Contributors</h2>")
@@ -1341,30 +1346,53 @@ def test_stock_net_equity_trend_preserves_missing_history_without_zero_fill() ->
     assert "invested capital" not in net_equity_image.lower()
 
 
-def test_stock_net_equity_trend_exposes_quality_styles_and_unknown_gap() -> None:
-    case, _, _, _ = use_case(value=snapshot())
-    report = replace(
-        case._build_report(snapshot(), date(2026, 7, 22)),
-        net_equity_history=(
-            StockNetEquityHistoryPoint(
-                date(2023, 8, 7), Decimal("100"), StockNetEquityQuality.VERIFIED
-            ),
-            StockNetEquityHistoryPoint(
-                date(2023, 8, 8),
-                Decimal("101"),
-                StockNetEquityQuality.ESTIMATED_LIABILITY,
-            ),
-            StockNetEquityHistoryPoint(
-                date(2023, 8, 9), None, StockNetEquityQuality.UNKNOWN
-            ),
+def test_sustained_net_equity_breakthrough_requires_three_verified_trading_days() -> (
+    None
+):
+    history = (
+        StockNetEquityHistoryPoint(date(2026, 1, 5), Decimal("2600000")),
+        StockNetEquityHistoryPoint(date(2026, 1, 6), Decimal("2400000")),
+        StockNetEquityHistoryPoint(date(2026, 1, 7), Decimal("2500000")),
+        StockNetEquityHistoryPoint(date(2026, 1, 8), Decimal("2600000")),
+        StockNetEquityHistoryPoint(date(2026, 1, 9), Decimal("2700000")),
+    )
+
+    point = _first_sustained_net_equity_breakthrough(history, Decimal("2500000"))
+
+    assert point is history[2]
+
+
+def test_sustained_net_equity_breakthrough_skips_closures_but_unknown_breaks() -> None:
+    history = (
+        StockNetEquityHistoryPoint(date(2026, 1, 9), Decimal("3100000")),
+        StockNetEquityHistoryPoint(
+            date(2026, 1, 10), None, None, is_expected_market_closure=True
+        ),
+        StockNetEquityHistoryPoint(
+            date(2026, 1, 12), None, StockNetEquityQuality.UNKNOWN
+        ),
+        StockNetEquityHistoryPoint(date(2026, 1, 13), Decimal("3100000")),
+        StockNetEquityHistoryPoint(
+            date(2026, 1, 14), Decimal("3100000"), StockNetEquityQuality.VERIFIED
+        ),
+        StockNetEquityHistoryPoint(
+            date(2026, 1, 15), Decimal("3100000"), StockNetEquityQuality.VERIFIED
         ),
     )
 
-    rendered = DailyEmailReportRenderer().render(report)
+    point = _first_sustained_net_equity_breakthrough(history, Decimal("3000000"))
 
-    assert "VERIFIED:blue-solid" in rendered.html
-    assert "ESTIMATED_LIABILITY:orange-dashed" in rendered.html
-    assert "UNKNOWN:gap" in rendered.html
+    assert point is history[3]
+
+
+def test_sustained_net_equity_breakthrough_omits_one_or_two_day_spikes() -> None:
+    history = (
+        StockNetEquityHistoryPoint(date(2026, 1, 5), Decimal("3100000")),
+        StockNetEquityHistoryPoint(date(2026, 1, 6), Decimal("3200000")),
+        StockNetEquityHistoryPoint(date(2026, 1, 7), Decimal("2900000")),
+    )
+
+    assert _first_sustained_net_equity_breakthrough(history, Decimal("3000000")) is None
 
 
 def test_stock_net_equity_trend_omits_estimated_series_when_none_exist() -> None:
@@ -1376,7 +1404,7 @@ def test_stock_net_equity_trend_omits_estimated_series_when_none_exist() -> None
                 date(2023, 8, 7), Decimal("100"), StockNetEquityQuality.VERIFIED
             ),
             StockNetEquityHistoryPoint(
-                date(2023, 8, 8), Decimal("101"), StockNetEquityQuality.VERIFIED
+                date(2023, 9, 8), Decimal("101"), StockNetEquityQuality.VERIFIED
             ),
         ),
     )
@@ -1518,12 +1546,85 @@ def test_stock_net_equity_history_uses_fixed_cross_year_range_and_report_end() -
         date(2025, 1, 2): Decimal("900"),
         report_date: Decimal("1100"),
     }
-    assert _long_range_ticks(STOCK_NET_EQUITY_HISTORY_START, report_date) == (
-        (date(2023, 8, 7), "2023-08-07"),
-        (date(2024, 1, 1), "2024"),
-        (date(2025, 1, 1), "2025"),
-        (date(2026, 1, 1), "2026"),
+    ticks = _monthly_ticks(STOCK_NET_EQUITY_HISTORY_START, report_date)
+    assert ticks[0] == (date(2023, 8, 7), "2023-08")
+    assert ticks[1] == (date(2023, 9, 1), "09")
+    assert ticks[-1] == (date(2026, 7, 1), "07")
+    assert len(ticks) == 36
+
+
+def test_stock_net_equity_milestone_uses_exact_first_threshold_hit() -> None:
+    history = (
+        StockNetEquityHistoryPoint(date(2024, 1, 1), Decimal("999999")),
+        StockNetEquityHistoryPoint(date(2024, 1, 2), Decimal("1000000")),
+        StockNetEquityHistoryPoint(date(2024, 1, 3), Decimal("1200000")),
     )
+
+    milestones = _net_equity_milestones(history)
+
+    assert milestones[0][0] == Decimal("1000000")
+    assert milestones[0][1].snapshot_date == date(2024, 1, 2)
+
+
+def test_stock_net_equity_milestone_uses_first_value_above_threshold() -> None:
+    history = (
+        StockNetEquityHistoryPoint(date(2024, 1, 1), Decimal("900000")),
+        StockNetEquityHistoryPoint(date(2024, 1, 2), Decimal("1100000")),
+    )
+
+    milestones = _net_equity_milestones(history)
+
+    assert milestones[0][1].snapshot_date == date(2024, 1, 2)
+
+
+def test_stock_net_equity_milestones_are_first_reached_for_non_monotonic_history() -> (
+    None
+):
+    history = (
+        StockNetEquityHistoryPoint(date(2024, 1, 4), Decimal("1300000")),
+        StockNetEquityHistoryPoint(date(2024, 1, 1), Decimal("900000")),
+        StockNetEquityHistoryPoint(date(2024, 1, 2), Decimal("1100000")),
+        StockNetEquityHistoryPoint(date(2024, 1, 3), Decimal("800000")),
+    )
+
+    milestones = _net_equity_milestones(history)
+
+    assert [(threshold, point.snapshot_date) for threshold, point in milestones] == [
+        (Decimal("1000000"), date(2024, 1, 2))
+    ]
+    assert all(threshold != Decimal("1500000") for threshold, _ in milestones)
+
+
+def test_stock_net_equity_y_axis_uses_fixed_half_million_ticks() -> None:
+    ticks = _net_equity_y_axis_ticks(
+        (Decimal("1005340"), Decimal("3000000"), Decimal("3000001"))
+    )
+
+    assert ticks == tuple(Decimal("500000") * step for step in range(11))
+    assert all(
+        later - earlier == Decimal("500000")
+        for earlier, later in zip(ticks, ticks[1:], strict=False)
+    )
+
+
+def test_stock_net_equity_chart_metadata_exposes_monthly_ticks_and_milestones() -> None:
+    case, _, _, _ = use_case(value=snapshot())
+    report = replace(
+        case._build_report(snapshot(), date(2026, 7, 22)),
+        net_equity_history=(
+            StockNetEquityHistoryPoint(date(2026, 5, 1), Decimal("900000")),
+            StockNetEquityHistoryPoint(date(2026, 6, 2), Decimal("1500001")),
+            StockNetEquityHistoryPoint(date(2026, 7, 22), Decimal("1600000")),
+        ),
+    )
+
+    rendered = DailyEmailReportRenderer().render(report)
+    chart = rendered.html.split('alt="Stock Net Equity Trend"', 1)[1].split(">", 1)[0]
+
+    assert 'data-y-tick-interval="500000"' in chart
+    assert 'data-x-axis-interval="monthly"' in chart
+    assert 'data-x-axis-ticks="2026-05,06,07,08,09,10,11,12"' in chart
+    assert 'data-milestones="1000000:2026-06-02,1500000:2026-06-02"' in chart
 
 
 def test_stock_net_equity_trend_is_the_final_email_section() -> None:

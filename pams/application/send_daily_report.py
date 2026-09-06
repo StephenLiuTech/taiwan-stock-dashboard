@@ -552,7 +552,11 @@ class SendDailyReportUseCase:
             else []
         )
         net_equity_snapshots = {
-            item.snapshot_date: (item.stock_net_equity, item.quality_status)
+            item.snapshot_date: (
+                item.stock_net_equity,
+                item.quality_status,
+                "price=carried-forward" in item.source_reference,
+            )
             for item in imported
         }
         for item in self._snapshots.list_between_dates(
@@ -563,6 +567,7 @@ class SendDailyReportUseCase:
                 net_equity_snapshots[item.snapshot_date] = (
                     item.net_asset_value,
                     StockNetEquityQuality.VERIFIED,
+                    False,
                 )
         net_equity_history = tuple(
             StockNetEquityHistoryPoint(
@@ -578,8 +583,9 @@ class SendDailyReportUseCase:
                     else None
                 ),
                 is_expected_market_closure=(
-                    current_date not in net_equity_snapshots
-                    and self._is_expected_market_closure(current_date)
+                    net_equity_snapshots[current_date][2]
+                    if current_date in net_equity_snapshots
+                    else self._is_expected_market_closure(current_date)
                 ),
             )
             for offset in range(
