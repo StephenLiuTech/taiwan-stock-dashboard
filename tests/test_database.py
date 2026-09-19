@@ -8,6 +8,32 @@ import pytest
 from database import initialize_database, initialize_schema
 from database.schema import SCHEMA_VERSION
 
+
+def test_sqlite_schema_14_to_15_adds_empty_lot_allocations_without_rewriting_rows() -> (
+    None
+):
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(
+        """CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+        INSERT INTO schema_version VALUES (14, 'before');
+        CREATE TABLE preserved (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT INTO preserved VALUES ('one', 'unchanged');"""
+    )
+
+    initialize_schema(connection)
+
+    assert (
+        connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+        == 15
+    )
+    assert connection.execute("SELECT COUNT(*) FROM lot_allocations").fetchone()[0] == 0
+    assert (
+        connection.execute("SELECT value FROM preserved").fetchone()[0] == "unchanged"
+    )
+    connection.close()
+
+
 SCHEMA_6_FIXTURE = """
 CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 INSERT INTO schema_version VALUES (6, '2026-08-01T00:00:00+00:00');
@@ -215,7 +241,7 @@ def test_sqlite_schema_10_to_11_preserves_existing_rows() -> None:
 
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 14
+        == 15
     )
     assert tuple(connection.execute("SELECT * FROM preserved").fetchone()) == (
         "one",
@@ -268,7 +294,7 @@ def test_sqlite_schema_11_to_12_backfills_valuation_provenance() -> None:
     assert row["unrealized_pnl"] == "123"
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 14
+        == 15
     )
     columns = {
         item[1]: item[3]
@@ -317,7 +343,7 @@ def test_sqlite_schema_12_to_13_preserves_rows_and_adds_empty_provenance() -> No
 
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 14
+        == 15
     )
     assert tuple(connection.execute("SELECT * FROM preserved").fetchone()) == (
         "one",

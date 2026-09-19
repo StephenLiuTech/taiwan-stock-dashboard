@@ -29,6 +29,7 @@ from domain.liability_principal import (
     LiabilityPrincipalEvent,
     LiabilityPrincipalPoint,
 )
+from domain.lot_allocation import LotAllocation
 from domain.models import (
     CorporateAction,
     DailyPortfolioPerformance,
@@ -112,6 +113,7 @@ __all__ = [
     "LiabilityPrincipalEventType",
     "LiabilityPrincipalEvent",
     "LiabilityPrincipalPoint",
+    "LotAllocation",
     "Market",
     "MultiCurrencyPortfolioValuation",
     "MarketSnapshotItem",

@@ -174,10 +174,33 @@ def test_schema_13_to_14_adds_only_stock_net_equity_history() -> None:
 
 
 def test_newer_postgresql_schema_is_rejected_without_commit() -> None:
-    connection = PostgreSQLConnectionStub(15)
+    connection = PostgreSQLConnectionStub(16)
 
     with pytest.raises(RuntimeError, match="newer than supported"):
         initialize_postgresql_schema(connection)  # type: ignore[arg-type]
 
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
+
+
+def test_schema_14_to_15_adds_only_lot_allocation_ledger() -> None:
+    connection = PostgreSQLConnectionStub(14)
+
+    initialize_postgresql_schema(connection)  # type: ignore[arg-type]
+
+    sql = [statement for statement, _ in connection.statements]
+    assert any("CREATE TABLE IF NOT EXISTS lot_allocations" in item for item in sql)
+    assert any("ix_lot_allocations_buy" in item for item in sql)
+    assert not any("UPDATE transactions" in item for item in sql)
+    assert any(parameters == (15,) for _, parameters in connection.statements)
+    assert connection.commits == 1
+
+
+def test_schema_14_to_15_failure_rolls_back() -> None:
+    connection = PostgreSQLConnectionStub(
+        14, fail_on="CREATE TABLE IF NOT EXISTS lot_allocations"
+    )
+    with pytest.raises(RuntimeError, match="injected migration failure"):
+        initialize_postgresql_schema(connection)  # type: ignore[arg-type]
     assert connection.commits == 0
     assert connection.rollbacks == 1

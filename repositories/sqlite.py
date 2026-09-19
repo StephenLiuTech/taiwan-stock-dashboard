@@ -18,11 +18,68 @@ from domain import (
     InvestmentCostEvent,
     Liability,
     LiabilityPrincipalEvent,
+    LotAllocation,
     PositionSnapshot,
     PriceQuote,
     Transaction,
     WatchlistItem,
 )
+
+
+class SQLiteLotAllocationRepository:
+    """Preserve exact Decimal lot matches and their broker provenance."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def list_all(self) -> list[LotAllocation]:
+        rows = self.connection.execute(
+            "SELECT * FROM lot_allocations "
+            "ORDER BY sell_transaction_id, buy_transaction_id"
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def list_by_sell(self, sell_transaction_id: str) -> list[LotAllocation]:
+        rows = self.connection.execute(
+            "SELECT * FROM lot_allocations WHERE sell_transaction_id = ? "
+            "ORDER BY buy_transaction_id",
+            (sell_transaction_id,),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def add_many(self, allocations: list[LotAllocation]) -> None:
+        self.connection.executemany(
+            """INSERT INTO lot_allocations (
+            sell_transaction_id, buy_transaction_id, matched_quantity,
+            matched_trade_cost, allocated_buy_fee, source, source_reference,
+            created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    item.sell_transaction_id,
+                    item.buy_transaction_id,
+                    str(item.matched_quantity),
+                    str(item.matched_trade_cost),
+                    str(item.allocated_buy_fee),
+                    item.source,
+                    item.source_reference,
+                    item.created_at.isoformat(),
+                )
+                for item in allocations
+            ],
+        )
+        if self.auto_commit:
+            self.connection.commit()
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> LotAllocation:
+        values = dict(row)
+        for field in ("matched_quantity", "matched_trade_cost", "allocated_buy_fee"):
+            values[field] = _decimal(values[field])
+        values["created_at"] = datetime.fromisoformat(values["created_at"])
+        return LotAllocation.model_validate(values)
 
 
 class SQLiteStockNetEquityHistoryRepository:
@@ -216,8 +273,11 @@ class SQLiteBrokerImportRecordRepository:
 class SQLiteAnnualPnlSnapshotRepository:
     """Persist immutable one-row-per-date annual P/L facts."""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
         self.connection = connection
+        self.auto_commit = auto_commit
 
     def get_by_date(self, snapshot_date: date) -> AnnualPnlSnapshot | None:
         row = self.connection.execute(
@@ -247,7 +307,8 @@ class SQLiteAnnualPnlSnapshotRepository:
                 snapshot.created_at.isoformat(),
             ),
         )
-        self.connection.commit()
+        if self.auto_commit:
+            self.connection.commit()
 
     def list_between_dates(self, start: date, end: date) -> list[AnnualPnlSnapshot]:
         rows = self.connection.execute(
@@ -280,6 +341,31 @@ class SQLiteAnnualPnlSnapshotRepository:
         ):
             values[key] = _decimal(values[key])
         return AnnualPnlSnapshot.model_validate(values)
+
+    def replace(self, snapshot: AnnualPnlSnapshot) -> None:
+        """Explicit correction path; normal annual generation remains insert-only."""
+        cursor = self.connection.execute(
+            """UPDATE annual_pnl_snapshots SET valuation_date = ?, year = ?,
+            reporting_currency = ?, realized_pnl_ytd = ?, unrealized_pnl = ?,
+            dividend_income_ytd = ?, financing_cost_ytd = ?, other_cost_ytd = ?,
+            total_pnl_ytd = ? WHERE snapshot_date = ?""",
+            (
+                snapshot.valuation_date.isoformat(),
+                snapshot.year,
+                snapshot.reporting_currency.value,
+                str(snapshot.realized_pnl_ytd),
+                str(snapshot.unrealized_pnl),
+                str(snapshot.dividend_income_ytd),
+                str(snapshot.financing_cost_ytd),
+                str(snapshot.other_cost_ytd),
+                str(snapshot.total_pnl_ytd),
+                snapshot.snapshot_date.isoformat(),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError(f"annual snapshot missing for {snapshot.snapshot_date}")
+        if self.auto_commit:
+            self.connection.commit()
 
 
 class SQLiteInvestmentCostEventRepository:

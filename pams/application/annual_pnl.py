@@ -59,8 +59,8 @@ class AnnualPnlUseCase:
         self._dividends = dividends
         self._costs = costs
         self._fx_rates = fx_rates
-        self._engine = engine or AnnualPnlEngine()
         self._transaction_engine = transaction_engine or TransactionEngine()
+        self._engine = engine or AnnualPnlEngine(self._transaction_engine)
         self._corporate_actions = corporate_actions
 
     def ensure(
@@ -75,13 +75,33 @@ class AnnualPnlUseCase:
         existing = self._annual_snapshots.get_by_date(snapshot_date)
         if existing is not None:
             return existing
+        result = self.recalculate(
+            snapshot_date,
+            unrealized_pnl=unrealized_pnl,
+            valuation_date=valuation_date,
+            allow_unpersisted_valuation=not persist,
+        )
+        if persist:
+            self._annual_snapshots.add(result)
+        return result
+
+    def recalculate(
+        self,
+        snapshot_date: date,
+        *,
+        unrealized_pnl: Decimal | None = None,
+        valuation_date: date | None = None,
+        allow_unpersisted_valuation: bool = False,
+        transactions_override: list[Transaction] | None = None,
+    ) -> AnnualPnlSnapshot:
+        """Preview a correction from source ledgers without changing immutable rows."""
         daily = (
             self._daily_snapshots.get_by_date(valuation_date)
             if valuation_date is not None
             else self._daily_snapshots.get_latest_on_or_before(snapshot_date)
         )
         preview_without_persisted_valuation = (
-            daily is None and unrealized_pnl is not None and not persist
+            daily is None and unrealized_pnl is not None and allow_unpersisted_valuation
         )
         if daily is None and not preview_without_persisted_valuation:
             raise AnnualPnlApplicationError(
@@ -104,7 +124,11 @@ class AnnualPnlUseCase:
         if unrealized_pnl is None:
             assert daily is not None
             unrealized_pnl = daily.total_unrealized_pnl
-        transactions = self._transactions.list_filtered(end_date=snapshot_date)
+        transactions = (
+            [item for item in transactions_override if item.trade_date <= snapshot_date]
+            if transactions_override is not None
+            else self._transactions.list_filtered(end_date=snapshot_date)
+        )
         dividends = self._dividends.list_filtered()
         start = date(snapshot_date.year, 1, 1)
         costs = self._costs.list_between_dates(start, snapshot_date)
@@ -124,8 +148,6 @@ class AnnualPnlUseCase:
             actions,
             valuation_date=valuation_date,
         )
-        if persist:
-            self._annual_snapshots.add(result)
         return result
 
     def realized_sales(

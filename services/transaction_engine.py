@@ -9,6 +9,7 @@ from domain import (
     Currency,
     Holding,
     HoldingType,
+    LotAllocation,
     Market,
     PortfolioLedger,
     RealizedSale,
@@ -31,6 +32,10 @@ class OversellError(TransactionEngineError):
 
 class InvalidTransactionHistoryError(TransactionEngineError):
     """Raised when ordered transaction history violates ledger invariants."""
+
+
+class InvalidLotAllocationError(InvalidTransactionHistoryError):
+    """Raised when explicit sale-to-buy matching cannot be replayed safely."""
 
 
 class UnsupportedTransactionTypeError(TransactionEngineError):
@@ -56,8 +61,13 @@ class _PositionState:
 class TransactionEngine:
     """Build moving-weighted-average positions from immutable transaction input."""
 
-    def __init__(self, corporate_actions: list[CorporateAction] | None = None) -> None:
+    def __init__(
+        self,
+        corporate_actions: list[CorporateAction] | None = None,
+        lot_allocations: list[LotAllocation] | None = None,
+    ) -> None:
         self.corporate_actions = tuple(corporate_actions or ())
+        self.lot_allocations = tuple(lot_allocations or ())
 
     @staticmethod
     def summarize_expenses(
@@ -96,6 +106,17 @@ class TransactionEngine:
         total_sell_fees = Decimal("0")
         total_taxes = Decimal("0")
         realized_sales: list[RealizedSale] = []
+        purchases = {
+            item.id: item
+            for item in transactions
+            if item.transaction_type is TransactionType.BUY
+        }
+        matches: dict[str, list[LotAllocation]] = {}
+        for allocation in self.lot_allocations:
+            matches.setdefault(allocation.sell_transaction_id, []).append(allocation)
+        used_buy_quantity: dict[str, Decimal] = {}
+        used_buy_fees: dict[str, Decimal] = {}
+        unmatched_sale_dates: dict[PositionKey, list[object]] = {}
         events: list[tuple[object, int, str, Transaction | CorporateAction]] = [
             (
                 item.trade_date,
@@ -139,7 +160,27 @@ class TransactionEngine:
                     f"SELL exceeds held quantity for {transaction.symbol} "
                     f"in transaction {transaction.id}"
                 )
-            allocated_cost = state.average_cost * transaction.quantity
+            sale_matches = matches.get(transaction.id, [])
+            if sale_matches:
+                allocated_cost = self._matched_cost(
+                    transaction,
+                    sale_matches,
+                    purchases,
+                    used_buy_quantity,
+                    used_buy_fees,
+                    unmatched_sale_dates.get(key, []),
+                )
+            else:
+                allocated_cost = (
+                    state.cost_basis
+                    if transaction.quantity == state.quantity
+                    else state.average_cost * transaction.quantity
+                )
+                unmatched_sale_dates.setdefault(key, []).append(transaction.trade_date)
+            if sale_matches and allocated_cost > state.cost_basis:
+                raise InvalidLotAllocationError(
+                    f"Matched cost exceeds available basis for {transaction.id}"
+                )
             net_proceeds = (
                 transaction.quantity * transaction.price
                 - transaction.fees
@@ -156,7 +197,7 @@ class TransactionEngine:
                     transaction.market.value,
                     transaction.currency,
                     transaction.quantity,
-                    state.average_cost,
+                    allocated_cost / transaction.quantity,
                     allocated_cost,
                     transaction.quantity * transaction.price,
                     transaction.fees,
@@ -173,6 +214,8 @@ class TransactionEngine:
             if state.quantity == 0:
                 state.cost_basis = Decimal("0")
                 state.average_cost = Decimal("0")
+            elif sale_matches:
+                state.average_cost = state.cost_basis / state.quantity
 
         positions = tuple(
             TransactionPosition(
@@ -202,6 +245,62 @@ class TransactionEngine:
             total_taxes,
             tuple(realized_sales),
         )
+
+    @staticmethod
+    def _matched_cost(
+        sale: Transaction,
+        allocations: list[LotAllocation],
+        purchases: dict[str, Transaction],
+        used_quantity: dict[str, Decimal],
+        used_fees: dict[str, Decimal],
+        unmatched_sale_dates: list[object],
+    ) -> Decimal:
+        """Validate complete explicit matching; BUY fees remain separate expenses."""
+        if (
+            sum((item.matched_quantity for item in allocations), Decimal("0"))
+            != sale.quantity
+        ):
+            raise InvalidLotAllocationError(
+                f"Incomplete lot allocation for SELL {sale.id}"
+            )
+        seen: set[str] = set()
+        cost = Decimal("0")
+        for item in allocations:
+            if item.buy_transaction_id in seen:
+                raise InvalidLotAllocationError(
+                    f"Duplicate BUY match for SELL {sale.id}"
+                )
+            seen.add(item.buy_transaction_id)
+            buy = purchases.get(item.buy_transaction_id)
+            if buy is None or (buy.symbol, buy.market, buy.currency) != (
+                sale.symbol,
+                sale.market,
+                sale.currency,
+            ):
+                raise InvalidLotAllocationError(
+                    f"BUY match is missing or belongs to another position: {item.buy_transaction_id}"
+                )
+            if buy.trade_date > sale.trade_date or any(
+                buy.trade_date <= previous <= sale.trade_date
+                for previous in unmatched_sale_dates
+            ):
+                raise InvalidLotAllocationError(
+                    f"BUY lot availability is ambiguous for SELL {sale.id}"
+                )
+            if item.matched_trade_cost != item.matched_quantity * buy.price:
+                raise InvalidLotAllocationError(
+                    f"Matched trade cost differs from BUY price for {buy.id}"
+                )
+            quantity = used_quantity.get(buy.id, Decimal("0")) + item.matched_quantity
+            fees = used_fees.get(buy.id, Decimal("0")) + item.allocated_buy_fee
+            if quantity > buy.quantity or fees > buy.fees:
+                raise InvalidLotAllocationError(
+                    f"Matched quantity or BUY fee exceeds BUY {buy.id}"
+                )
+            used_quantity[buy.id] = quantity
+            used_fees[buy.id] = fees
+            cost += item.matched_trade_cost
+        return cost
 
     @staticmethod
     def _apply_corporate_action(

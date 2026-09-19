@@ -42,6 +42,7 @@ class PostgreSQLMarketDataUnitOfWork:
 
     def __init__(self, connection: object) -> None:
         self.connection = connection
+        self.holdings = PostgreSQLHoldingRepository(connection, auto_commit=False)
         self.price_quotes = PostgreSQLPriceQuoteRepository(
             connection, auto_commit=False
         )

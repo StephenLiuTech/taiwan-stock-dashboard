@@ -32,6 +32,7 @@ from services.report_sections import NewsService, ReportSectionService
 from services.snapshot import DuplicateSnapshotError, SnapshotService
 from services.transaction_engine import (
     HoldingProjectionMetadata,
+    InvalidLotAllocationError,
     InvalidTransactionHistoryError,
     OversellError,
     TransactionEngine,
@@ -61,6 +62,7 @@ __all__ = [
     "LiabilityPrincipalReplayError",
     "HoldingProjectionMetadata",
     "InvalidTransactionHistoryError",
+    "InvalidLotAllocationError",
     "OversellError",
     "PortfolioService",
     "SnapshotService",

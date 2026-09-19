@@ -412,7 +412,8 @@ def compose_daily_report(
                 liabilities=context.repositories.liabilities,
                 corporate_actions=context.repositories.corporate_actions,
                 transaction_engine=TransactionEngine(
-                    context.repositories.corporate_actions.list_all()
+                    context.repositories.corporate_actions.list_all(),
+                    context.repositories.lot_allocations.list_all(),
                 ),
             ),
             annual_pnl=context.annual_pnl,
@@ -749,7 +750,8 @@ def _compose(
         quotes = repositories.price_quotes
         transaction_repository = repositories.transactions
         transaction_engine = TransactionEngine(
-            repositories.corporate_actions.list_all()
+            repositories.corporate_actions.list_all(),
+            repositories.lot_allocations.list_all(),
         )
         annual_pnl = AnnualPnlUseCase(
             transaction_repository,

@@ -20,6 +20,7 @@ from repositories.interfaces import (
     InvestmentCostEventRepository,
     LiabilityPrincipalEventRepository,
     LiabilityRepository,
+    LotAllocationRepository,
     MarginTransactionUnitOfWork,
     MarketDataUnitOfWork,
     PositionSnapshotRepository,
@@ -46,6 +47,7 @@ from repositories.postgresql import (
     PostgreSQLInvestmentCostEventRepository,
     PostgreSQLLiabilityPrincipalEventRepository,
     PostgreSQLLiabilityRepository,
+    PostgreSQLLotAllocationRepository,
     PostgreSQLPositionSnapshotRepository,
     PostgreSQLPriceQuoteRepository,
     PostgreSQLReportDeliveryRepository,
@@ -72,6 +74,7 @@ from repositories.sqlite import (
     SQLiteInvestmentCostEventRepository,
     SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
+    SQLiteLotAllocationRepository,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
     SQLiteReportDeliveryRepository,
@@ -108,6 +111,7 @@ class RepositoryBundle:
     broker_import_uow: BrokerImportUnitOfWork
     stock_net_equity_history: StockNetEquityHistoryRepository
     stock_net_equity_history_uow: StockNetEquityHistoryUnitOfWork
+    lot_allocations: LotAllocationRepository
 
 
 def create_repositories(backend: str, connection: object) -> RepositoryBundle:
@@ -136,6 +140,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             SQLiteBrokerImportUnitOfWork(connection),
             SQLiteStockNetEquityHistoryRepository(connection),
             SQLiteStockNetEquityHistoryUnitOfWork(connection),
+            SQLiteLotAllocationRepository(connection),
         )
     if backend == "postgresql":
         return RepositoryBundle(
@@ -161,5 +166,6 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             PostgreSQLBrokerImportUnitOfWork(connection),
             PostgreSQLStockNetEquityHistoryRepository(connection),
             PostgreSQLStockNetEquityHistoryUnitOfWork(connection),
+            PostgreSQLLotAllocationRepository(connection),
         )
     raise ValueError(f"Unsupported database backend: {backend}")

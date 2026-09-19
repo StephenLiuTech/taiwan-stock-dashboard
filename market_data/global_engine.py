@@ -111,6 +111,7 @@ class GlobalMarketDataEngine:
             trade_date, holdings_override, reuse_persisted_taiwan=True
         )
         with self.unit_of_work.transaction():
+            self._sync_holdings(result)
             self.unit_of_work.price_quotes.upsert_many(list(result.quotes))
             if fx_rate is not None:
                 self.unit_of_work.fx_rates.upsert(fx_rate)
@@ -133,6 +134,7 @@ class GlobalMarketDataEngine:
         result, fx_rate = self._preview(trade_date, holdings_override)
         positions = self._snapshots(result)
         with self.unit_of_work.transaction():
+            self._sync_holdings(result)
             self.unit_of_work.price_quotes.upsert_many(list(result.quotes))
             if fx_rate is not None:
                 self.unit_of_work.fx_rates.upsert(fx_rate)
@@ -156,6 +158,7 @@ class GlobalMarketDataEngine:
     ) -> MarketDataRefreshResult:
         result, fx_rate = self._preview(trade_date, holdings_override)
         with self.unit_of_work.transaction():
+            self._sync_holdings(result)
             self.unit_of_work.price_quotes.replace_many_for_date(
                 trade_date, [q for q in result.quotes if q.trade_date == trade_date]
             )
@@ -430,3 +433,8 @@ class GlobalMarketDataEngine:
             )
             for item in result.summary.positions
         ]
+
+    def _sync_holdings(self, result: MarketDataRefreshResult) -> None:
+        """Persist every projected holding before dependent position rows."""
+        for holding in result.holdings:
+            self.unit_of_work.holdings.upsert(holding)

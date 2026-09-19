@@ -9,7 +9,19 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from config.settings import Settings
-from domain import Currency, FxRate, Holding, Market, PriceQuote
+from domain import (
+    Currency,
+    DailySnapshot,
+    FxRate,
+    Holding,
+    Market,
+    PortfolioSummary,
+    PositionValuation,
+    PriceQuote,
+    Transaction,
+    TransactionType,
+)
+from market_data.engine import MarketDataRefreshResult
 from market_data.exceptions import (
     ProviderAuthenticationError,
     ProviderDataError,
@@ -27,15 +39,19 @@ from market_data.providers.global_markets import _daily_series
 from pams.application.send_daily_report import DailyEmailPosition, DailyEmailReport
 from pams.application.valuate_portfolio import ValuatePortfolioUseCase
 from pams.delivery.rendering import DailyEmailReportRenderer
+from repositories.market_data_uow import SQLiteMarketDataUnitOfWork
 from repositories.sqlite import (
     SQLiteFxRateRepository,
     SQLiteHoldingRepository,
+    SQLiteLiabilityRepository,
+    SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
 )
 from services.multi_currency_valuation import (
     MultiCurrencyValuationEngine,
     MultiCurrencyValuationError,
 )
+from services.transaction_engine import TransactionEngine
 
 
 class DocumentTransport:
@@ -285,6 +301,88 @@ def test_application_valuation_translates_us_holding_to_twd(
     result = ValuatePortfolioUseCase(holdings, quotes, fx_rates=rates).execute()
     assert result.total_market_value == Decimal("34562.00")
     assert result.total_cost == Decimal("31420.00")
+
+
+def test_global_rebuild_persists_new_ledger_holding_before_position_snapshot(
+    connection: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_date = date(2026, 9, 9)
+    transaction = Transaction(
+        symbol="AAPL",
+        market=Market.US,
+        transaction_type=TransactionType.BUY,
+        trade_date=report_date,
+        settlement_date=report_date,
+        quantity=Decimal("1"),
+        price=Decimal("312.50"),
+        fees=Decimal("0.25"),
+        taxes=Decimal("0"),
+        currency=Currency.USD,
+    )
+    projected = TransactionEngine().project_current_holdings([transaction], [])
+    aapl = projected[0]
+    position = PositionValuation(
+        holding_id=aapl.id,
+        symbol=aapl.symbol,
+        market=aapl.market,
+        native_currency=aapl.currency,
+        quote_date=report_date,
+        fx_rate=Decimal("32"),
+        fx_rate_date=report_date,
+        quantity=aapl.quantity,
+        average_cost=aapl.average_cost,
+        close_price=Decimal("315"),
+        cost_basis=Decimal("10000"),
+        market_value=Decimal("10080"),
+        unrealized_pnl=Decimal("80"),
+        unrealized_return=Decimal("0.008"),
+        portfolio_weight=Decimal("1"),
+        daily_value_change=Decimal("80"),
+        daily_return=Decimal("0.008"),
+    )
+    summary = PortfolioSummary(
+        valuation_date=report_date,
+        positions=[position],
+        total_market_value=Decimal("10080"),
+        total_cost_basis=Decimal("10000"),
+        total_unrealized_pnl=Decimal("80"),
+        total_liabilities=Decimal("0"),
+        net_asset_value=Decimal("10080"),
+        leverage_ratio=Decimal("0"),
+    )
+    snapshot = DailySnapshot(
+        snapshot_date=report_date,
+        total_market_value=summary.total_market_value,
+        total_cost_basis=summary.total_cost_basis,
+        total_unrealized_pnl=summary.total_unrealized_pnl,
+        total_liabilities=summary.total_liabilities,
+        net_asset_value=summary.net_asset_value,
+        leverage_ratio=summary.leverage_ratio,
+        high_water_mark=summary.net_asset_value,
+        drawdown=Decimal("0"),
+    )
+    result = MarketDataRefreshResult((), projected, summary, snapshot, report_date)
+    holdings = SQLiteHoldingRepository(connection)
+    engine = GlobalMarketDataEngine(
+        SimpleNamespace(),
+        holdings,
+        SQLiteLiabilityRepository(connection),
+        SQLiteMarketDataUnitOfWork(connection),
+        SQLiteFxRateRepository(connection),
+        None,
+        None,
+    )
+    monkeypatch.setattr(engine, "_preview", lambda *_args, **_kwargs: (result, None))
+
+    engine.rebuild(report_date, holdings_override=projected)
+    engine.rebuild(report_date, holdings_override=projected)
+
+    persisted = holdings.get_by_id("holding-ledger-us-usd-aapl")
+    assert persisted is not None
+    assert persisted.quantity == Decimal("1")
+    positions = SQLitePositionSnapshotRepository(connection).list_by_date(report_date)
+    assert len(positions) == 1
+    assert positions[0].holding_id == persisted.id
 
 
 class CompletenessQuoteRepository:

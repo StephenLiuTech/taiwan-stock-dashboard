@@ -126,6 +126,17 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_transactions_symbol_date ON transactions(symbol, trade_date);
+CREATE TABLE IF NOT EXISTS lot_allocations (
+    sell_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE RESTRICT,
+    buy_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE RESTRICT,
+    matched_quantity TEXT NOT NULL CHECK (matched_quantity::NUMERIC > 0),
+    matched_trade_cost TEXT NOT NULL CHECK (matched_trade_cost::NUMERIC >= 0),
+    allocated_buy_fee TEXT NOT NULL CHECK (allocated_buy_fee::NUMERIC >= 0),
+    source TEXT NOT NULL, source_reference TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (sell_transaction_id, buy_transaction_id)
+);
+CREATE INDEX IF NOT EXISTS ix_lot_allocations_buy ON lot_allocations(buy_transaction_id);
 CREATE TABLE IF NOT EXISTS corporate_actions (
     id TEXT PRIMARY KEY, symbol TEXT NOT NULL, market TEXT NOT NULL,
     effective_date TEXT NOT NULL, quantity_multiplier TEXT NOT NULL,
@@ -299,6 +310,8 @@ def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
             _migrate_postgresql_v12_to_v13(connection)
         if 0 < current_version <= 13:
             _migrate_postgresql_v13_to_v14(connection)
+        if 0 < current_version <= 14:
+            _migrate_postgresql_v14_to_v15(connection)
 
         for version in range(current_version + 1, SCHEMA_VERSION + 1):
             connection.execute(
@@ -410,4 +423,11 @@ def _migrate_postgresql_v13_to_v14(connection: PostgreSQLConnection) -> None:
     """Add isolated historical Stock Net Equity facts."""
     for statement in POSTGRESQL_SCHEMA.split(";"):
         if "stock_net_equity_history" in statement:
+            connection.execute(statement)
+
+
+def _migrate_postgresql_v14_to_v15(connection: PostgreSQLConnection) -> None:
+    """Add explicit sale-to-buy matching without rewriting financial history."""
+    for statement in POSTGRESQL_SCHEMA.split(";"):
+        if "lot_allocations" in statement:
             connection.execute(statement)

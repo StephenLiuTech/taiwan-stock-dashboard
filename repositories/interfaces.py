@@ -17,6 +17,7 @@ from domain import (
     InvestmentCostEvent,
     Liability,
     LiabilityPrincipalEvent,
+    LotAllocation,
     PositionSnapshot,
     PriceQuote,
     Transaction,
@@ -49,9 +50,18 @@ class BrokerImportRecordRepository(Protocol):
     ) -> bool: ...
 
 
+class LotAllocationRepository(Protocol):
+    """Immutable, explicitly sourced sale-to-buy matching records."""
+
+    def list_all(self) -> list[LotAllocation]: ...
+    def list_by_sell(self, sell_transaction_id: str) -> list[LotAllocation]: ...
+    def add_many(self, allocations: list[LotAllocation]) -> None: ...
+
+
 class AnnualPnlSnapshotRepository(Protocol):
     def get_by_date(self, snapshot_date: date) -> AnnualPnlSnapshot | None: ...
     def add(self, snapshot: AnnualPnlSnapshot) -> None: ...
+    def replace(self, snapshot: AnnualPnlSnapshot) -> None: ...
     def list_between_dates(self, start: date, end: date) -> list[AnnualPnlSnapshot]: ...
     def list_for_year(self, year: int) -> list[AnnualPnlSnapshot]: ...
 
@@ -224,6 +234,7 @@ class WatchlistRepository(Protocol):
 class MarketDataUnitOfWork(Protocol):
     """Atomic persistence boundary for one valuation snapshot."""
 
+    holdings: HoldingRepository
     price_quotes: PriceQuoteRepository
     fx_rates: FxRateRepository
     daily_snapshots: SnapshotRepository

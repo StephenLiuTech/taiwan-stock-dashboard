@@ -1,0 +1,14 @@
+{
+  "sell_transaction_id": "56f0a948-005f-422f-80e0-b59b8c632c23",
+  "buy_fees": [
+    {"transaction_id": "cd255a7d-7eef-4b67-82d9-b95110caf164", "expected_fee": "0", "corrected_fee": "22"},
+    {"transaction_id": "3ea787af-9c5e-4d3a-b4a0-24a8553e3eed", "expected_fee": "0", "corrected_fee": "22"},
+    {"transaction_id": "41f6ead9-d6c1-4510-9548-e483032cbcf4", "expected_fee": "0", "corrected_fee": "17"}
+  ],
+  "allocations": [
+    {"sell_transaction_id": "56f0a948-005f-422f-80e0-b59b8c632c23", "buy_transaction_id": "780df71e-4573-4aee-a01b-262eeff0fdce", "matched_quantity": "80", "matched_trade_cost": "56560", "allocated_buy_fee": "22", "source": "broker_realized_statement", "source_reference": "3293-2026-09-18-approved-lot-match"},
+    {"sell_transaction_id": "56f0a948-005f-422f-80e0-b59b8c632c23", "buy_transaction_id": "cd255a7d-7eef-4b67-82d9-b95110caf164", "matched_quantity": "80", "matched_trade_cost": "56880", "allocated_buy_fee": "22", "source": "broker_realized_statement", "source_reference": "3293-2026-09-18-approved-lot-match"},
+    {"sell_transaction_id": "56f0a948-005f-422f-80e0-b59b8c632c23", "buy_transaction_id": "3ea787af-9c5e-4d3a-b4a0-24a8553e3eed", "matched_quantity": "80", "matched_trade_cost": "56480", "allocated_buy_fee": "22", "source": "broker_realized_statement", "source_reference": "3293-2026-09-18-approved-lot-match"},
+    {"sell_transaction_id": "56f0a948-005f-422f-80e0-b59b8c632c23", "buy_transaction_id": "41f6ead9-d6c1-4510-9548-e483032cbcf4", "matched_quantity": "60", "matched_trade_cost": "42660", "allocated_buy_fee": "17", "source": "broker_realized_statement", "source_reference": "3293-2026-09-18-approved-lot-match"}
+  ]
+}

@@ -11,6 +11,7 @@ from repositories.sqlite import (
     SQLiteInvestmentCostEventRepository,
     SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
+    SQLiteLotAllocationRepository,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
     SQLiteReportDeliveryRepository,
@@ -19,6 +20,10 @@ from repositories.sqlite import (
     SQLiteTransactionRepository,
     SQLiteWatchlistRepository,
 )
+
+
+class PostgreSQLLotAllocationRepository(SQLiteLotAllocationRepository):
+    """Persist auditable lot matches in PostgreSQL."""
 
 
 class PostgreSQLStockNetEquityHistoryRepository(SQLiteStockNetEquityHistoryRepository):
