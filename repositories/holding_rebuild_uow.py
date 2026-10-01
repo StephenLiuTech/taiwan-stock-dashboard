@@ -41,6 +41,9 @@ class SQLiteMarginTransactionUnitOfWork:
         self.holdings = SQLiteHoldingRepository(connection, auto_commit=False)
         self.transactions = SQLiteTransactionRepository(connection, auto_commit=False)
         self.liabilities = SQLiteLiabilityRepository(connection, auto_commit=False)
+        self.liability_principal_events = SQLiteLiabilityPrincipalEventRepository(
+            connection, auto_commit=False
+        )
 
     @contextmanager
     def transaction(self) -> Iterator[None]:

@@ -126,6 +126,32 @@ class SQLiteStockNetEquityHistoryRepository:
             self.connection.commit()
         return inserted
 
+    def replace(self, row: HistoricalStockNetEquity) -> None:
+        cursor = self.connection.execute(
+            """UPDATE stock_net_equity_history SET total_market_value = ?,
+            pledge_debt = ?, margin_debt = ?, total_liabilities = ?,
+            stock_net_equity = ?, quality_status = ?, source = ?,
+            source_reference = ?, imported_at = ? WHERE snapshot_date = ?""",
+            (
+                _optional_decimal(row.total_market_value),
+                _optional_decimal(row.pledge_debt),
+                _optional_decimal(row.margin_debt),
+                _optional_decimal(row.total_liabilities),
+                _optional_decimal(row.stock_net_equity),
+                row.quality_status.value,
+                row.source,
+                row.source_reference,
+                row.imported_at.isoformat(),
+                row.snapshot_date.isoformat(),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError(
+                f"Stock Net Equity history missing for {row.snapshot_date}"
+            )
+        if self.auto_commit:
+            self.connection.commit()
+
     @staticmethod
     def _from_row(row: sqlite3.Row) -> HistoricalStockNetEquity:
         values = dict(row)
@@ -206,6 +232,35 @@ class SQLiteLiabilityPrincipalEventRepository:
         if before is not None:
             return self.connection.total_changes - before
         return max(cursor.rowcount, 0)
+
+    def replace(self, event: LiabilityPrincipalEvent) -> None:
+        cursor = self.connection.execute(
+            """UPDATE liability_principal_events SET liability_id = ?,
+            effective_date = ?, sequence = ?, event_type = ?, principal_delta = ?,
+            resulting_principal = ?, source = ?, reference = ?, notes = ?,
+            created_at = ? WHERE id = ?""",
+            (
+                event.liability_id,
+                event.effective_date.isoformat(),
+                event.sequence,
+                event.event_type.value,
+                str(event.principal_delta),
+                (
+                    str(event.resulting_principal)
+                    if event.resulting_principal is not None
+                    else None
+                ),
+                event.source,
+                event.reference,
+                event.notes,
+                event.created_at.isoformat(),
+                event.id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError(f"liability principal event missing: {event.id}")
+        if self.auto_commit:
+            self.connection.commit()
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> LiabilityPrincipalEvent:
@@ -371,8 +426,11 @@ class SQLiteAnnualPnlSnapshotRepository:
 class SQLiteInvestmentCostEventRepository:
     """Persist dated financing and other investment expenses."""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
         self.connection = connection
+        self.auto_commit = auto_commit
 
     def add(self, event: InvestmentCostEvent) -> None:
         self.connection.execute(
@@ -388,7 +446,8 @@ class SQLiteInvestmentCostEventRepository:
                 event.created_at.isoformat(),
             ),
         )
-        self.connection.commit()
+        if self.auto_commit:
+            self.connection.commit()
 
     def insert_many_if_absent(self, events: list[InvestmentCostEvent]) -> int:
         """Atomically insert new semantic IDs without rewriting existing facts."""
@@ -417,13 +476,35 @@ class SQLiteInvestmentCostEventRepository:
                     for event in events
                 ],
             )
-            self.connection.commit()
+            if self.auto_commit:
+                self.connection.commit()
         except Exception:
             self.connection.rollback()
             raise
         if before is not None:
             return self.connection.total_changes - before
         return max(cursor.rowcount, 0)
+
+    def replace(self, event: InvestmentCostEvent) -> None:
+        cursor = self.connection.execute(
+            """UPDATE investment_cost_events SET event_date = ?, cost_type = ?,
+            amount = ?, currency = ?, description = ?, source = ?, created_at = ?
+            WHERE id = ?""",
+            (
+                event.event_date.isoformat(),
+                event.cost_type.value,
+                str(event.amount),
+                event.currency.value,
+                event.description,
+                event.source,
+                event.created_at.isoformat(),
+                event.id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError(f"investment cost event missing: {event.id}")
+        if self.auto_commit:
+            self.connection.commit()
 
     def list_between_dates(self, start: date, end: date) -> list[InvestmentCostEvent]:
         rows = self.connection.execute(

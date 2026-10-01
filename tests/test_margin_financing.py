@@ -23,6 +23,7 @@ from pams.application.exceptions import DuplicateTransactionError
 from repositories.holding_rebuild_uow import SQLiteMarginTransactionUnitOfWork
 from repositories.sqlite import (
     SQLiteHoldingRepository,
+    SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
     SQLiteTransactionRepository,
 )
@@ -154,19 +155,37 @@ def test_margin_buy_atomically_updates_transaction_holding_and_liability(
     assert margin.financed_symbol == "2027"
     assert margin.financed_quantity == Decimal("30000")
     assert margin.notes == "Accrued interest reference: NT$4,583"
+    event = SQLiteLiabilityPrincipalEventRepository(margin_database).list_by_liability(
+        "liability-margin-financing"
+    )
+    assert len(event) == 1
+    assert event[0].principal_delta == Decimal("60000")
+    assert event[0].resulting_principal == Decimal("767000")
+    assert event[0].reference == "margin-1"
     assert (
         SQLiteLiabilityRepository(margin_database).get_by_id("liability-stock-pledge")
         == pledge_before
     )
 
 
-def test_margin_decimal_precision_is_exact(margin_database: sqlite3.Connection) -> None:
-    result = use_case(
-        margin_database, Decimal("0.3333333333333333333333333333")
-    ).execute(command(quantity=Decimal("3"), price=Decimal("0.1")))
-    assert result.gross_purchase_value == Decimal("0.3")
-    assert result.self_funded_amount == Decimal("0.09999999999999999999999999999")
-    assert result.financed_principal == Decimal("0.2000000000000000000000000000")
+@pytest.mark.parametrize(
+    ("price", "expected_principal", "expected_cash"),
+    [
+        (Decimal("48.10"), Decimal("57000"), Decimal("39200")),
+        (Decimal("49.30"), Decimal("59000"), Decimal("39600")),
+        (Decimal("71.25"), Decimal("85000"), Decimal("57500")),
+    ],
+)
+def test_margin_principal_uses_broker_thousand_rounding(
+    margin_database: sqlite3.Connection,
+    price: Decimal,
+    expected_principal: Decimal,
+    expected_cash: Decimal,
+) -> None:
+    result = use_case(margin_database).execute(command(price=price))
+    assert result.gross_purchase_value == price * Decimal("2000")
+    assert result.financed_principal == expected_principal
+    assert result.self_funded_amount == expected_cash
 
 
 def test_duplicate_margin_purchase_does_not_apply_twice(
@@ -184,6 +203,7 @@ def test_duplicate_margin_purchase_does_not_apply_twice(
     assert SQLiteHoldingRepository(margin_database).list_all()[0].quantity == Decimal(
         "38000"
     )
+    assert len(SQLiteLiabilityPrincipalEventRepository(margin_database).list_all()) == 1
 
 
 def test_failure_rolls_back_all_margin_writes(
@@ -206,6 +226,35 @@ def test_failure_rolls_back_all_margin_writes(
     )
     with pytest.raises(RuntimeError, match="simulated"):
         case.execute(command())
+    assert SQLiteTransactionRepository(margin_database).get_by_id("margin-1") is None
+    assert SQLiteHoldingRepository(margin_database).list_all()[0].quantity == Decimal(
+        "36000"
+    )
+    margin = SQLiteLiabilityRepository(margin_database).get_by_id(
+        "liability-margin-financing"
+    )
+    assert margin is not None and margin.principal == Decimal("707000")
+
+
+def test_principal_event_failure_rolls_back_transaction_holding_and_master(
+    margin_database: sqlite3.Connection,
+) -> None:
+    unit = SQLiteMarginTransactionUnitOfWork(margin_database)
+
+    class FailingEvents:
+        def list_by_liability(self, liability_id: str) -> list[object]:
+            del liability_id
+            return []
+
+        def insert_many_if_absent(self, events: list[object]) -> int:
+            del events
+            raise RuntimeError("simulated principal-event write failure")
+
+    unit.liability_principal_events = FailingEvents()  # type: ignore[assignment]
+    with pytest.raises(RuntimeError, match="principal-event"):
+        AddTransactionUseCase(
+            SQLiteTransactionRepository(margin_database), unit, Decimal("0.40")
+        ).execute(command())
     assert SQLiteTransactionRepository(margin_database).get_by_id("margin-1") is None
     assert SQLiteHoldingRepository(margin_database).list_all()[0].quantity == Decimal(
         "36000"

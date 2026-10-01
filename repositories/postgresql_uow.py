@@ -96,6 +96,9 @@ class PostgreSQLMarginTransactionUnitOfWork:
             connection, auto_commit=False
         )
         self.liabilities = PostgreSQLLiabilityRepository(connection, auto_commit=False)
+        self.liability_principal_events = PostgreSQLLiabilityPrincipalEventRepository(
+            connection, auto_commit=False
+        )
 
     @contextmanager
     def transaction(self) -> Iterator[None]:

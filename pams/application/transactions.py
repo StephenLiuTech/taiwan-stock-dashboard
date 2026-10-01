@@ -1,11 +1,14 @@
 """Transaction entry and query application workflows."""
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from uuid import NAMESPACE_URL, uuid5
 
 from domain import (
     Currency,
     FinancingType,
+    LiabilityPrincipalEvent,
+    LiabilityPrincipalEventType,
     LiabilityType,
     Market,
     Transaction,
@@ -130,6 +133,37 @@ class AddTransactionUseCase:
             if len(liabilities) != 1:
                 raise ValueError("exactly one margin-financing liability is required")
             financing = self.margin_service.apply(transaction, liabilities[0])
+            history = unit.liability_principal_events.list_by_liability(
+                liabilities[0].id
+            )
+            sequence = 1 + max(
+                (
+                    item.sequence
+                    for item in history
+                    if item.effective_date == transaction.trade_date
+                ),
+                default=-1,
+            )
+            principal_event = LiabilityPrincipalEvent(
+                id=str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        f"margin-principal|{liabilities[0].id}|{transaction.id}",
+                    )
+                ),
+                liability_id=liabilities[0].id,
+                effective_date=transaction.trade_date,
+                sequence=sequence,
+                event_type=LiabilityPrincipalEventType.INCREASE,
+                principal_delta=financing.financed_principal,
+                resulting_principal=financing.updated_liability.principal,
+                source="transaction entry",
+                reference=transaction.id,
+                notes="Broker-rounded margin principal from margin BUY",
+                created_at=datetime.combine(
+                    transaction.trade_date, datetime.min.time(), UTC
+                ),
+            )
             unit.transactions.add(transaction)
             persisted_holdings = unit.holdings.list_all()
             projected = self.transaction_engine.project_current_holdings(
@@ -144,6 +178,13 @@ class AddTransactionUseCase:
             )
             unit.holdings.upsert(holding)
             unit.liabilities.upsert(financing.updated_liability)
+            inserted = unit.liability_principal_events.insert_many_if_absent(
+                [principal_event]
+            )
+            if inserted != 1:
+                raise DuplicateTransactionError(
+                    "Margin principal event already exists for this transaction"
+                )
             return _record(transaction, financing, holding.quantity)
 
     @staticmethod

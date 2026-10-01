@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 
 from domain import (
     Currency,
@@ -31,6 +31,8 @@ class MarginFinancingResult:
 
 class MarginFinancingService:
     """Apply configured broker margin ratios to one Taiwan BUY transaction."""
+
+    PRINCIPAL_INCREMENT = Decimal("1000")
 
     def __init__(self, self_funding_ratio: Decimal) -> None:
         if self_funding_ratio <= 0 or self_funding_ratio >= 1:
@@ -65,8 +67,11 @@ class MarginFinancingService:
                 f"margin liability already tracks a different symbol: {symbol}"
             )
         gross = transaction.quantity * transaction.price
-        self_funded = gross * self.self_funding_ratio
-        financed = gross - self_funded
+        raw_financed = gross * (Decimal("1") - self.self_funding_ratio)
+        financed = (raw_financed / self.PRINCIPAL_INCREMENT).to_integral_value(
+            rounding=ROUND_FLOOR
+        ) * self.PRINCIPAL_INCREMENT
+        self_funded = gross - financed
         updated_quantity = existing_quantity + transaction.quantity
         updated = liability.model_copy(
             update={
