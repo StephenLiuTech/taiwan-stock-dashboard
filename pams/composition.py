@@ -626,6 +626,7 @@ def _compose(
             liabilities,
             repositories.market_data_uow,
             liability_principal_events=repositories.liability_principal_events,
+            transactions=repositories.transactions,
         )
         alpha_key = (
             settings.alpha_vantage_api_key.get_secret_value()
@@ -678,6 +679,7 @@ def _compose(
                 us_provider,
                 fx_provider,
                 repositories.liability_principal_events,
+                repositories.transactions,
             )
 
         engine = global_engine(engine)
@@ -801,6 +803,7 @@ def _compose(
                     liability_principal_events=(
                         repositories.liability_principal_events
                     ),
+                    transactions=repositories.transactions,
                 )
             )
 

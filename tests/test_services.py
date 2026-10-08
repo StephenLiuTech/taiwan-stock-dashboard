@@ -14,6 +14,8 @@ from domain import (
     Market,
     PortfolioSummary,
     PriceQuote,
+    Transaction,
+    TransactionType,
 )
 from repositories import (
     SQLiteHoldingRepository,
@@ -76,6 +78,105 @@ def test_portfolio_calculates_weight_and_daily_change() -> None:
     position = value_summary().positions[0]
     assert position.portfolio_weight == Decimal("1")
     assert position.daily_value_change == Decimal("100")
+
+
+def transaction(
+    transaction_type: TransactionType,
+    quantity: str,
+    price: str,
+    *,
+    fees: str = "0",
+    taxes: str = "0",
+) -> Transaction:
+    return Transaction(
+        id=f"{transaction_type.value}-{quantity}-{price}",
+        symbol="2059",
+        market=Market.TWSE,
+        transaction_type=transaction_type,
+        trade_date=date(2026, 10, 8),
+        settlement_date=date(2026, 10, 8),
+        quantity=Decimal(quantity),
+        price=Decimal(price),
+        fees=Decimal(fees),
+        taxes=Decimal(taxes),
+        currency=Currency.TWD,
+    )
+
+
+def transaction_day_position(
+    ending_quantity: str,
+    close: str,
+    previous_close: str,
+    transactions: list[Transaction],
+) -> object:
+    holding = Holding(
+        id="holding-ledger-twse-twd-2059",
+        symbol="2059",
+        name="川湖",
+        market=Market.TWSE,
+        currency=Currency.TWD,
+        quantity=Decimal(ending_quantity),
+        average_cost=Decimal("100"),
+    )
+    quote = PriceQuote(
+        symbol="2059",
+        market=Market.TWSE,
+        trade_date=date(2026, 10, 8),
+        close_price=Decimal(close),
+        previous_close=Decimal(previous_close),
+        currency=Currency.TWD,
+        source="fixture",
+    )
+    return (
+        PortfolioService()
+        .value_portfolio(
+            [holding],
+            [quote],
+            [],
+            date(2026, 10, 8),
+            daily_transactions=transactions,
+        )
+        .positions[0]
+    )
+
+
+def test_new_position_daily_pnl_uses_trade_price_and_excludes_fees() -> None:
+    position = transaction_day_position(
+        "1",
+        "10615",
+        "10500",
+        [transaction(TransactionType.BUY, "1", "10625", fees="25")],
+    )
+
+    assert position.daily_value_change == Decimal("-10")
+    assert position.daily_return == Decimal("-10") / Decimal("10625")
+
+
+def test_existing_position_addition_splits_overnight_and_purchase_pnl() -> None:
+    position = transaction_day_position(
+        "15", "120", "100", [transaction(TransactionType.BUY, "5", "110")]
+    )
+
+    assert position.daily_value_change == Decimal("250")
+
+
+def test_partial_sale_uses_execution_price_for_sold_quantity_without_costs() -> None:
+    position = transaction_day_position(
+        "6",
+        "120",
+        "100",
+        [
+            transaction(
+                TransactionType.SELL,
+                "4",
+                "110",
+                fees="999",
+                taxes="999",
+            )
+        ],
+    )
+
+    assert position.daily_value_change == Decimal("160")
 
 
 def test_portfolio_calculates_nav_and_leverage() -> None:

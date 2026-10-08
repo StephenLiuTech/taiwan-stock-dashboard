@@ -172,8 +172,8 @@ class PositionStub:
 
 
 class HoldingStub:
-    def list_all(self) -> list[Holding]:
-        return [
+    def __init__(self, values: list[Holding] | None = None) -> None:
+        self.values = values or [
             Holding(
                 id="h1",
                 symbol="2330",
@@ -193,6 +193,9 @@ class HoldingStub:
                 average_cost=Decimal("100"),
             ),
         ]
+
+    def list_all(self) -> list[Holding]:
+        return self.values
 
 
 class StockNetEquityHistoryStub:
@@ -267,6 +270,7 @@ def use_case(
     asset_store: AssetStoreStub | None = None,
     stock_history: list[HistoricalStockNetEquity] | None = None,
     is_non_trading_day: Callable[[date], bool] | None = None,
+    holding_values: list[Holding] | None = None,
 ) -> tuple[SendDailyReportUseCase, UpdateStub, DeliveryStub, TransportStub]:
     update = UpdateStub()
     deliveries = delivery or DeliveryStub()
@@ -276,7 +280,7 @@ def use_case(
             update,  # type: ignore[arg-type]
             SnapshotStub(value, history),  # type: ignore[arg-type]
             PositionStub(position_values),  # type: ignore[arg-type]
-            HoldingStub(),  # type: ignore[arg-type]
+            HoldingStub(holding_values),  # type: ignore[arg-type]
             deliveries,
             DailyEmailReportRenderer(),
             email,
@@ -917,6 +921,60 @@ def test_final_annual_performance_section_uses_persisted_dates_and_values() -> N
     assert "TWSE | 2330 | +NT$125" in message.plain_text
     assert repository.rows == (prior_annual_snapshot, annual_snapshot)
     assert annual.mutations == 0
+
+
+def test_symbol_only_holding_name_uses_existing_security_catalog() -> None:
+    report_date = date(2026, 7, 22)
+    holding = Holding(
+        id="holding-ledger-twse-twd-2059",
+        symbol="2059",
+        name="2059",
+        market=Market.TWSE,
+        currency=Currency.TWD,
+        quantity=Decimal("1"),
+        average_cost=Decimal("10625"),
+    )
+    position = PositionSnapshot(
+        snapshot_date=report_date,
+        holding_id=holding.id,
+        symbol="2059",
+        quantity=Decimal("1"),
+        average_cost=Decimal("10625"),
+        close_price=Decimal("11000"),
+        cost_basis=Decimal("10625"),
+        market_value=Decimal("11000"),
+        unrealized_pnl=Decimal("375"),
+        unrealized_return=Decimal("0.03529411764705882352941176471"),
+        portfolio_weight=Decimal("1"),
+        daily_value_change=Decimal("100"),
+        daily_return=Decimal("0.009174311926605504587155963303"),
+    )
+    value = snapshot(
+        report_date, market_value="11000", net_asset_value="11000"
+    ).model_copy(
+        update={
+            "total_cost_basis": Decimal("10625"),
+            "total_unrealized_pnl": Decimal("375"),
+            "total_liabilities": Decimal("0"),
+            "leverage_ratio": Decimal("0"),
+        }
+    )
+    case, _, _, _ = use_case(
+        value=value,
+        position_values=[position],
+        holding_values=[holding],
+    )
+
+    rendered = DailyEmailReportRenderer().render(case._build_report(value, report_date))
+
+    contributors = rendered.html.split(">Today's Contributors</h2>", 1)[1].split(
+        ">Holdings</h2>", 1
+    )[0]
+    holdings = rendered.html.split(">Holdings</h2>", 1)[1].split("</table>", 1)[0]
+    assert "川湖" in contributors
+    assert "川湖" in holdings
+    assert "2059" in contributors
+    assert "2059" in holdings
 
 
 def test_final_annual_performance_section_warns_when_data_is_unavailable() -> None:

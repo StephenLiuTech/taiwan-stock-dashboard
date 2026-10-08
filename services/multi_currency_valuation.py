@@ -11,8 +11,10 @@ from domain import (
     Market,
     MultiCurrencyPortfolioValuation,
     PriceQuote,
+    Transaction,
     TranslatedHoldingValuation,
 )
+from services.daily_pnl import DailyPnlCalculator
 
 
 class MultiCurrencyValuationError(ValueError):
@@ -30,6 +32,7 @@ class MultiCurrencyValuationEngine:
         holdings: list[Holding],
         quotes: list[PriceQuote],
         fx_rate: FxRate | None,
+        daily_transactions: list[Transaction] | None = None,
     ) -> MultiCurrencyPortfolioValuation:
         quote_by_key = {(item.symbol, item.market): item for item in quotes}
         values: list[TranslatedHoldingValuation] = []
@@ -48,6 +51,12 @@ class MultiCurrencyValuationEngine:
                     f"Currency mismatch for {holding.symbol}"
                 )
             conversion, fx_date = self._conversion(holding, fx_rate, report_date)
+            daily = DailyPnlCalculator.calculate(
+                holding,
+                quote,
+                daily_transactions or [],
+                conversion_rate=conversion,
+            )
             native_cost = holding.quantity * holding.average_cost
             native_market = holding.quantity * quote.close_price
             cost_twd = native_cost * conversion
@@ -56,13 +65,6 @@ class MultiCurrencyValuationEngine:
                 (quote.close_price - holding.average_cost)
                 * holding.quantity
                 * conversion
-            )
-            daily_twd = (
-                (quote.close_price - quote.previous_close)
-                * holding.quantity
-                * conversion
-                if quote.previous_close is not None
-                else Decimal("0")
             )
             values.append(
                 TranslatedHoldingValuation(
@@ -79,13 +81,8 @@ class MultiCurrencyValuationEngine:
                     self.reporting_currency,
                     cost_twd,
                     market_twd,
-                    daily_twd,
-                    (
-                        (quote.close_price - quote.previous_close)
-                        / quote.previous_close
-                        if quote.previous_close
-                        else Decimal("0")
-                    ),
+                    daily.profit_loss,
+                    daily.return_percentage,
                     unrealized_twd,
                     unrealized_twd / cost_twd if cost_twd else Decimal("0"),
                 )

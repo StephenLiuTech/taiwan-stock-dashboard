@@ -129,6 +129,32 @@ def test_same_symbol_can_exist_in_different_markets(
     }
 
 
+def test_multi_currency_valuation_uses_transaction_aware_daily_pnl() -> None:
+    report_date = date(2026, 10, 8)
+    tw = holding("2059", Market.TWSE, Currency.TWD).model_copy(
+        update={"quantity": Decimal("1"), "average_cost": Decimal("10625")}
+    )
+    tw_quote = quote("2059", Market.TWSE, Currency.TWD, "10615", "10500", report_date)
+    purchase = Transaction(
+        id="2059-new-position",
+        symbol="2059",
+        market=Market.TWSE,
+        transaction_type=TransactionType.BUY,
+        trade_date=report_date,
+        settlement_date=report_date,
+        quantity=Decimal("1"),
+        price=Decimal("10625"),
+        fees=Decimal("25"),
+        currency=Currency.TWD,
+    )
+
+    result = MultiCurrencyValuationEngine().valuate(
+        report_date, [tw], [tw_quote], None, daily_transactions=[purchase]
+    )
+
+    assert result.holdings[0].daily_pnl_twd == Decimal("-10")
+
+
 def test_fx_repository_never_returns_future_rate(
     connection: sqlite3.Connection,
 ) -> None:

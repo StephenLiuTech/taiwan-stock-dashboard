@@ -25,6 +25,7 @@ from repositories.interfaces import (
     LiabilityPrincipalEventRepository,
     LiabilityRepository,
     MarketDataUnitOfWork,
+    TransactionRepository,
 )
 from services.liability_principal import LiabilityPrincipalEngine
 from services.portfolio import PortfolioService
@@ -56,6 +57,7 @@ class MarketDataEngine:
         normalizer: QuoteNormalizer | None = None,
         portfolio: PortfolioService | None = None,
         liability_principal_events: LiabilityPrincipalEventRepository | None = None,
+        transactions: TransactionRepository | None = None,
     ) -> None:
         self.providers = {provider.market: provider for provider in providers}
         self.holdings = holdings
@@ -64,6 +66,7 @@ class MarketDataEngine:
         self.normalizer = normalizer or QuoteNormalizer()
         self.portfolio = portfolio or PortfolioService()
         self.liability_principal_events = liability_principal_events
+        self.transactions = transactions
         self.liability_principal_engine = LiabilityPrincipalEngine()
 
     def dependency_graph_ready(self) -> bool:
@@ -206,7 +209,17 @@ class MarketDataEngine:
                 trade_date,
             )
         summary = self.portfolio.value_portfolio(
-            taiwan_holdings, quotes, liabilities, trade_date
+            taiwan_holdings,
+            quotes,
+            liabilities,
+            trade_date,
+            daily_transactions=(
+                self.transactions.list_filtered(
+                    start_date=trade_date, end_date=trade_date
+                )
+                if self.transactions is not None
+                else []
+            ),
         )
         snapshot = SnapshotService(self.unit_of_work.daily_snapshots).preview(summary)
         return MarketDataRefreshResult(

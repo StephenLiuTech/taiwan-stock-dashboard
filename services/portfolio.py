@@ -13,7 +13,9 @@ from domain import (
     PositionSnapshot,
     PositionValuation,
     PriceQuote,
+    Transaction,
 )
+from services.daily_pnl import DailyPnlCalculator
 from services.valuation_engine import ValuationEngine
 
 
@@ -33,6 +35,7 @@ class PortfolioService:
         quotes: list[PriceQuote],
         liabilities: list[Liability],
         valuation_date: date,
+        daily_transactions: list[Transaction] | None = None,
     ) -> PortfolioSummary:
         """Build a summary from holdings, quotes, and liabilities."""
         currencies = {holding.currency for holding in holdings} | {
@@ -61,6 +64,7 @@ class PortfolioService:
                 holding,
                 quote,
                 valuation_by_key[(holding.symbol, holding.market)],
+                daily_transactions or [],
             )
             for holding, quote in inputs
         ]
@@ -145,13 +149,14 @@ class PortfolioService:
         holding: Holding,
         quote: PriceQuote,
         valuation: HoldingValuation,
+        daily_transactions: list[Transaction],
     ) -> PositionValuation:
         cost_basis = valuation.cost_basis
         market_value = valuation.market_value
-        previous_value = (
-            holding.quantity * quote.previous_close
-            if quote.previous_close is not None
-            else market_value
+        daily = DailyPnlCalculator.calculate(
+            holding,
+            quote,
+            daily_transactions,
         )
         return PositionValuation(
             holding_id=holding.id,
@@ -167,10 +172,6 @@ class PortfolioService:
             unrealized_pnl=valuation.unrealized_pl,
             unrealized_return=valuation.unrealized_return,
             portfolio_weight=valuation.portfolio_weight,
-            daily_value_change=market_value - previous_value,
-            daily_return=(
-                (quote.close_price - quote.previous_close) / quote.previous_close
-                if quote.previous_close
-                else None
-            ),
+            daily_value_change=daily.profit_loss,
+            daily_return=daily.return_percentage,
         )

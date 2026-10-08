@@ -22,6 +22,7 @@ from repositories.interfaces import (
     LiabilityPrincipalEventRepository,
     LiabilityRepository,
     MarketDataUnitOfWork,
+    TransactionRepository,
 )
 from services.liability_principal import LiabilityPrincipalEngine
 from services.multi_currency_valuation import MultiCurrencyValuationEngine
@@ -43,6 +44,7 @@ class GlobalMarketDataEngine:
         us_provider: USMarketDataProvider | None,
         fx_provider: FXRateProvider | None,
         liability_principal_events: LiabilityPrincipalEventRepository | None = None,
+        transactions: TransactionRepository | None = None,
     ) -> None:
         self.taiwan_engine = taiwan_engine
         self.holdings = holdings
@@ -52,6 +54,7 @@ class GlobalMarketDataEngine:
         self.us_provider = us_provider
         self.fx_provider = fx_provider
         self.liability_principal_events = liability_principal_events
+        self.transactions = transactions
         self.liability_principal_engine = LiabilityPrincipalEngine()
         self.valuation = MultiCurrencyValuationEngine()
 
@@ -296,7 +299,17 @@ class GlobalMarketDataEngine:
             *us_holdings,
         ]
         valuation = self.valuation.valuate(
-            trade_date, valued_holdings, [*taiwan_quotes, *us_quotes], fx_rate
+            trade_date,
+            valued_holdings,
+            [*taiwan_quotes, *us_quotes],
+            fx_rate,
+            daily_transactions=(
+                self.transactions.list_filtered(
+                    start_date=trade_date, end_date=trade_date
+                )
+                if self.transactions is not None
+                else []
+            ),
         )
         liabilities = self.liabilities.list_all()
         if self.liability_principal_events is not None:

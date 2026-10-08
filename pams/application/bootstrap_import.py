@@ -37,6 +37,7 @@ SECURITIES: dict[str, tuple[str, Market]] = {
     "長興": ("1717", Market.TWSE),
     "富喬": ("1815", Market.TPEX),
     "大成鋼": ("2027", Market.TWSE),
+    "川湖": ("2059", Market.TWSE),
     "台達電": ("2308", Market.TWSE),
     "華通": ("2313", Market.TWSE),
     "台積電": ("2330", Market.TWSE),
@@ -50,6 +51,22 @@ SECURITIES: dict[str, tuple[str, Market]] = {
     "福懋科": ("8131", Market.TWSE),
     "群聯": ("8299", Market.TPEX),
 }
+
+
+def resolve_security_name(symbol: str, market: Market, current_name: str) -> str:
+    """Fill a symbol-only name from the existing broker security catalog."""
+    normalized_symbol = symbol.strip().upper()
+    normalized_name = current_name.strip()
+    if normalized_name and normalized_name.upper() != normalized_symbol:
+        return current_name
+    return next(
+        (
+            name
+            for name, identity in SECURITIES.items()
+            if identity == (normalized_symbol, market)
+        ),
+        current_name,
+    )
 
 
 class BootstrapImportError(ValueError):

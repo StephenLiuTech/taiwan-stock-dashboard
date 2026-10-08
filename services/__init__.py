@@ -13,6 +13,11 @@ from services.annual_pnl_engine import (
 )
 from services.bootstrap import BootstrapService
 from services.broker_reconciliation import BrokerReconciliationEngine
+from services.daily_pnl import (
+    DailyPnlCalculationError,
+    DailyPnlCalculator,
+    DailyPnlResult,
+)
 from services.financing_interest import DailyFinancingInterest, FinancingInterestEngine
 from services.liability_principal import (
     LiabilityPrincipalEngine,
@@ -50,6 +55,9 @@ __all__ = [
     "DailyFinancingInterest",
     "FinancingInterestEngine",
     "BootstrapService",
+    "DailyPnlCalculationError",
+    "DailyPnlCalculator",
+    "DailyPnlResult",
     "BrokerReconciliationEngine",
     "DuplicateSnapshotError",
     "DuplicateSnapshotDateError",

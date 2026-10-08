@@ -20,6 +20,7 @@ from domain import (
 )
 from market_calendar import MarketCalendarUnavailableError
 from pams.application.annual_pnl import AnnualPnlUseCase
+from pams.application.bootstrap_import import resolve_security_name
 from pams.application.report_sections import BuildReportSectionsUseCase
 from pams.application.update_portfolio import UpdatePortfolioUseCase
 from repositories import (
@@ -483,7 +484,12 @@ class SendDailyReportUseCase:
         accounting_limit: date | None = None,
     ) -> DailyEmailReport:
         holdings = self._holdings.list_all()
-        names = {holding.id: holding.name for holding in holdings}
+        names = {
+            holding.id: resolve_security_name(
+                holding.symbol, holding.market, holding.name
+            )
+            for holding in holdings
+        }
         persisted = self._positions.list_by_date(snapshot.snapshot_date)
         daily_performance = PortfolioService.calculate_daily_performance(persisted)
         contribution_by_holding = {
@@ -611,7 +617,7 @@ class SendDailyReportUseCase:
         unavailable_positions = tuple(
             DailyEmailPosition(
                 symbol=item.symbol,
-                name=item.name,
+                name=names[item.id],
                 quantity=item.quantity,
                 average_cost=item.average_cost,
                 close_price=None,
