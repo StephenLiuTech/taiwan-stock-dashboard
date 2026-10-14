@@ -147,10 +147,16 @@ class MarketDataEngine:
             else self.holdings.list_all()
         )
         taiwan_holdings = [
-            holding for holding in holdings if holding.market in TAIWAN_MARKETS
+            holding
+            for holding in holdings
+            if holding.market in TAIWAN_MARKETS and holding.quantity > 0
         ]
         requested = {
-            market: {holding.symbol for holding in holdings if holding.market == market}
+            market: {
+                holding.symbol
+                for holding in holdings
+                if holding.market == market and holding.quantity > 0
+            }
             for market in TAIWAN_MARKETS
         }
         fetched_at = datetime.now(UTC)

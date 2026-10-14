@@ -411,6 +411,66 @@ def test_global_rebuild_persists_new_ledger_holding_before_position_snapshot(
     assert positions[0].holding_id == persisted.id
 
 
+def test_global_rebuild_closes_sold_holding_without_requiring_quote_or_snapshot(
+    connection: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_date = date(2026, 10, 14)
+    stale = Holding(
+        id="holding-ledger-us-usd-aapl",
+        symbol="AAPL",
+        name="Apple Inc.",
+        market=Market.US,
+        currency=Currency.USD,
+        quantity=Decimal("1"),
+        average_cost=Decimal("312.50"),
+    )
+    closed = stale.model_copy(
+        update={"quantity": Decimal("0"), "average_cost": Decimal("0")}
+    )
+    summary = PortfolioSummary(
+        valuation_date=report_date,
+        positions=[],
+        total_market_value=Decimal("0"),
+        total_cost_basis=Decimal("0"),
+        total_unrealized_pnl=Decimal("0"),
+        total_liabilities=Decimal("0"),
+        net_asset_value=Decimal("0"),
+        leverage_ratio=Decimal("0"),
+    )
+    snapshot = DailySnapshot(
+        snapshot_date=report_date,
+        total_market_value=Decimal("0"),
+        total_cost_basis=Decimal("0"),
+        total_unrealized_pnl=Decimal("0"),
+        total_liabilities=Decimal("0"),
+        net_asset_value=Decimal("0"),
+        leverage_ratio=Decimal("0"),
+        high_water_mark=Decimal("0"),
+        drawdown=Decimal("0"),
+    )
+    result = MarketDataRefreshResult((), (closed,), summary, snapshot, report_date)
+    holdings = SQLiteHoldingRepository(connection)
+    holdings.upsert(stale)
+    engine = GlobalMarketDataEngine(
+        SimpleNamespace(),
+        holdings,
+        SQLiteLiabilityRepository(connection),
+        SQLiteMarketDataUnitOfWork(connection),
+        SQLiteFxRateRepository(connection),
+        None,
+        None,
+    )
+    monkeypatch.setattr(engine, "_preview", lambda *_args, **_kwargs: (result, None))
+
+    engine.rebuild(report_date, holdings_override=(closed,))
+
+    persisted = holdings.get_by_id(stale.id)
+    assert persisted is not None
+    assert persisted.quantity == Decimal("0")
+    assert SQLitePositionSnapshotRepository(connection).list_by_date(report_date) == []
+    assert not engine.requires_enrichment(report_date, holdings_override=(closed,))
+
+
 class CompletenessQuoteRepository:
     def __init__(self, quotes: dict[str, PriceQuote]) -> None:
         self.quotes = quotes

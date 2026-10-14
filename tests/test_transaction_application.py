@@ -13,7 +13,8 @@ from pams.application import (
     DuplicateTransactionError,
     ListTransactionsUseCase,
 )
-from repositories import SQLiteTransactionRepository
+from repositories import SQLiteHoldingRepository, SQLiteTransactionRepository
+from repositories.holding_rebuild_uow import SQLiteHoldingRebuildUnitOfWork
 
 
 def command(identifier: str = "tx-1") -> AddTransactionCommand:
@@ -175,3 +176,68 @@ def test_sqlite_transaction_add_rejects_duplicates_and_filters(
     )
     assert len(listed.transactions) == 1
     assert listed.transactions[0].fees == Decimal("20.05")
+
+
+def test_full_sale_atomically_closes_ledger_derived_holding(
+    connection: sqlite3.Connection,
+) -> None:
+    transactions = SQLiteTransactionRepository(connection)
+    unit = SQLiteHoldingRebuildUnitOfWork(connection)
+    use_case = AddTransactionUseCase(transactions, holding_unit_of_work=unit)
+    buy = AddTransactionCommand(
+        transaction_id="aapl-buy",
+        symbol="AAPL",
+        market="US",
+        transaction_type="buy",
+        trade_date=date(2026, 9, 9),
+        settlement_date=date(2026, 9, 11),
+        quantity=Decimal("1"),
+        price=Decimal("312.50"),
+        fees=Decimal("0.25"),
+        taxes=Decimal("0"),
+        currency="USD",
+        notes="fixture",
+    )
+    sell = AddTransactionCommand(
+        **{
+            **vars(buy),
+            "transaction_id": "aapl-sell",
+            "transaction_type": "sell",
+            "trade_date": date(2026, 10, 14),
+            "settlement_date": date(2026, 10, 16),
+            "price": Decimal("343.50"),
+            "fees": Decimal("0.27"),
+        }
+    )
+
+    assert use_case.execute(buy).updated_holding_quantity == Decimal("1")
+    result = use_case.execute(sell)
+
+    holding = SQLiteHoldingRepository(connection).get_by_id(
+        "holding-ledger-us-usd-aapl"
+    )
+    assert result.updated_holding_quantity == Decimal("0")
+    assert holding is not None
+    assert holding.quantity == Decimal("0")
+    assert holding.average_cost == Decimal("0")
+    assert [item.id for item in transactions.list_all()] == ["aapl-buy", "aapl-sell"]
+
+
+def test_transaction_and_holding_update_roll_back_together(
+    connection: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transactions = SQLiteTransactionRepository(connection)
+    unit = SQLiteHoldingRebuildUnitOfWork(connection)
+    use_case = AddTransactionUseCase(transactions, holding_unit_of_work=unit)
+    failing = command("atomic-failure")
+    monkeypatch.setattr(
+        unit.holdings,
+        "upsert",
+        lambda _holding: (_ for _ in ()).throw(RuntimeError("holding write failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="holding write failed"):
+        use_case.execute(failing)
+
+    assert not transactions.exists("atomic-failure")
+    assert SQLiteHoldingRepository(connection).list_all() == []

@@ -868,6 +868,7 @@ def _compose(
                 repositories.margin_transaction_uow,
                 settings.margin_self_funding_ratio,
                 transaction_engine,
+                repositories.holding_rebuild_uow,
             ),
             add_corporate_action=AddCorporateActionUseCase(
                 repositories.corporate_actions,

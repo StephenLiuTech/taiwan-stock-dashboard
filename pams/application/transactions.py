@@ -20,7 +20,11 @@ from pams.application.dto import (
     TransactionRecord,
 )
 from pams.application.exceptions import DuplicateTransactionError
-from repositories.interfaces import MarginTransactionUnitOfWork, TransactionRepository
+from repositories.interfaces import (
+    MarginTransactionUnitOfWork,
+    TransactionHoldingUnitOfWork,
+    TransactionRepository,
+)
 from services import MarginFinancingResult, MarginFinancingService, TransactionEngine
 
 
@@ -69,11 +73,13 @@ class AddTransactionUseCase:
         margin_unit_of_work: MarginTransactionUnitOfWork | None = None,
         margin_self_funding_ratio: Decimal = Decimal("0.40"),
         transaction_engine: TransactionEngine | None = None,
+        holding_unit_of_work: TransactionHoldingUnitOfWork | None = None,
     ) -> None:
         self.transactions = transactions
         self.margin_unit_of_work = margin_unit_of_work
         self.margin_service = MarginFinancingService(margin_self_funding_ratio)
         self.transaction_engine = transaction_engine or TransactionEngine()
+        self.holding_unit_of_work = holding_unit_of_work
 
     def execute(self, command: AddTransactionCommand) -> TransactionRecord:
         market = Market(command.market)
@@ -106,12 +112,38 @@ class AddTransactionUseCase:
         transaction = Transaction.model_validate(transaction_values)
         if transaction.financing_type is FinancingType.MARGIN:
             return self._execute_margin(transaction)
+        if self.holding_unit_of_work is not None:
+            return self._execute_with_holding(transaction)
         if self.transactions.exists(transaction.id):
             raise DuplicateTransactionError(
                 f"Transaction ID already exists: {transaction.id}"
             )
         self.transactions.add(transaction)
         return _record(transaction)
+
+    def _execute_with_holding(self, transaction: Transaction) -> TransactionRecord:
+        unit = self.holding_unit_of_work
+        if unit is None:  # pragma: no cover - guarded by execute
+            raise RuntimeError("transaction holding persistence is not configured")
+        with unit.transaction():
+            existing = unit.transactions.list_all()
+            if unit.transactions.exists(transaction.id):
+                raise DuplicateTransactionError(
+                    f"Transaction ID already exists: {transaction.id}"
+                )
+            unit.transactions.add(transaction)
+            projected = self.transaction_engine.project_current_holdings(
+                [*existing, transaction], unit.holdings.list_all()
+            )
+            holding = next(
+                item
+                for item in projected
+                if item.symbol == transaction.symbol
+                and item.market is transaction.market
+                and item.currency is transaction.currency
+            )
+            unit.holdings.upsert(holding)
+            return _record(transaction, updated_holding_quantity=holding.quantity)
 
     def _execute_margin(self, transaction: Transaction) -> TransactionRecord:
         if self.margin_unit_of_work is None:

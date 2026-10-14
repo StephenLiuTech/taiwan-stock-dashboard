@@ -274,6 +274,15 @@ class HoldingRebuildUnitOfWork(Protocol):
     def transaction(self) -> AbstractContextManager[None]: ...
 
 
+class TransactionHoldingUnitOfWork(Protocol):
+    """Atomic boundary for a transaction and its derived holding projection."""
+
+    holdings: HoldingRepository
+    transactions: TransactionRepository
+
+    def transaction(self) -> AbstractContextManager[None]: ...
+
+
 class MarginTransactionUnitOfWork(Protocol):
     """Atomic persistence boundary for a margin BUY and its projections."""
 

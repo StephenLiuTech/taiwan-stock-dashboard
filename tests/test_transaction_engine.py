@@ -152,6 +152,49 @@ def test_current_holdings_do_not_merge_same_symbol_across_markets() -> None:
     ]
 
 
+def test_current_holdings_preserve_closed_ledger_position_as_zero_projection() -> None:
+    existing = [
+        Holding(
+            id="holding-ledger-us-usd-aapl",
+            symbol="AAPL",
+            name="Apple Inc.",
+            market=Market.US,
+            currency=Currency.USD,
+            quantity=Decimal("1"),
+            average_cost=Decimal("312.50"),
+        )
+    ]
+    projected = TransactionEngine().project_current_holdings(
+        [
+            transaction(
+                "aapl-buy",
+                TransactionType.BUY,
+                "1",
+                "312.50",
+                symbol="AAPL",
+                market=Market.US,
+                currency=Currency.USD,
+            ),
+            transaction(
+                "aapl-sell",
+                TransactionType.SELL,
+                "1",
+                "343.50",
+                symbol="AAPL",
+                market=Market.US,
+                currency=Currency.USD,
+                trade_date=date(2026, 10, 14),
+            ),
+        ],
+        existing,
+    )
+
+    assert len(projected) == 1
+    assert projected[0].id == "holding-ledger-us-usd-aapl"
+    assert projected[0].quantity == Decimal("0")
+    assert projected[0].average_cost == Decimal("0")
+
+
 def test_partial_sell_keeps_average_cost_and_deducts_fees_and_tax() -> None:
     ledger = TransactionEngine().build_ledger(
         [

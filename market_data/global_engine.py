@@ -69,7 +69,8 @@ class GlobalMarketDataEngine:
     ) -> bool:
         """Return whether an existing snapshot can gain missing global coverage."""
         holdings = list(holdings_override or tuple(self.holdings.list_all()))
-        us_holdings = [item for item in holdings if item.market is Market.US]
+        active_holdings = [item for item in holdings if item.quantity > 0]
+        us_holdings = [item for item in active_holdings if item.market is Market.US]
         if not us_holdings:
             return False
         eligible_us_quotes = [
@@ -95,7 +96,7 @@ class GlobalMarketDataEngine:
             item.holding_id
             for item in self.unit_of_work.position_snapshots.list_by_date(trade_date)
         }
-        positions_complete = all(item.id in covered_ids for item in holdings)
+        positions_complete = all(item.id in covered_ids for item in active_holdings)
         fetchable_missing = (not quotes_complete and self.us_provider is not None) or (
             not fx_complete and self.fx_provider is not None
         )
@@ -192,8 +193,9 @@ class GlobalMarketDataEngine:
         reuse_persisted_taiwan: bool = False,
     ) -> tuple[MarketDataRefreshResult, FxRate | None]:
         holdings = list(holdings_override or tuple(self.holdings.list_all()))
-        us_holdings = [h for h in holdings if h.market is Market.US]
-        taiwan_holdings = [h for h in holdings if h.market is not Market.US]
+        active_holdings = [item for item in holdings if item.quantity > 0]
+        us_holdings = [h for h in active_holdings if h.market is Market.US]
+        taiwan_holdings = [h for h in active_holdings if h.market is not Market.US]
         if not us_holdings:
             return (
                 self.taiwan_engine.preview(

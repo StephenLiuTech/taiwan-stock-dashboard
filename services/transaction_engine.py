@@ -390,14 +390,24 @@ class TransactionEngine:
             (transaction.symbol, transaction.market, transaction.currency)
             for transaction in transactions
         }
-        unchanged = (
+        unchanged = [
             holding
             for key, holding in existing_by_key.items()
             if key not in transaction_keys
-        )
+        ]
+        projected_keys = {
+            (holding.symbol, holding.market, holding.currency) for holding in projected
+        }
+        closed = [
+            holding.model_copy(
+                update={"quantity": Decimal("0"), "average_cost": Decimal("0")}
+            )
+            for key, holding in existing_by_key.items()
+            if key in transaction_keys and key not in projected_keys
+        ]
         return tuple(
             sorted(
-                (*projected, *unchanged),
+                (*projected, *closed, *unchanged),
                 key=lambda holding: (
                     holding.symbol,
                     holding.market.value,
