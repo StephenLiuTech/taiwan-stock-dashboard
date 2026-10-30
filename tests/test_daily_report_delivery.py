@@ -5,7 +5,7 @@ import re
 import smtplib
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from http.client import IncompleteRead
 from io import BytesIO
@@ -27,6 +27,8 @@ from domain import (
     PositionSnapshot,
     RealizedPnlBySymbol,
     StockNetEquityQuality,
+    TransactionSummaryItem,
+    TransactionSummarySection,
 )
 from market_calendar import MarketAvailability, MarketCalendarUnavailableError
 from market_data import ProviderDataError
@@ -725,6 +727,43 @@ def test_html_and_plain_text_contain_correct_persisted_figures() -> None:
     )
 
 
+def test_transaction_summary_precedes_contributors_in_html_and_plain_text() -> None:
+    case, _, _, _ = use_case(value=snapshot())
+    report = case._build_report(snapshot(), date(2026, 7, 22))
+    transaction = TransactionSummaryItem(
+        transaction_type="buy",
+        symbol="0050",
+        name="元大台灣50",
+        market="TWSE",
+        quantity=Decimal("200"),
+        price=Decimal("107.25"),
+        gross_amount=Decimal("21450"),
+        fees=Decimal("8"),
+        taxes=Decimal("0"),
+        net_cash_impact=Decimal("-21458"),
+    )
+    rendered = DailyEmailReportRenderer().render(
+        replace(
+            report,
+            sections=replace(
+                report.sections,
+                transactions=TransactionSummarySection(
+                    items=(transaction,), total_buy_fees=Decimal("8")
+                ),
+            ),
+        )
+    )
+
+    assert rendered.html.count("Transaction Summary") == 1
+    assert rendered.html.index("Transaction Summary") < rendered.html.index(
+        "Today's Contributors"
+    )
+    assert rendered.plain_text.count("Transaction Summary") == 1
+    assert rendered.plain_text.index("Transaction Summary") < rendered.plain_text.index(
+        "Today's Contributors"
+    )
+
+
 def test_final_annual_performance_section_uses_persisted_dates_and_values() -> None:
     prior_annual_snapshot = AnnualPnlSnapshot(
         snapshot_date=date(2026, 7, 21),
@@ -1324,7 +1363,7 @@ def test_portfolio_trend_chart_uses_market_line_absolute_pnl_bars_and_mondays() 
     assert "Unrealized P/L" not in trend_text
     assert "Dividend Income YTD" not in trend_text
     trend_image = message.html.split(
-        'alt="30-day total stock market value and daily profit or loss chart"', 1
+        'alt="10-week total stock market value and daily profit or loss chart"', 1
     )[1].split(">", 1)[0]
     assert 'data-chart-type="mixed-line-bar"' in trend_image
     assert 'data-internal-title="none"' in trend_image
@@ -1342,6 +1381,26 @@ def test_portfolio_trend_chart_uses_market_line_absolute_pnl_bars_and_mondays() 
     assert 'data-vertical-gridlines="monday"' in trend_image
     assert 'data-observation-count="7"' in trend_image
     assert 'data-x-axis-ticks="07-27,08-03,08-10,08-17,08-24"' in trend_image
+
+
+def test_portfolio_trend_uses_exact_ten_calendar_week_window() -> None:
+    report_date = date(2026, 10, 14)
+    boundary = report_date - timedelta(weeks=10)
+    history = [
+        snapshot(boundary - timedelta(days=1)),
+        snapshot(boundary),
+        snapshot(date(2026, 9, 1)),
+        snapshot(report_date),
+    ]
+    case, _, _, _ = use_case(value=snapshot(report_date), history=history)
+
+    report = case._build_report(snapshot(report_date), report_date)
+
+    assert [item.snapshot_date for item in report.history] == [
+        boundary,
+        date(2026, 9, 1),
+        report_date,
+    ]
 
 
 def test_daily_pnl_bars_use_absolute_height_sign_color_and_skip_null() -> None:
@@ -1619,9 +1678,9 @@ def test_stock_net_equity_milestone_uses_exact_first_threshold_hit() -> None:
     )
 
     milestones = _net_equity_milestones(history)
+    by_threshold = dict(milestones)
 
-    assert milestones[0][0] == Decimal("1000000")
-    assert milestones[0][1].snapshot_date == date(2024, 1, 2)
+    assert by_threshold[Decimal("1000000")].snapshot_date == date(2024, 1, 2)
 
 
 def test_stock_net_equity_milestone_uses_first_value_above_threshold() -> None:
@@ -1631,8 +1690,9 @@ def test_stock_net_equity_milestone_uses_first_value_above_threshold() -> None:
     )
 
     milestones = _net_equity_milestones(history)
+    by_threshold = dict(milestones)
 
-    assert milestones[0][1].snapshot_date == date(2024, 1, 2)
+    assert by_threshold[Decimal("1000000")].snapshot_date == date(2024, 1, 2)
 
 
 def test_stock_net_equity_milestones_are_first_reached_for_non_monotonic_history() -> (
@@ -1648,9 +1708,31 @@ def test_stock_net_equity_milestones_are_first_reached_for_non_monotonic_history
     milestones = _net_equity_milestones(history)
 
     assert [(threshold, point.snapshot_date) for threshold, point in milestones] == [
-        (Decimal("1000000"), date(2024, 1, 2))
+        (Decimal("500000"), date(2024, 1, 1)),
+        (Decimal("1000000"), date(2024, 1, 2)),
     ]
     assert all(threshold != Decimal("1500000") for threshold, _ in milestones)
+
+
+def test_stock_net_equity_milestones_extend_dynamically_every_half_million() -> None:
+    history = (
+        StockNetEquityHistoryPoint(date(2026, 1, 2), Decimal("490000")),
+        StockNetEquityHistoryPoint(date(2026, 1, 5), Decimal("1750000")),
+        StockNetEquityHistoryPoint(date(2026, 1, 6), Decimal("2400000")),
+        StockNetEquityHistoryPoint(date(2026, 1, 7), Decimal("3600000")),
+    )
+
+    milestones = _net_equity_milestones(history)
+
+    assert [threshold for threshold, _ in milestones] == [
+        Decimal("500000"),
+        Decimal("1000000"),
+        Decimal("1500000"),
+        Decimal("2000000"),
+        Decimal("3500000"),
+    ]
+    assert dict(milestones)[Decimal("3500000")].snapshot_date == date(2026, 1, 7)
+    assert Decimal("4000000") not in dict(milestones)
 
 
 def test_stock_net_equity_y_axis_uses_fixed_half_million_ticks() -> None:
@@ -1682,7 +1764,10 @@ def test_stock_net_equity_chart_metadata_exposes_monthly_ticks_and_milestones() 
     assert 'data-y-tick-interval="500000"' in chart
     assert 'data-x-axis-interval="monthly"' in chart
     assert 'data-x-axis-ticks="2026-05,06,07,08,09,10,11,12"' in chart
-    assert 'data-milestones="1000000:2026-06-02,1500000:2026-06-02"' in chart
+    assert (
+        'data-milestones="500000:2026-05-01,1000000:2026-06-02,'
+        '1500000:2026-06-02"' in chart
+    )
 
 
 def test_stock_net_equity_trend_is_the_final_email_section() -> None:
@@ -1863,7 +1948,7 @@ def test_one_snapshot_resend_fallback_does_not_publish_asset() -> None:
     assert "a trend chart requires at least two snapshots" in transport.messages[0].html
 
 
-def test_fewer_than_thirty_snapshots_are_rendered_without_padding() -> None:
+def test_available_snapshots_in_ten_week_window_render_without_padding() -> None:
     history = [
         snapshot(date(2026, 7, 21), market_value="1100", net_asset_value="1000"),
         snapshot(),
@@ -1876,7 +1961,7 @@ def test_fewer_than_thirty_snapshots_are_rendered_without_padding() -> None:
     assert len(transport.messages[0].inline_images) == 2
 
 
-def test_history_is_limited_to_most_recent_thirty_snapshots() -> None:
+def test_history_preserves_all_snapshots_within_ten_week_window() -> None:
     history = [
         snapshot(
             date(2026, 6, 18 + index),
@@ -1901,9 +1986,9 @@ def test_history_is_limited_to_most_recent_thirty_snapshots() -> None:
     portfolio_trend_text = text.split("Portfolio Trend\n", 1)[1].split(
         "\n\nToday's Contributors", 1
     )[0]
-    assert "(30 available snapshots)" in portfolio_trend_text
-    assert "2026-06-19 |" not in portfolio_trend_text
-    assert "2026-06-23 |" in portfolio_trend_text
+    assert "(34 available snapshots)" in portfolio_trend_text
+    assert "2026-06-19 |" in portfolio_trend_text
+    assert "2026-07-22 |" in portfolio_trend_text
 
 
 def test_one_snapshot_uses_clear_chart_fallback_without_attachment() -> None:

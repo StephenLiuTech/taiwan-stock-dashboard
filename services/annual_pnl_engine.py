@@ -19,6 +19,8 @@ from domain import (
 )
 from services.transaction_engine import TransactionEngine
 
+BROKER_INTEREST_REVERSAL_PREFIX = "broker-financing-interest-reversal:"
+
 
 class AnnualPnlFxUnavailableError(ValueError):
     """A historical native-currency cash flow cannot be translated safely."""
@@ -91,7 +93,11 @@ class AnnualPnlEngine:
                 event.amount, event.currency, event.event_date, exchange_rates
             )
             if event.cost_type is InvestmentCostType.FINANCING:
-                financing += amount
+                financing += (
+                    -amount
+                    if event.id.startswith(BROKER_INTEREST_REVERSAL_PREFIX)
+                    else amount
+                )
             else:
                 other += amount
         dividends_ytd = self._dividends(
@@ -204,6 +210,8 @@ class AnnualPnlEngine:
             amount = self._convert(
                 event.amount, event.currency, event.event_date, exchange_rates
             )
+            if event.id.startswith(BROKER_INTEREST_REVERSAL_PREFIX):
+                amount = -amount
             category = self._financing_category(event)
             if category == "margin":
                 margin += amount

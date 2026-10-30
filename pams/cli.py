@@ -37,6 +37,7 @@ from pams.application import (
     AnalyticsDataUnavailableError,
     AnalyticsRepositoryError,
     BootstrapImportError,
+    BrokerActualInterestError,
     CorporateActionError,
     DailyReportDeliveryError,
     DailyReportSnapshotMissingError,
@@ -45,6 +46,7 @@ from pams.application import (
     HoldingQueryError,
     InvalidAnalyticsPeriodError,
     PortfolioAnalyticsError,
+    RecordBrokerActualInterestCommand,
     StockNetEquityImportError,
     ValuationDataUnavailableError,
     ValuationRepositoryError,
@@ -54,6 +56,7 @@ from pams.brokerage.reporting import format_apply_plan, format_reconciliation
 from pams.composition import (
     compose_application,
     compose_bootstrap_import,
+    compose_broker_actual_interest,
     compose_daily_report,
     compose_database_migration,
     compose_demo_data,
@@ -437,9 +440,21 @@ def build_parser() -> argparse.ArgumentParser:
     liability_principal.add_argument("--liability-id", required=True)
     liability_principal.add_argument("--date", required=True, type=parse_iso_date)
     liability_interest = liability_commands.add_parser(
-        "interest", help="Inspect calculated financing interest without writing"
+        "interest", help="inspect or record financing interest"
+    )
+    liability_interest.add_argument(
+        "interest_action", nargs="?", choices=("inspect", "add"), default="inspect"
     )
     liability_interest.add_argument("--date", required=True, type=parse_iso_date)
+    liability_interest.add_argument("--amount", type=parse_decimal)
+    liability_interest.add_argument("--liability-id")
+    liability_interest.add_argument("--market", choices=tuple(Market))
+    liability_interest.add_argument("--symbol")
+    liability_interest.add_argument("--sell-order")
+    liability_interest.add_argument("--source")
+    liability_interest_mode = liability_interest.add_mutually_exclusive_group()
+    liability_interest_mode.add_argument("--dry-run", action="store_true")
+    liability_interest_mode.add_argument("--apply", action="store_true")
     for command in (liability_history, liability_principal, liability_interest):
         command.add_argument("--database", type=Path)
         command.add_argument("--verbose", action="store_true")
@@ -479,6 +494,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _error_exit_code(error: Exception) -> ExitCode:
     if isinstance(error, DailyReportDeliveryError):
         return ExitCode.PROVIDER_ERROR
+    if isinstance(error, BrokerActualInterestError):
+        return ExitCode.SECURITY_ERROR
     if isinstance(error, DatabaseMigrationError):
         return ExitCode.CONFIG_OR_DATABASE_ERROR
     if isinstance(error, DailyReportSnapshotMissingError):
@@ -532,6 +549,45 @@ def main(argv: Sequence[str] | None = None) -> int:
             authorization = compose_email_authorization()
             authorization.execute(_show_device_authorization_prompt)
             print("Microsoft email authorization complete; token cache updated.")
+            return int(ExitCode.SUCCESS)
+        if (
+            arguments.command == "liability"
+            and arguments.liability_command == "interest"
+            and arguments.interest_action == "add"
+        ):
+            required = {
+                "--amount": arguments.amount,
+                "--liability-id": arguments.liability_id,
+                "--market": arguments.market,
+                "--symbol": arguments.symbol,
+                "--sell-order": arguments.sell_order,
+                "--source": arguments.source,
+            }
+            missing = [name for name, value in required.items() if value is None]
+            if missing or arguments.dry_run == arguments.apply:
+                raise BrokerActualInterestError(
+                    "liability interest add requires all event fields and "
+                    "exactly one of --dry-run/--apply"
+                    + (f"; missing: {', '.join(missing)}" if missing else "")
+                )
+            with compose_broker_actual_interest(
+                arguments.database,
+                verbose=arguments.verbose,
+                apply=arguments.apply,
+            ) as use_case:
+                plan = use_case.execute(
+                    RecordBrokerActualInterestCommand(
+                        event_date=arguments.date,
+                        amount=arguments.amount,
+                        liability_id=arguments.liability_id,
+                        market=Market(arguments.market),
+                        symbol=arguments.symbol,
+                        sell_order=arguments.sell_order,
+                        source=arguments.source,
+                    ),
+                    apply=arguments.apply,
+                )
+            print(_format_broker_actual_interest(plan))
             return int(ExitCode.SUCCESS)
         if arguments.command == "fx":
             with compose_fx_backfill(
@@ -714,7 +770,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             f"{event.principal_delta:+} | {point.principal}"
                         )
                     print(f"Count: {len(points)}")
-                else:
+                elif arguments.interest_action == "inspect":
                     assert application.financing_interest is not None
                     items = application.financing_interest.inspect(arguments.date)
                     print("PAMS Financing Interest")
@@ -1062,6 +1118,30 @@ def _format_stock_net_equity_import(result: object) -> str:
         f"Missing: {result.missing}",
         f"Inserted: {result.inserted}",
         f"Result: {'applied' if result.applied else 'dry-run; no database writes'}",
+    ]
+    return "\n".join(lines)
+
+
+def _format_broker_actual_interest(result: object) -> str:
+    """Render a concise, auditable actual-interest dry-run/apply manifest."""
+    event = result.event
+    lines = [
+        "PAMS Broker Actual Margin Interest",
+        f"Mode: {'APPLY' if result.applied else 'DRY-RUN'}",
+        f"Event ID: {event.id}",
+        f"Event date: {event.event_date}",
+        f"Amount: NT${event.amount}",
+        f"Source: {event.source}",
+        f"Description: {event.description}",
+        f"Replaces accrual: {result.replacement_event_id}",
+        f"Replaced accrual amount: NT${result.replaced_accrual_amount}",
+        f"Reversal event: {result.reversal_event.id if result.reversal_event else 'none'}",
+        f"Events to insert: {len(result.events_to_insert)}",
+        f"Inserted: {result.inserted}",
+        f"Already recorded: {'yes' if result.already_recorded else 'no'}",
+        f"Annual financing cost delta: NT${result.annual_financing_cost_delta}",
+        "Principal events: 0",
+        "Liability master updates: 0",
     ]
     return "\n".join(lines)
 

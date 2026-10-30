@@ -34,6 +34,7 @@ from services import PortfolioService
 
 REPORT_TYPE = "daily_portfolio"
 STOCK_NET_EQUITY_HISTORY_START = date(2023, 8, 7)
+PORTFOLIO_TREND_WEEKS = 10
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -495,10 +496,11 @@ class SendDailyReportUseCase:
         contribution_by_holding = {
             item.holding_id: item for item in daily_performance.positions
         }
+        trend_start = snapshot.snapshot_date - timedelta(weeks=PORTFOLIO_TREND_WEEKS)
         historical_snapshots = sorted(
-            self._snapshots.list_between_dates(date.min, snapshot.snapshot_date),
+            self._snapshots.list_between_dates(trend_start, snapshot.snapshot_date),
             key=lambda item: item.snapshot_date,
-        )[-30:]
+        )
         if not historical_snapshots:
             historical_snapshots = [snapshot]
         historical_positions = self._positions.list_between_dates(

@@ -16,6 +16,13 @@ from pams.application.bootstrap_import import (
     BootstrapImportUseCase,
     BootstrapTransactionPreview,
 )
+from pams.application.broker_actual_interest import (
+    BrokerActualInterestError,
+    BrokerActualInterestPlan,
+    RecordBrokerActualInterestCommand,
+    RecordBrokerActualInterestUseCase,
+    broker_actual_interest_event_id,
+)
 from pams.application.corporate_actions import (
     AddCorporateActionCommand,
     AddCorporateActionUseCase,
@@ -160,6 +167,8 @@ __all__ = [
     "BootstrapImportPreview",
     "BootstrapImportUseCase",
     "BootstrapTransactionPreview",
+    "BrokerActualInterestError",
+    "BrokerActualInterestPlan",
     "BrokerImportBlockedError",
     "ChartSource",
     "DemoDataResult",
@@ -185,6 +194,7 @@ __all__ = [
     "FinancingInterestResult",
     "FinancingInterestUseCase",
     "financing_interest_event_id",
+    "broker_actual_interest_event_id",
     "HoldingChangeItem",
     "HoldingChangePlan",
     "HoldingOverview",
@@ -225,6 +235,8 @@ __all__ = [
     "ProjectedHoldingResult",
     "RebuildHoldingsResult",
     "RebuildHoldingsUseCase",
+    "RecordBrokerActualInterestCommand",
+    "RecordBrokerActualInterestUseCase",
     "SendDailyReportUseCase",
     "TransactionList",
     "TransactionRecord",

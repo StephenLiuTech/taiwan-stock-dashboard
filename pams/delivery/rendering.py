@@ -1,5 +1,6 @@
 """Plain-text and email-compatible HTML daily report rendering."""
 
+from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
 from html import escape
@@ -35,7 +36,7 @@ from pams.delivery.html_styles import (
 from pams.delivery.sections import DailyReportSectionRenderer
 
 CHART_CONTENT_ID = "pams-asset-change-chart"
-CHART_FILENAME = "pams-30-day-asset-change.png"
+CHART_FILENAME = "pams-10-week-asset-change.png"
 NET_EQUITY_CHART_CONTENT_ID = "pams-stock-net-equity-trend-chart"
 NET_EQUITY_CHART_FILENAME = "pams-stock-net-equity-trend.png"
 ANNUAL_CHART_CONTENT_ID = "pams-realized-total-pnl-ytd-chart"
@@ -54,9 +55,8 @@ DAILY_PNL_PROFIT_BAR = (220, 38, 38, 105)
 DAILY_PNL_LOSS_BAR = (22, 163, 74, 105)
 DAILY_PNL_NEUTRAL_BAR = (107, 114, 128, 105)
 NET_EQUITY_Y_TICK_INTERVAL = Decimal("500000")
-NET_EQUITY_MILESTONES = tuple(
-    Decimal(value) for value in ("1000000", "1500000", "2000000", "2500000", "3000000")
-)
+NET_EQUITY_MILESTONE_INTERVAL = Decimal("500000")
+NET_EQUITY_SUSTAINED_MILESTONES = frozenset((Decimal("2500000"), Decimal("3000000")))
 REPORT_WIDTH_STYLE = "border-collapse:collapse;width:100%;max-width:100%;"
 REPORT_CHART_STYLE = "display:block;width:100%;max-width:100%;height:auto;border:0;"
 REPORT_CONTENT_MAX_WIDTH = "1000px"
@@ -559,7 +559,7 @@ def _draw_two_level_date_axis(
 def _net_equity_milestones(
     history: tuple[StockNetEquityHistoryPoint, ...],
 ) -> tuple[tuple[Decimal, StockNetEquityHistoryPoint], ...]:
-    """Select the first persisted qualifying observation for each milestone."""
+    """Select each reached half-million milestone from persisted observations."""
     available = sorted(
         (
             point
@@ -569,11 +569,20 @@ def _net_equity_milestones(
         ),
         key=lambda point: point.snapshot_date,
     )
+    if not available:
+        return ()
+    highest_step = int(
+        max(point.net_asset_value for point in available)
+        // NET_EQUITY_MILESTONE_INTERVAL
+    )
+    thresholds = tuple(
+        NET_EQUITY_MILESTONE_INTERVAL * step for step in range(1, highest_step + 1)
+    )
     reached = []
-    for threshold in NET_EQUITY_MILESTONES:
+    for threshold in thresholds:
         point = (
             _first_sustained_net_equity_breakthrough(history, threshold)
-            if threshold in (Decimal("2500000"), Decimal("3000000"))
+            if threshold in NET_EQUITY_SUSTAINED_MILESTONES
             else next(
                 (point for point in available if point.net_asset_value >= threshold),
                 None,
@@ -1241,6 +1250,10 @@ class DailyEmailReportRenderer:
     ) -> RenderedEmail:
         """Return deterministic plain text, HTML, subject, and inline chart."""
         subject = f"PAMS Daily Portfolio Report - {report.report_date}"
+        section_renderer = DailyReportSectionRenderer()
+        transaction_html = section_renderer.transactions_html(report.sections)
+        transaction_text = section_renderer.transactions_text(report.sections)
+        remaining_sections = replace(report.sections, transactions=None)
         contributors = _ranked_contributors(report.positions)
         ordered_holdings = _ordered_holdings(report.positions)
         text_lines = [
@@ -1266,6 +1279,8 @@ class DailyEmailReportRenderer:
             "Portfolio Trend",
             *_history_text(report.history),
             "",
+            *(transaction_text.splitlines() if transaction_text else ()),
+            *(("",) if transaction_text else ()),
             "Today's Contributors",
             *_contributor_text(report.positions),
             "",
@@ -1419,7 +1434,7 @@ class DailyEmailReportRenderer:
             )
             chart_html = (
                 f'<img class="pams-report-chart" src="{escape(source.uri, quote=True)}" '
-                'alt="30-day total stock market value and daily profit or loss chart" '
+                'alt="10-week total stock market value and daily profit or loss chart" '
                 'data-chart-type="mixed-line-bar" data-internal-title="none" '
                 'data-point-markers="visible" '
                 'data-primary-axis="Total stock market value" '
@@ -1585,6 +1600,7 @@ class DailyEmailReportRenderer:
 <table role="presentation" class="pams-report-width pams-chart-container" width="100%" style="{REPORT_WIDTH_STYLE}"><tr><td width="100%" style="width:100%;padding:0;vertical-align:top">
 {chart_html}</td></tr></table>
 <table role="presentation" class="pams-report-width pams-wide-tables" width="100%" style="{REPORT_WIDTH_STYLE}table-layout:auto"><tr><td width="100%" style="width:100%;padding:0;vertical-align:top">
+{transaction_html}
 <h2 style="font-size:18px;margin-top:24px">Today's Contributors</h2>
 <table class="pams-canonical-report-table" width="100%" style="border-collapse:collapse;width:100%;table-layout:auto">
 <thead><tr>{headers((("Rank", "5%", "right"), ("Market", "8%", "left"), ("Symbol", "9%", "left"), ("Name", "38%", "left"), ("Quote Date", "12%", "left"), ("Today's P/L", "15%", "right"), ("Today's P/L %", "13%", "right")), font_size="14px")}</tr></thead>
@@ -1594,13 +1610,13 @@ class DailyEmailReportRenderer:
 <table class="pams-canonical-report-table pams-holdings-table" width="100%" style="border-collapse:collapse;width:100%;max-width:100%;table-layout:auto">
 <thead><tr>{headers((("Market", "6%", "left"), ("Symbol", "7%", "left"), ("Name", None, "left"), ("Currency", "7%", "left"), ("Quantity", "7%", "right"), ("Average Cost", "9%", "right"), ("Close", "7%", "right"), ("Quote Date", "9%", "right"), ("FX", "6%", "right"), ("Unrealized P/L", "9%", "right"), ("Return %", "6%", "right"), ("Market Value", "9%", "right")), font_size="13px")}</tr></thead>
 <tbody>{rows}</tbody></table>
-{DailyReportSectionRenderer().html(report.sections)}
+{section_renderer.html(remaining_sections)}
 {_annual_performance_html(report, annual_chart_html)}
 <h2 style="font-size:18px;margin-top:24px">Stock Net Equity Trend</h2>
 {net_equity_chart_html}
 </td></tr></table>
 </div></body></html>"""
-        section_text = DailyReportSectionRenderer().text(report.sections)
+        section_text = section_renderer.text(remaining_sections)
         annual_text = _annual_performance_text(report)
         return RenderedEmail(
             subject,

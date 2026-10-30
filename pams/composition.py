@@ -78,6 +78,7 @@ from pams.application import (
     PortfolioStatusUseCase,
     QueryHoldingsUseCase,
     ReconcileBrokerUseCase,
+    RecordBrokerActualInterestUseCase,
     ReportSectionSettings,
     SendDailyReportUseCase,
     UpdatePortfolioUseCase,
@@ -240,6 +241,37 @@ def compose_fx_backfill(
             repositories.fx_rates,
             repositories.market_data_uow,
             database.display_url,
+        )
+    finally:
+        database.connection.close()
+
+
+@contextmanager
+def compose_broker_actual_interest(
+    database_override: Path | None = None,
+    *,
+    verbose: bool = False,
+    apply: bool = False,
+) -> Iterator[RecordBrokerActualInterestUseCase]:
+    """Compose broker actual-interest recording with a write-free preview path."""
+    settings = get_settings()
+    configure_logging(
+        "DEBUG" if verbose else settings.log_level,
+        load_logging_config().format,
+    )
+    database_url = database_url_for_override(database_override, settings.database_url)
+    database = open_database(database_url)
+    try:
+        if apply:
+            database.initialize_schema()
+        elif database.backend == "postgresql":
+            database.connection.execute("BEGIN TRANSACTION READ ONLY")
+        else:
+            database.connection.execute("PRAGMA query_only = ON")
+        repositories = create_repositories(database.backend, database.connection)
+        yield RecordBrokerActualInterestUseCase(
+            repositories.investment_cost_events,
+            repositories.liabilities,
         )
     finally:
         database.connection.close()

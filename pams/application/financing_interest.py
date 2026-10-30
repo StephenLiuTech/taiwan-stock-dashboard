@@ -16,6 +16,7 @@ from services import FinancingInterestEngine, LiabilityPrincipalEngine
 
 AUTOMATIC_FINANCING_ACCRUAL_START = date(2026, 8, 29)
 AUTOMATIC_FINANCING_SOURCE = "automatic financing accrual"
+BROKER_ACTUAL_INTEREST_PREFIX = "broker-financing-interest:"
 
 
 class FinancingInterestError(RuntimeError):
@@ -72,10 +73,13 @@ class FinancingInterestUseCase:
 
     def inspect(self, accrual_date: date) -> tuple[FinancingInterestItem, ...]:
         """Calculate one date without writing or filling earlier dates."""
-        existing = {
-            item.id
-            for item in self._costs.list_between_dates(accrual_date, accrual_date)
-        }
+        persisted = self._costs.list_between_dates(accrual_date, accrual_date)
+        existing = {item.id for item in persisted}
+        existing.update(
+            replacement_id
+            for item in persisted
+            if (replacement_id := _actual_interest_replacement_id(item)) is not None
+        )
         return self._items_for_date(accrual_date, existing)
 
     def ensure_through(
@@ -85,11 +89,17 @@ class FinancingInterestUseCase:
         start = AUTOMATIC_FINANCING_ACCRUAL_START
         if end_date < start:
             return FinancingInterestResult(start, end_date, (), 0)
-        existing = {
-            item.id
+        persisted_costs = [
+            item
             for item in self._costs.list_between_dates(start, end_date)
             if item.cost_type is InvestmentCostType.FINANCING
-        }
+        ]
+        existing = {item.id for item in persisted_costs}
+        existing.update(
+            replacement_id
+            for item in persisted_costs
+            if (replacement_id := _actual_interest_replacement_id(item)) is not None
+        )
         items: list[FinancingInterestItem] = []
         events: list[InvestmentCostEvent] = []
         current = start
@@ -148,3 +158,18 @@ class FinancingInterestUseCase:
                 )
             )
         return tuple(result)
+
+
+def _actual_interest_replacement_id(event: InvestmentCostEvent) -> str | None:
+    """Map a broker settlement identity to the daily accrual it supersedes."""
+    if not event.id.startswith(BROKER_ACTUAL_INTEREST_PREFIX):
+        return None
+    parts = event.id.removeprefix(BROKER_ACTUAL_INTEREST_PREFIX).rsplit(":", 4)
+    if len(parts) != 5:
+        return None
+    liability_id, raw_date, _, _, _ = parts
+    try:
+        event_date = date.fromisoformat(raw_date)
+    except ValueError:
+        return None
+    return financing_interest_event_id(liability_id, event_date)
