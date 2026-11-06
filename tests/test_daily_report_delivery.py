@@ -262,6 +262,24 @@ class AssetStoreStub:
         return self.url
 
 
+class DividendRefreshStub:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.calls: list[tuple[Market | None, date | None, date | None]] = []
+        self.error = error
+
+    def update(
+        self,
+        *,
+        market: Market | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> object:
+        self.calls.append((market, start_date, end_date))
+        if self.error is not None:
+            raise self.error
+        return object()
+
+
 def use_case(
     *,
     value: DailySnapshot | None = None,
@@ -273,6 +291,7 @@ def use_case(
     stock_history: list[HistoricalStockNetEquity] | None = None,
     is_non_trading_day: Callable[[date], bool] | None = None,
     holding_values: list[Holding] | None = None,
+    dividend_events: DividendRefreshStub | None = None,
 ) -> tuple[SendDailyReportUseCase, UpdateStub, DeliveryStub, TransportStub]:
     update = UpdateStub()
     deliveries = delivery or DeliveryStub()
@@ -291,11 +310,42 @@ def use_case(
             asset_store,
             stock_net_equity_history=StockNetEquityHistoryStub(stock_history or []),
             is_non_trading_day=is_non_trading_day,
+            dividend_events=dividend_events,
         ),
         update,
         deliveries,
         email,
     )
+
+
+def test_daily_report_refreshes_active_holding_dividends_for_report_year() -> None:
+    dividends = DividendRefreshStub()
+    case, _, _, _ = use_case(value=snapshot(), dividend_events=dividends)
+
+    result = case.execute(requested_date=date(2026, 7, 22))
+
+    assert result.status == "sent"
+    assert dividends.calls == [(None, date(2026, 1, 1), date(2026, 12, 31))]
+
+
+def test_daily_report_dry_run_does_not_persist_dividend_refresh() -> None:
+    dividends = DividendRefreshStub()
+    case, _, _, _ = use_case(value=snapshot(), dividend_events=dividends)
+
+    result = case.execute(requested_date=date(2026, 7, 22), dry_run=True)
+
+    assert result.status == "dry_run"
+    assert dividends.calls == []
+
+
+def test_daily_report_uses_persisted_dividends_when_provider_is_unavailable() -> None:
+    dividends = DividendRefreshStub(ProviderDataError("TWSE unavailable"))
+    case, _, _, transport = use_case(value=snapshot(), dividend_events=dividends)
+
+    result = case.execute(requested_date=date(2026, 7, 22))
+
+    assert result.status == "sent"
+    assert len(transport.messages) == 1
 
 
 def live_date_case(

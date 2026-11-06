@@ -19,6 +19,7 @@ from domain import (
     StockNetEquityQuality,
 )
 from market_calendar import MarketCalendarUnavailableError
+from market_data import ProviderDataError
 from pams.application.annual_pnl import AnnualPnlUseCase
 from pams.application.bootstrap_import import resolve_security_name
 from pams.application.report_sections import BuildReportSectionsUseCase
@@ -182,6 +183,18 @@ class DailyEmailRenderer(Protocol):
     ) -> RenderedEmail: ...
 
 
+class DividendEventRefresher(Protocol):
+    """Refresh official dividend events for the active portfolio."""
+
+    def update(
+        self,
+        *,
+        market: Market | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> object: ...
+
+
 class ReportAssetStore(Protocol):
     """Publish a generated report asset and return its public HTTPS URL."""
 
@@ -226,6 +239,7 @@ class SendDailyReportUseCase:
         annual_snapshots: AnnualPnlSnapshotRepository | None = None,
         stock_net_equity_history: StockNetEquityHistoryRepository | None = None,
         is_non_trading_day: Callable[[date], bool] | None = None,
+        dividend_events: DividendEventRefresher | None = None,
     ) -> None:
         self._update_portfolio = update_portfolio
         self._snapshots = snapshots
@@ -243,6 +257,7 @@ class SendDailyReportUseCase:
         self._annual_snapshots = annual_snapshots
         self._stock_net_equity_history = stock_net_equity_history
         self._is_non_trading_day = is_non_trading_day
+        self._dividend_events = dividend_events
 
     def _is_expected_market_closure(self, value: date) -> bool:
         """Classify an absent date without fabricating a historical observation."""
@@ -327,6 +342,19 @@ class SendDailyReportUseCase:
                 f"aggregate portfolio snapshot does not exist for {target}"
             )
         report_date = snapshot.snapshot_date
+        if self._dividend_events is not None and not dry_run:
+            try:
+                self._dividend_events.update(
+                    start_date=date(report_date.year, 1, 1),
+                    end_date=date(report_date.year, 12, 31),
+                )
+            except ProviderDataError as error:
+                _LOGGER.warning(
+                    "Official dividend refresh unavailable; using persisted events: "
+                    "report_date=%s error_type=%s",
+                    report_date,
+                    type(error).__name__,
+                )
         if self._annual_pnl is not None:
             self._annual_pnl.ensure(report_date, persist=not dry_run)
         report = self._build_report(

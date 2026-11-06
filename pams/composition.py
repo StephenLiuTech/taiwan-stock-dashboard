@@ -451,6 +451,7 @@ def compose_daily_report(
             annual_pnl=context.annual_pnl,
             annual_snapshots=context.repositories.annual_pnl_snapshots,
             stock_net_equity_history=(context.repositories.stock_net_equity_history),
+            dividend_events=context.dividend_events,
         )
         yield replace(context, send_daily_report=use_case)
 
