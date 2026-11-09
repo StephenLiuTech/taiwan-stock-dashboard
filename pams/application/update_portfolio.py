@@ -116,7 +116,7 @@ class UpdatePortfolioUseCase:
             if needs_historical_provider
             else self.engine
         )
-        projected_holdings = self._project_current_holdings()
+        projected_holdings = self._project_holdings_as_of(requested_date)
         existing_snapshot = (
             self.snapshot_repository.get_by_date(requested_date)
             if self.snapshot_repository is not None
@@ -211,11 +211,11 @@ class UpdatePortfolioUseCase:
             availability=None,
         )
 
-    def _project_current_holdings(self) -> tuple[Holding, ...] | None:
+    def _project_holdings_as_of(self, as_of_date: date) -> tuple[Holding, ...] | None:
         if self.transaction_repository is None or self.holding_repository is None:
             return None
         return self.transaction_engine.project_current_holdings(
-            self.transaction_repository.list_all(),
+            self.transaction_repository.list_filtered(end_date=as_of_date),
             self.holding_repository.list_all(),
         )
 

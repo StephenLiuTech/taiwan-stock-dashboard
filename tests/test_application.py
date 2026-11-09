@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from domain import Currency, Holding, Market, Transaction, TransactionType
 from market_calendar import MarketAvailability
 from market_data.exceptions import MarketDateUnavailableError
 from pams.application import (
@@ -266,6 +267,90 @@ def test_repeated_automatic_update_force_rebuilds_existing_snapshot() -> None:
     assert result.requested_date == selected_date
     assert engine.rebuild_called is True
     assert engine.refresh_called is False
+
+
+def test_historical_rebuild_projects_holdings_only_through_requested_date() -> None:
+    requested = date(2026, 7, 22)
+    captured: list[tuple[Holding, ...]] = []
+
+    class HistoricalEngine(FakeEngine):
+        def rebuild(
+            self,
+            trade_date: date,
+            *,
+            holdings_override: tuple[Holding, ...] | None = None,
+        ) -> object:
+            assert trade_date == requested
+            assert holdings_override is not None
+            captured.append(holdings_override)
+            self.rebuild_called = True
+            return sample_result()
+
+    transactions = [
+        Transaction(
+            id="existing-buy",
+            symbol="2330",
+            market=Market.TWSE,
+            transaction_type=TransactionType.BUY,
+            trade_date=requested,
+            settlement_date=requested,
+            quantity=Decimal("1"),
+            price=Decimal("100"),
+            currency=Currency.TWD,
+        ),
+        Transaction(
+            id="future-buy",
+            symbol="2330",
+            market=Market.TWSE,
+            transaction_type=TransactionType.BUY,
+            trade_date=date(2026, 7, 23),
+            settlement_date=date(2026, 7, 23),
+            quantity=Decimal("1"),
+            price=Decimal("110"),
+            currency=Currency.TWD,
+        ),
+    ]
+
+    class Transactions:
+        def list_filtered(
+            self,
+            *,
+            symbol: str | None = None,
+            start_date: date | None = None,
+            end_date: date | None = None,
+        ) -> list[Transaction]:
+            del symbol, start_date
+            assert end_date is not None
+            return [item for item in transactions if item.trade_date <= end_date]
+
+    class Holdings:
+        def list_all(self) -> list[Holding]:
+            return [
+                Holding(
+                    id="holding-2330",
+                    symbol="2330",
+                    name="TSMC",
+                    market=Market.TWSE,
+                    currency=Currency.TWD,
+                    quantity=Decimal("2"),
+                    average_cost=Decimal("105"),
+                )
+            ]
+
+    engine = HistoricalEngine()
+    UpdatePortfolioUseCase(
+        CalendarStub(requested, requested),  # type: ignore[arg-type]
+        engine,  # type: ignore[arg-type]
+        Path("pams.db"),
+        historical_engine_factory=lambda _: engine,  # type: ignore[arg-type]
+        snapshot_repository=SnapshotsStub(requested),  # type: ignore[arg-type]
+        transaction_repository=Transactions(),  # type: ignore[arg-type]
+        holding_repository=Holdings(),  # type: ignore[arg-type]
+    ).execute(requested, force=True)
+
+    assert len(captured) == 1
+    assert captured[0][0].quantity == Decimal("1")
+    assert captured[0][0].average_cost == Decimal("100")
 
 
 def test_repeated_explicit_update_is_idempotent() -> None:

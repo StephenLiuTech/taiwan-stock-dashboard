@@ -35,7 +35,10 @@ from pams.application.dividends import (
     DividendEventUseCase,
     NormalizeDividendEventsUseCase,
 )
-from pams.application.report_sections import BuildReportSectionsUseCase
+from pams.application.report_sections import (
+    BuildReportSectionsUseCase,
+    ReportSectionSettings,
+)
 from pams.cli import _format_dividends, main
 from pams.delivery.sections import DailyReportSectionRenderer
 from repositories import SQLiteDividendEventRepository
@@ -620,3 +623,74 @@ def test_eligible_quantity_uses_trade_date_before_ex_date_and_partial_sells() ->
     use_case = object.__new__(BuildReportSectionsUseCase)
     quantities = use_case._eligible_quantities([event()], transactions, [holding])
     assert quantities[("2330", date(2026, 7, 27))] == Decimal("7")
+
+
+def test_daily_report_hides_dividend_events_before_first_purchase() -> None:
+    holding = Holding(
+        id="holding-ledger-twse-twd-00919",
+        symbol="00919",
+        name="群益台灣精選高息",
+        market=Market.TWSE,
+        currency=Currency.TWD,
+        quantity=Decimal("620"),
+        average_cost=Decimal("32.35"),
+        holding_type=HoldingType.ETF,
+    )
+    purchase = Transaction(
+        id="buy-00919",
+        symbol="00919",
+        market=Market.TWSE,
+        transaction_type=TransactionType.BUY,
+        trade_date=date(2026, 10, 30),
+        settlement_date=date(2026, 11, 3),
+        quantity=Decimal("620"),
+        price=Decimal("32.35"),
+        currency=Currency.TWD,
+    )
+    before_purchase = event().model_copy(
+        update={
+            "symbol": "00919",
+            "name": "群益台灣精選高息",
+            "source_event_id": "00919-before-purchase",
+            "ex_dividend_date": date(2026, 1, 15),
+            "payment_date": date(2026, 2, 13),
+        }
+    )
+    after_purchase = before_purchase.model_copy(
+        update={
+            "source_event_id": "00919-after-purchase",
+            "ex_dividend_date": date(2026, 11, 20),
+            "payment_date": date(2026, 12, 18),
+        }
+    )
+
+    class Repository:
+        def __init__(self, values):
+            self.values = values
+
+        def list_all(self):
+            return self.values
+
+        def list_filtered(self, **filters):
+            del filters
+            return self.values
+
+    class Quotes:
+        def get_latest(self, symbol, market):
+            del symbol, market
+            return None
+
+    result = BuildReportSectionsUseCase(
+        Repository([holding]),
+        Repository([purchase]),
+        Repository([before_purchase, after_purchase]),
+        Quotes(),
+        Repository([]),
+        ReportSectionSettings(),
+    ).execute(date(2026, 11, 6), [], Decimal("0"))
+
+    assert result.dividend_calendar is not None
+    assert [item.ex_dividend_date for item in result.dividend_calendar.items] == [
+        date(2026, 11, 20)
+    ]
+    assert result.dividend_calendar.items[0].eligible_quantity == Decimal("620")

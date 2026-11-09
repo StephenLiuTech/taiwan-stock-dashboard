@@ -25,7 +25,12 @@ from repositories.interfaces import (
     TransactionHoldingUnitOfWork,
     TransactionRepository,
 )
-from services import MarginFinancingResult, MarginFinancingService, TransactionEngine
+from services import (
+    LiabilityPrincipalEngine,
+    MarginFinancingResult,
+    MarginFinancingService,
+    TransactionEngine,
+)
 
 
 def _record(
@@ -188,13 +193,19 @@ class AddTransactionUseCase:
                 sequence=sequence,
                 event_type=LiabilityPrincipalEventType.INCREASE,
                 principal_delta=financing.financed_principal,
-                resulting_principal=financing.updated_liability.principal,
+                resulting_principal=None,
                 source="transaction entry",
                 reference=transaction.id,
                 notes="Broker-rounded margin principal from margin BUY",
                 created_at=datetime.combine(
                     transaction.trade_date, datetime.min.time(), UTC
                 ),
+            )
+            principal_event, restated_events = self._restated_principal_events(
+                history,
+                principal_event,
+                current_principal=liabilities[0].principal,
+                updated_principal=financing.updated_liability.principal,
             )
             unit.transactions.add(transaction)
             persisted_holdings = unit.holdings.list_all()
@@ -217,7 +228,50 @@ class AddTransactionUseCase:
                 raise DuplicateTransactionError(
                     "Margin principal event already exists for this transaction"
                 )
+            for event in restated_events:
+                unit.liability_principal_events.replace(event)
             return _record(transaction, financing, holding.quantity)
+
+    @staticmethod
+    def _restated_principal_events(
+        history: list[LiabilityPrincipalEvent],
+        principal_event: LiabilityPrincipalEvent,
+        *,
+        current_principal: Decimal,
+        updated_principal: Decimal,
+    ) -> tuple[LiabilityPrincipalEvent, tuple[LiabilityPrincipalEvent, ...]]:
+        """Insert a backdated event without invalidating later replay checkpoints."""
+        if not history:
+            return (
+                principal_event.model_copy(
+                    update={"resulting_principal": updated_principal}
+                ),
+                (),
+            )
+        timeline = LiabilityPrincipalEngine().timeline(history)
+        if not timeline or timeline[-1].principal != current_principal:
+            raise ValueError(
+                "margin liability master does not match its principal event ledger"
+            )
+        ordered = sorted(
+            [*history, principal_event],
+            key=lambda item: (item.effective_date, item.sequence, item.id),
+        )
+        running = Decimal("0")
+        inserted = principal_event
+        replacements: list[LiabilityPrincipalEvent] = []
+        for event in ordered:
+            running += event.principal_delta
+            restated = event.model_copy(update={"resulting_principal": running})
+            if event.id == principal_event.id:
+                inserted = restated
+            elif restated != event:
+                replacements.append(restated)
+        if running != updated_principal:
+            raise ValueError(
+                "updated margin liability does not match its principal event ledger"
+            )
+        return inserted, tuple(replacements)
 
     @staticmethod
     def _same_margin_purchase(existing: Transaction, candidate: Transaction) -> bool:

@@ -126,6 +126,11 @@ class BuildReportSectionsUseCase:
             if (item.symbol, item.market) in active_keys
         ]
         eligible = self._eligible_quantities(dividend_values, transactions, holdings)
+        dividend_values = [
+            item
+            for item in dividend_values
+            if eligible.get((item.symbol, item.ex_dividend_date), Decimal("0")) > 0
+        ]
         dividends = ReportSectionService.dividends(
             report_date,
             dividend_values,

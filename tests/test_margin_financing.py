@@ -1,8 +1,9 @@
 """First-class margin-financed transaction workflow tests."""
 
 import sqlite3
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 
@@ -13,6 +14,8 @@ from domain import (
     Holding,
     HoldingType,
     Liability,
+    LiabilityPrincipalEvent,
+    LiabilityPrincipalEventType,
     LiabilityType,
     Market,
     Transaction,
@@ -204,6 +207,63 @@ def test_duplicate_margin_purchase_does_not_apply_twice(
         "38000"
     )
     assert len(SQLiteLiabilityPrincipalEventRepository(margin_database).list_all()) == 1
+
+
+def test_backdated_margin_buy_restates_later_principal_checkpoints(
+    margin_database: sqlite3.Connection,
+) -> None:
+    events = SQLiteLiabilityPrincipalEventRepository(margin_database)
+    events.insert_many_if_absent(
+        [
+            LiabilityPrincipalEvent(
+                id="opening-margin",
+                liability_id="liability-margin-financing",
+                effective_date=date(2026, 8, 14),
+                sequence=0,
+                event_type=LiabilityPrincipalEventType.OPENING,
+                principal_delta=Decimal("707000"),
+                resulting_principal=Decimal("707000"),
+                source="test opening",
+                created_at=datetime(2026, 8, 14, tzinfo=UTC),
+            )
+        ]
+    )
+    case = use_case(margin_database)
+    case.execute(
+        command(
+            transaction_id="later-margin-buy",
+            trade_date=date(2026, 8, 23),
+        )
+    )
+
+    result = case.execute(
+        command(
+            transaction_id="backdated-margin-buy",
+            trade_date=date(2026, 8, 22),
+            price=Decimal("48.10"),
+        )
+    )
+
+    assert result.updated_margin_principal == Decimal("824000")
+    checkpoints = {
+        item.id: item.resulting_principal
+        for item in events.list_by_liability("liability-margin-financing")
+    }
+    assert checkpoints == {
+        "opening-margin": Decimal("707000"),
+        str(
+            uuid5(
+                NAMESPACE_URL,
+                "margin-principal|liability-margin-financing|backdated-margin-buy",
+            )
+        ): Decimal("764000"),
+        str(
+            uuid5(
+                NAMESPACE_URL,
+                "margin-principal|liability-margin-financing|later-margin-buy",
+            )
+        ): Decimal("824000"),
+    }
 
 
 def test_failure_rolls_back_all_margin_writes(
