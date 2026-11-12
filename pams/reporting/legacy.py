@@ -403,7 +403,7 @@ def format_holding_detail(result: HoldingsQueryResult) -> str:
 def format_transaction_record(record: TransactionRecord) -> str:
     """Render confirmation for one recorded transaction."""
     lines = [
-        "PAMS Transaction Added",
+        "PAMS Transaction Added" if record.applied else "PAMS Transaction Dry Run",
         f"ID: {record.id}",
         f"Symbol: {record.symbol}",
         f"Market: {record.market}",
@@ -412,6 +412,8 @@ def format_transaction_record(record: TransactionRecord) -> str:
         f"Quantity: {record.quantity}",
         f"Price: {record.price}",
     ]
+    if record.broker_order is not None:
+        lines.append(f"Broker order: {record.broker_order}")
     if record.financing_type == "margin":
         lines.extend(
             [
@@ -427,6 +429,8 @@ def format_transaction_record(record: TransactionRecord) -> str:
                 "Updated margin financing:",
                 f"Position: {record.updated_margin_quantity:,.0f} shares",
                 f"Principal: NT${record.updated_margin_principal:,.0f}",
+                f"Margin position ID: {record.margin_position_id}",
+                f"Principal event ID: {record.principal_event_id}",
             ]
         )
     return "\n".join(lines)

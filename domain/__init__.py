@@ -22,6 +22,8 @@ from domain.enums import (
 )
 from domain.ledger import (
     PortfolioLedger,
+    TransactionCostPool,
+    TransactionCostPoolOpening,
     TransactionExpenseSummary,
     TransactionPosition,
 )
@@ -30,6 +32,7 @@ from domain.liability_principal import (
     LiabilityPrincipalPoint,
 )
 from domain.lot_allocation import LotAllocation
+from domain.margin_position import MarginFinancingPosition, margin_position_id
 from domain.models import (
     CorporateAction,
     DailyPortfolioPerformance,
@@ -60,6 +63,7 @@ from domain.report_sections import (
     DividendCalendarSection,
     FinancingLeverageSection,
     MarginFinancingSection,
+    MarginPositionReference,
     MarketSnapshotItem,
     MarketSnapshotSection,
     NewsItem,
@@ -119,6 +123,9 @@ __all__ = [
     "MarketSnapshotItem",
     "MarketSnapshotSection",
     "MarginFinancingSection",
+    "MarginFinancingPosition",
+    "MarginPositionReference",
+    "margin_position_id",
     "NewsItem",
     "NewsSection",
     "PortfolioSummary",
@@ -139,6 +146,8 @@ __all__ = [
     "StockPledgeSection",
     "StockNetEquityQuality",
     "Transaction",
+    "TransactionCostPool",
+    "TransactionCostPoolOpening",
     "TransactionPosition",
     "TransactionExpenseSummary",
     "TransactionType",

@@ -6,11 +6,18 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import MappingProxyType
 
-from domain import Currency, InvestmentCostEvent, InvestmentCostType, LiabilityType
+from domain import (
+    Currency,
+    InvestmentCostEvent,
+    InvestmentCostType,
+    LiabilityPrincipalEvent,
+    LiabilityType,
+)
 from repositories import (
     InvestmentCostEventRepository,
     LiabilityPrincipalEventRepository,
     LiabilityRepository,
+    MarginFinancingPositionRepository,
 )
 from services import FinancingInterestEngine, LiabilityPrincipalEngine
 
@@ -34,6 +41,7 @@ class FinancingInterestItem:
     daily_interest: Decimal
     event_id: str
     persisted: bool
+    margin_position_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +59,11 @@ def financing_interest_event_id(liability_id: str, accrual_date: date) -> str:
     return f"financing-interest:{liability_id}:{accrual_date.isoformat()}"
 
 
+def margin_position_interest_event_id(position_id: str, accrual_date: date) -> str:
+    """Return the stable identity for one financed symbol/day expense."""
+    return f"financing-interest-position:{position_id}:{accrual_date.isoformat()}"
+
+
 class FinancingInterestUseCase:
     """Replay principal and ensure missing calendar-day interest events."""
 
@@ -63,6 +76,7 @@ class FinancingInterestUseCase:
         *,
         interest_engine: FinancingInterestEngine | None = None,
         principal_engine: LiabilityPrincipalEngine | None = None,
+        margin_positions: MarginFinancingPositionRepository | None = None,
     ) -> None:
         self._liabilities = liabilities
         self._principal_events = principal_events
@@ -70,6 +84,7 @@ class FinancingInterestUseCase:
         self._annual_rates = MappingProxyType(dict(annual_rates))
         self._interest_engine = interest_engine or FinancingInterestEngine()
         self._principal_engine = principal_engine or LiabilityPrincipalEngine()
+        self._margin_positions = margin_positions
 
     def inspect(self, accrual_date: date) -> tuple[FinancingInterestItem, ...]:
         """Calculate one date without writing or filling earlier dates."""
@@ -122,6 +137,7 @@ class FinancingInterestUseCase:
                             "Actual/365; v11 principal replay"
                         ),
                         source=AUTOMATIC_FINANCING_SOURCE,
+                        margin_position_id=item.margin_position_id,
                         created_at=datetime.combine(current, datetime.min.time(), UTC),
                     )
                 )
@@ -140,24 +156,77 @@ class FinancingInterestUseCase:
             rate = self._annual_rates.get(liability.liability_type)
             if rate is None:
                 continue
-            principal = self._principal_engine.principal_as_of(
-                [item for item in values if item.liability_id == liability.id],
-                accrual_date,
+            liability_events = [
+                item for item in values if item.liability_id == liability.id
+            ]
+            legacy_event_id = financing_interest_event_id(liability.id, accrual_date)
+            positions = (
+                self._margin_positions.list_by_liability(liability.id)
+                if self._margin_positions is not None
+                and liability.liability_type is LiabilityType.MARGIN_FINANCING
+                else []
             )
-            calculated = self._interest_engine.calculate(principal, rate)
-            event_id = financing_interest_event_id(liability.id, accrual_date)
-            result.append(
-                FinancingInterestItem(
-                    liability.id,
-                    accrual_date,
-                    principal,
-                    rate,
-                    calculated.amount,
-                    event_id,
-                    event_id in existing,
+            if not positions or legacy_event_id in existing:
+                principal = self._principal_engine.principal_as_of(
+                    liability_events, accrual_date
                 )
-            )
+                calculated = self._interest_engine.calculate(principal, rate)
+                result.append(
+                    FinancingInterestItem(
+                        liability.id,
+                        accrual_date,
+                        principal,
+                        rate,
+                        calculated.amount,
+                        legacy_event_id,
+                        legacy_event_id in existing,
+                    )
+                )
+                continue
+            for position in positions:
+                position_events = [
+                    item
+                    for item in liability_events
+                    if item.margin_position_id == position.id
+                ]
+                principal = self._position_principal_as_of(
+                    position_events, accrual_date
+                )
+                calculated = self._interest_engine.calculate(principal, rate)
+                event_id = margin_position_interest_event_id(position.id, accrual_date)
+                result.append(
+                    FinancingInterestItem(
+                        liability.id,
+                        accrual_date,
+                        principal,
+                        rate,
+                        calculated.amount,
+                        event_id,
+                        event_id in existing,
+                        position.id,
+                    )
+                )
         return tuple(result)
+
+    @staticmethod
+    def _position_principal_as_of(
+        events: list[LiabilityPrincipalEvent], accrual_date: date
+    ) -> Decimal:
+        """Replay one position's deltas without aggregate liability checkpoints."""
+        principal = Decimal("0")
+        for event in sorted(
+            events,
+            key=lambda item: (item.effective_date, item.sequence, item.id),
+        ):
+            if event.effective_date > accrual_date:
+                break
+            principal += event.principal_delta
+            if principal < 0:
+                raise FinancingInterestError(
+                    "margin position principal became negative at "
+                    f"{event.effective_date}"
+                )
+        return principal
 
 
 def _actual_interest_replacement_id(event: InvestmentCostEvent) -> str | None:
@@ -172,4 +241,6 @@ def _actual_interest_replacement_id(event: InvestmentCostEvent) -> str | None:
         event_date = date.fromisoformat(raw_date)
     except ValueError:
         return None
+    if event.margin_position_id is not None:
+        return margin_position_interest_event_id(event.margin_position_id, event_date)
     return financing_interest_event_id(liability_id, event_date)

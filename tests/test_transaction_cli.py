@@ -63,9 +63,13 @@ class FakeApplyUseCase:
 class FakeAddUseCase:
     def __init__(self) -> None:
         self.command = None
+        self.apply = True
 
-    def execute(self, command: AddTransactionCommand) -> TransactionRecord:
+    def execute(
+        self, command: AddTransactionCommand, *, apply: bool = True
+    ) -> TransactionRecord:
         self.command = command
+        self.apply = apply
         margin = command.financing_type == "margin"
         return TransactionRecord(
             id=command.transaction_id or "generated",
@@ -87,6 +91,7 @@ class FakeAddUseCase:
             updated_holding_quantity=Decimal("38000") if margin else None,
             updated_margin_quantity=Decimal("30000") if margin else None,
             updated_margin_principal=Decimal("767000") if margin else None,
+            applied=apply,
         )
 
 
@@ -318,6 +323,49 @@ def test_transaction_add_help_documents_margin_option(
     output = capsys.readouterr().out
     assert "--financing {margin}" in output
     assert "configured margin ratio" in output
+    assert "--margin-principal" in output
+    assert "--broker-order" in output
+    assert "--dry-run" in output
+
+
+def test_transaction_add_margin_dry_run_preserves_broker_fields(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, add_use_case, _ = install_composition(monkeypatch)
+    assert (
+        main(
+            [
+                "transaction",
+                "add",
+                "--symbol",
+                "00406A",
+                "--market",
+                "TWSE",
+                "--type",
+                "buy",
+                "--trade-date",
+                "2026-11-11",
+                "--quantity",
+                "15000",
+                "--price",
+                "7.89",
+                "--fees",
+                "47",
+                "--financing",
+                "margin",
+                "--margin-principal",
+                "47000",
+                "--broker-order",
+                "AW854",
+                "--dry-run",
+            ]
+        )
+        == ExitCode.SUCCESS
+    )
+    assert add_use_case.apply is False
+    assert add_use_case.command.broker_order == "AW854"
+    assert add_use_case.command.margin_principal == Decimal("47000")
+    assert "PAMS Transaction Dry Run" in capsys.readouterr().out
 
 
 def test_cli_holdings_list_and_show_route_to_query_use_case(

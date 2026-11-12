@@ -24,6 +24,8 @@ class LiabilityPrincipalEvent(BaseModel):
     resulting_principal: Decimal | None = Field(default=None, ge=0)
     source: str
     reference: str | None = None
+    margin_position_id: str | None = None
+    financed_quantity_delta: Decimal | None = None
     notes: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 

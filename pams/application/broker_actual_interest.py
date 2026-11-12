@@ -12,8 +12,15 @@ from domain import (
     LiabilityType,
     Market,
 )
-from pams.application.financing_interest import financing_interest_event_id
-from repositories import InvestmentCostEventRepository, LiabilityRepository
+from pams.application.financing_interest import (
+    financing_interest_event_id,
+    margin_position_interest_event_id,
+)
+from repositories import (
+    InvestmentCostEventRepository,
+    LiabilityRepository,
+    MarginFinancingPositionRepository,
+)
 
 ACTUAL_INTEREST_PREFIX = "broker-financing-interest:"
 REVERSAL_INTEREST_PREFIX = "broker-financing-interest-reversal:"
@@ -94,6 +101,8 @@ def replaced_automatic_interest_id(event: InvestmentCostEvent) -> str | None:
         parsed_date = date.fromisoformat(event_date)
     except ValueError:
         return None
+    if event.margin_position_id is not None:
+        return margin_position_interest_event_id(event.margin_position_id, parsed_date)
     return financing_interest_event_id(liability_id, parsed_date)
 
 
@@ -104,9 +113,11 @@ class RecordBrokerActualInterestUseCase:
         self,
         costs: InvestmentCostEventRepository,
         liabilities: LiabilityRepository,
+        margin_positions: MarginFinancingPositionRepository | None = None,
     ) -> None:
         self._costs = costs
         self._liabilities = liabilities
+        self._margin_positions = margin_positions
 
     def execute(
         self, command: RecordBrokerActualInterestCommand, *, apply: bool
@@ -129,10 +140,38 @@ class RecordBrokerActualInterestUseCase:
             raise BrokerActualInterestError(
                 f"liability is not margin financing: {command.liability_id}"
             )
+        position = (
+            self._margin_positions.get(
+                command.liability_id, command.market.value, command.symbol
+            )
+            if self._margin_positions is not None
+            else None
+        )
+        if self._margin_positions is not None and position is None:
+            raise BrokerActualInterestError(
+                "margin position does not exist for "
+                f"{command.market.value} {command.symbol}"
+            )
 
         created_at = datetime.combine(command.event_date, datetime.min.time(), UTC)
-        replacement_id = financing_interest_event_id(
+        legacy_replacement_id = financing_interest_event_id(
             command.liability_id, command.event_date
+        )
+        position_replacement_id = (
+            margin_position_interest_event_id(position.id, command.event_date)
+            if position is not None
+            else None
+        )
+        existing = {
+            item.id: item
+            for item in self._costs.list_between_dates(
+                command.event_date, command.event_date
+            )
+        }
+        replacement_id = (
+            legacy_replacement_id
+            if legacy_replacement_id in existing
+            else position_replacement_id or legacy_replacement_id
         )
         description = (
             "broker actual margin interest; "
@@ -148,14 +187,9 @@ class RecordBrokerActualInterestUseCase:
             currency=Currency.TWD,
             description=description,
             source=command.source,
+            margin_position_id=(position.id if position is not None else None),
             created_at=created_at,
         )
-        existing = {
-            item.id: item
-            for item in self._costs.list_between_dates(
-                command.event_date, command.event_date
-            )
-        }
         existing_actual = existing.get(actual.id)
         if existing_actual is not None:
             self._assert_same(existing_actual, actual)
@@ -174,6 +208,7 @@ class RecordBrokerActualInterestUseCase:
                     f"replaced_event_id={replacement_id}; actual_event_id={actual.id}"
                 ),
                 source=command.source,
+                margin_position_id=(position.id if position is not None else None),
                 created_at=created_at,
             )
             existing_reversal = existing.get(reversal.id)

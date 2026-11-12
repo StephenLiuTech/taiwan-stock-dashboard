@@ -21,6 +21,7 @@ from repositories.interfaces import (
     LiabilityPrincipalEventRepository,
     LiabilityRepository,
     LotAllocationRepository,
+    MarginFinancingPositionRepository,
     MarginTransactionUnitOfWork,
     MarketDataUnitOfWork,
     PositionSnapshotRepository,
@@ -29,6 +30,7 @@ from repositories.interfaces import (
     SnapshotRepository,
     StockNetEquityHistoryRepository,
     StockNetEquityHistoryUnitOfWork,
+    TransactionCostPoolOpeningRepository,
     TransactionRepository,
     WatchlistRepository,
 )
@@ -48,11 +50,13 @@ from repositories.postgresql import (
     PostgreSQLLiabilityPrincipalEventRepository,
     PostgreSQLLiabilityRepository,
     PostgreSQLLotAllocationRepository,
+    PostgreSQLMarginFinancingPositionRepository,
     PostgreSQLPositionSnapshotRepository,
     PostgreSQLPriceQuoteRepository,
     PostgreSQLReportDeliveryRepository,
     PostgreSQLSnapshotRepository,
     PostgreSQLStockNetEquityHistoryRepository,
+    PostgreSQLTransactionCostPoolOpeningRepository,
     PostgreSQLTransactionRepository,
     PostgreSQLWatchlistRepository,
 )
@@ -75,11 +79,13 @@ from repositories.sqlite import (
     SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
     SQLiteLotAllocationRepository,
+    SQLiteMarginFinancingPositionRepository,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
     SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
     SQLiteStockNetEquityHistoryRepository,
+    SQLiteTransactionCostPoolOpeningRepository,
     SQLiteTransactionRepository,
     SQLiteWatchlistRepository,
 )
@@ -112,6 +118,8 @@ class RepositoryBundle:
     stock_net_equity_history: StockNetEquityHistoryRepository
     stock_net_equity_history_uow: StockNetEquityHistoryUnitOfWork
     lot_allocations: LotAllocationRepository
+    margin_positions: MarginFinancingPositionRepository
+    transaction_cost_pool_openings: TransactionCostPoolOpeningRepository
 
 
 def create_repositories(backend: str, connection: object) -> RepositoryBundle:
@@ -141,6 +149,8 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             SQLiteStockNetEquityHistoryRepository(connection),
             SQLiteStockNetEquityHistoryUnitOfWork(connection),
             SQLiteLotAllocationRepository(connection),
+            SQLiteMarginFinancingPositionRepository(connection),
+            SQLiteTransactionCostPoolOpeningRepository(connection),
         )
     if backend == "postgresql":
         return RepositoryBundle(
@@ -167,5 +177,7 @@ def create_repositories(backend: str, connection: object) -> RepositoryBundle:
             PostgreSQLStockNetEquityHistoryRepository(connection),
             PostgreSQLStockNetEquityHistoryUnitOfWork(connection),
             PostgreSQLLotAllocationRepository(connection),
+            PostgreSQLMarginFinancingPositionRepository(connection),
+            PostgreSQLTransactionCostPoolOpeningRepository(connection),
         )
     raise ValueError(f"Unsupported database backend: {backend}")

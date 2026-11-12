@@ -9,6 +9,7 @@ from domain import (
     AnnualPnlSnapshot,
     BrokerImportRecord,
     CorporateAction,
+    Currency,
     DailySnapshot,
     Dividend,
     DividendEvent,
@@ -19,11 +20,43 @@ from domain import (
     Liability,
     LiabilityPrincipalEvent,
     LotAllocation,
+    MarginFinancingPosition,
+    Market,
     PositionSnapshot,
     PriceQuote,
     Transaction,
+    TransactionCostPoolOpening,
     WatchlistItem,
 )
+
+
+class SQLiteTransactionCostPoolOpeningRepository:
+    """Read audited legacy cash/margin cost-pool openings."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def list_all(self) -> list[TransactionCostPoolOpening]:
+        rows = self.connection.execute(
+            """SELECT * FROM transaction_cost_pool_openings
+            ORDER BY effective_date, market, symbol"""
+        ).fetchall()
+        return [
+            TransactionCostPoolOpening(
+                symbol=row["symbol"],
+                market=Market(row["market"]),
+                currency=Currency(row["currency"]),
+                effective_date=date.fromisoformat(row["effective_date"]),
+                cash_quantity=_decimal(row["cash_quantity"]),
+                margin_quantity=_decimal(row["margin_quantity"]),
+                source=row["source"],
+                source_reference=row["source_reference"],
+            )
+            for row in rows
+        ]
 
 
 class SQLiteLotAllocationRepository:
@@ -203,8 +236,11 @@ class SQLiteLiabilityPrincipalEventRepository:
             else None
         )
         cursor = self.connection.executemany(
-            """INSERT INTO liability_principal_events VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO liability_principal_events (
+            id, liability_id, effective_date, sequence, event_type,
+            principal_delta, resulting_principal, source, reference,
+            margin_position_id, financed_quantity_delta, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO NOTHING""",
             [
                 (
@@ -221,6 +257,8 @@ class SQLiteLiabilityPrincipalEventRepository:
                     ),
                     event.source,
                     event.reference,
+                    event.margin_position_id,
+                    _optional_decimal(event.financed_quantity_delta),
                     event.notes,
                     event.created_at.isoformat(),
                 )
@@ -237,7 +275,8 @@ class SQLiteLiabilityPrincipalEventRepository:
         cursor = self.connection.execute(
             """UPDATE liability_principal_events SET liability_id = ?,
             effective_date = ?, sequence = ?, event_type = ?, principal_delta = ?,
-            resulting_principal = ?, source = ?, reference = ?, notes = ?,
+            resulting_principal = ?, source = ?, reference = ?,
+            margin_position_id = ?, financed_quantity_delta = ?, notes = ?,
             created_at = ? WHERE id = ?""",
             (
                 event.liability_id,
@@ -252,6 +291,8 @@ class SQLiteLiabilityPrincipalEventRepository:
                 ),
                 event.source,
                 event.reference,
+                event.margin_position_id,
+                _optional_decimal(event.financed_quantity_delta),
                 event.notes,
                 event.created_at.isoformat(),
                 event.id,
@@ -270,6 +311,10 @@ class SQLiteLiabilityPrincipalEventRepository:
         values["principal_delta"] = _decimal(values["principal_delta"])
         if values["resulting_principal"] is not None:
             values["resulting_principal"] = _decimal(values["resulting_principal"])
+        if values.get("financed_quantity_delta") is not None:
+            values["financed_quantity_delta"] = _decimal(
+                values["financed_quantity_delta"]
+            )
         return LiabilityPrincipalEvent.model_validate(values)
 
 
@@ -434,7 +479,9 @@ class SQLiteInvestmentCostEventRepository:
 
     def add(self, event: InvestmentCostEvent) -> None:
         self.connection.execute(
-            "INSERT INTO investment_cost_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            """INSERT INTO investment_cost_events (
+            id, event_date, cost_type, amount, currency, description, source,
+            margin_position_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 event.id,
                 event.event_date.isoformat(),
@@ -443,6 +490,7 @@ class SQLiteInvestmentCostEventRepository:
                 event.currency.value,
                 event.description,
                 event.source,
+                event.margin_position_id,
                 event.created_at.isoformat(),
             ),
         )
@@ -460,7 +508,9 @@ class SQLiteInvestmentCostEventRepository:
         )
         try:
             cursor = self.connection.executemany(
-                """INSERT INTO investment_cost_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """INSERT INTO investment_cost_events (
+                id, event_date, cost_type, amount, currency, description, source,
+                margin_position_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO NOTHING""",
                 [
                     (
@@ -471,6 +521,7 @@ class SQLiteInvestmentCostEventRepository:
                         event.currency.value,
                         event.description,
                         event.source,
+                        event.margin_position_id,
                         event.created_at.isoformat(),
                     )
                     for event in events
@@ -488,8 +539,8 @@ class SQLiteInvestmentCostEventRepository:
     def replace(self, event: InvestmentCostEvent) -> None:
         cursor = self.connection.execute(
             """UPDATE investment_cost_events SET event_date = ?, cost_type = ?,
-            amount = ?, currency = ?, description = ?, source = ?, created_at = ?
-            WHERE id = ?""",
+            amount = ?, currency = ?, description = ?, source = ?,
+            margin_position_id = ?, created_at = ? WHERE id = ?""",
             (
                 event.event_date.isoformat(),
                 event.cost_type.value,
@@ -497,6 +548,7 @@ class SQLiteInvestmentCostEventRepository:
                 event.currency.value,
                 event.description,
                 event.source,
+                event.margin_position_id,
                 event.created_at.isoformat(),
                 event.id,
             ),
@@ -726,14 +778,15 @@ class SQLiteTransactionRepository:
         self.connection.execute(
             """INSERT INTO transactions (
             id, symbol, market, transaction_type, trade_date, settlement_date,
-            quantity, price, fees, taxes, currency, notes, created_at, financing_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            quantity, price, fees, taxes, currency, notes, created_at, financing_type,
+            broker_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET symbol=excluded.symbol, market=excluded.market,
             transaction_type=excluded.transaction_type, trade_date=excluded.trade_date,
             settlement_date=excluded.settlement_date, quantity=excluded.quantity,
             price=excluded.price, fees=excluded.fees, taxes=excluded.taxes,
             currency=excluded.currency, notes=excluded.notes,
-            financing_type=excluded.financing_type""",
+            financing_type=excluded.financing_type,
+            broker_order=excluded.broker_order""",
             (
                 transaction.id,
                 transaction.symbol,
@@ -753,6 +806,7 @@ class SQLiteTransactionRepository:
                     if transaction.financing_type is not None
                     else None
                 ),
+                transaction.broker_order,
             ),
         )
         if self.auto_commit:
@@ -762,8 +816,8 @@ class SQLiteTransactionRepository:
         self.connection.execute(
             """INSERT INTO transactions (
             id, symbol, market, transaction_type, trade_date, settlement_date,
-            quantity, price, fees, taxes, currency, notes, created_at, financing_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            quantity, price, fees, taxes, currency, notes, created_at, financing_type,
+            broker_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 transaction.id,
                 transaction.symbol,
@@ -783,6 +837,7 @@ class SQLiteTransactionRepository:
                     if transaction.financing_type is not None
                     else None
                 ),
+                transaction.broker_order,
             ),
         )
         if self.auto_commit:
@@ -1062,6 +1117,75 @@ class SQLiteLiabilityRepository:
         if values["maturity_date"]:
             values["maturity_date"] = date.fromisoformat(values["maturity_date"])
         return Liability.model_validate(values)
+
+
+class SQLiteMarginFinancingPositionRepository:
+    """Persist current per-symbol projections beneath one margin liability."""
+
+    def __init__(
+        self, connection: sqlite3.Connection, *, auto_commit: bool = True
+    ) -> None:
+        self.connection = connection
+        self.auto_commit = auto_commit
+
+    def list_all(self) -> list[MarginFinancingPosition]:
+        rows = self.connection.execute(
+            "SELECT * FROM margin_financing_positions "
+            "ORDER BY liability_id, market, symbol"
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def list_by_liability(self, liability_id: str) -> list[MarginFinancingPosition]:
+        rows = self.connection.execute(
+            """SELECT * FROM margin_financing_positions WHERE liability_id = ?
+            ORDER BY market, symbol""",
+            (liability_id,),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def get(
+        self, liability_id: str, market: str, symbol: str
+    ) -> MarginFinancingPosition | None:
+        row = self.connection.execute(
+            """SELECT * FROM margin_financing_positions
+            WHERE liability_id = ? AND market = ? AND symbol = ?""",
+            (liability_id, market, symbol.upper()),
+        ).fetchone()
+        return self._from_row(row) if row else None
+
+    def upsert(self, position: MarginFinancingPosition) -> None:
+        self.connection.execute(
+            """INSERT INTO margin_financing_positions (
+            id, liability_id, market, symbol, currency, principal,
+            financed_quantity, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(liability_id, market, symbol) DO UPDATE SET
+            principal=excluded.principal,
+            financed_quantity=excluded.financed_quantity,
+            updated_at=excluded.updated_at""",
+            (
+                position.id,
+                position.liability_id,
+                position.market.value,
+                position.symbol,
+                position.currency.value,
+                str(position.principal),
+                str(position.financed_quantity),
+                position.created_at.isoformat(),
+                position.updated_at.isoformat(),
+            ),
+        )
+        if self.auto_commit:
+            self.connection.commit()
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> MarginFinancingPosition:
+        values = dict(row)
+        values["principal"] = _decimal(values["principal"])
+        values["financed_quantity"] = _decimal(values["financed_quantity"])
+        values["created_at"] = datetime.fromisoformat(values["created_at"])
+        values["updated_at"] = datetime.fromisoformat(values["updated_at"])
+        return MarginFinancingPosition.model_validate(values)
 
 
 class SQLiteSnapshotRepository:

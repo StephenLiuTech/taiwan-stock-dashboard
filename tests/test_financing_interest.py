@@ -12,6 +12,8 @@ from domain import (
     LiabilityPrincipalEvent,
     LiabilityPrincipalEventType,
     LiabilityType,
+    MarginFinancingPosition,
+    Market,
 )
 from pams.application import (
     AUTOMATIC_FINANCING_ACCRUAL_START,
@@ -24,6 +26,7 @@ from repositories.sqlite import (
     SQLiteInvestmentCostEventRepository,
     SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
+    SQLiteMarginFinancingPositionRepository,
 )
 from services import FinancingInterestEngine
 
@@ -124,6 +127,68 @@ def test_exact_first_daily_interest_two_liabilities_and_deterministic_ids(
     assert use_case.ensure_through(date(2026, 8, 29)).inserted == 0
     assert len(use_case.inspect(date(2026, 8, 29))) == 2
     assert all(item.persisted for item in use_case.inspect(date(2026, 8, 29)))
+    connection.close()
+
+
+def test_margin_interest_is_calculated_independently_per_symbol(
+    tmp_path: Path,
+) -> None:
+    use_case, connection = build_use_case(tmp_path)
+    positions = SQLiteMarginFinancingPositionRepository(connection)
+    positions.upsert(
+        MarginFinancingPosition(
+            id="margin-2027",
+            liability_id="margin",
+            market=Market.TWSE,
+            symbol="2027",
+            principal=Decimal("927000"),
+            financed_quantity=Decimal("50000"),
+        )
+    )
+    positions.upsert(
+        MarginFinancingPosition(
+            id="margin-00406a",
+            liability_id="margin",
+            market=Market.TWSE,
+            symbol="00406A",
+            principal=Decimal("47000"),
+            financed_quantity=Decimal("15000"),
+        )
+    )
+    principal = SQLiteLiabilityPrincipalEventRepository(connection)
+    original = principal.list_by_liability("margin")[0]
+    principal.replace(original.model_copy(update={"margin_position_id": "margin-2027"}))
+    principal.insert_many_if_absent(
+        [
+            principal_event(
+                "00406a-buy",
+                "margin",
+                date(2026, 8, 29),
+                11,
+                "47000",
+                "1021000",
+            ).model_copy(update={"margin_position_id": "margin-00406a"})
+        ]
+    )
+    use_case = FinancingInterestUseCase(
+        SQLiteLiabilityRepository(connection),
+        principal,
+        SQLiteInvestmentCostEventRepository(connection),
+        {
+            LiabilityType.MARGIN_FINANCING: RATE,
+            LiabilityType.STOCK_PLEDGE: RATE,
+        },
+        margin_positions=positions,
+    )
+
+    items = use_case.inspect(date(2026, 8, 29))
+
+    margin_items = [item for item in items if item.liability_id == "margin"]
+    assert [(item.margin_position_id, item.principal) for item in margin_items] == [
+        ("margin-00406a", Decimal("47000")),
+        ("margin-2027", Decimal("974000")),
+    ]
+    assert all("financing-interest-position:" in item.event_id for item in margin_items)
     connection.close()
 
 

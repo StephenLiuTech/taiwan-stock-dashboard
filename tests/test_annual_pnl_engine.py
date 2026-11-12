@@ -8,6 +8,7 @@ import pytest
 from domain import (
     Currency,
     DividendEvent,
+    FinancingType,
     InvestmentCostEvent,
     InvestmentCostType,
     Market,
@@ -27,10 +28,12 @@ def tx(
     fees: str = "0",
     taxes: str = "0",
     currency: Currency = Currency.TWD,
+    financing_type: FinancingType | None = None,
+    symbol: str | None = None,
 ) -> Transaction:
     return Transaction(
         id=identifier,
-        symbol="2330" if currency is Currency.TWD else "MU",
+        symbol=symbol or ("2330" if currency is Currency.TWD else "MU"),
         market=Market.TWSE if currency is Currency.TWD else Market.US,
         transaction_type=side,
         trade_date=day,
@@ -40,7 +43,53 @@ def tx(
         fees=Decimal(fees),
         taxes=Decimal(taxes),
         currency=currency,
+        financing_type=financing_type,
     )
+
+
+def test_annual_pnl_keeps_cash_sale_realized_pnl_when_margin_buy_is_added() -> None:
+    trade_day = date(2026, 11, 11)
+    cash_transactions = [
+        tx(
+            "cash-buy",
+            TransactionType.BUY,
+            date(2026, 11, 1),
+            "10000",
+            "7.50",
+            symbol="00406A",
+        ),
+        tx(
+            "AX494",
+            TransactionType.SELL,
+            trade_day,
+            "10000",
+            "7.89",
+            fees="31",
+            taxes="78",
+            symbol="00406A",
+        ),
+    ]
+    with_margin = [
+        *cash_transactions,
+        tx(
+            "AW854",
+            TransactionType.BUY,
+            trade_day,
+            "15000",
+            "7.89",
+            fees="47",
+            financing_type=FinancingType.MARGIN,
+            symbol="00406A",
+        ),
+    ]
+    engine = AnnualPnlEngine()
+    baseline = engine.calculate(trade_day, cash_transactions, Decimal("0"), [], [], {})
+    rebuilt = engine.calculate(trade_day, with_margin, Decimal("1050"), [], [], {})
+
+    assert rebuilt.realized_pnl_ytd == baseline.realized_pnl_ytd
+    assert rebuilt.other_cost_ytd == baseline.other_cost_ytd + Decimal("47")
+    assert rebuilt.unrealized_pnl == Decimal("1050")
+    assert rebuilt.total_pnl_ytd == baseline.total_pnl_ytd + Decimal("1003")
 
 
 def test_realized_sale_uses_moving_average_and_sell_expenses() -> None:

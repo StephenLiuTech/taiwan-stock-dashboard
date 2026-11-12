@@ -18,11 +18,17 @@ from domain import (
     Liability,
     LiabilityPrincipalEvent,
     LotAllocation,
+    MarginFinancingPosition,
     PositionSnapshot,
     PriceQuote,
     Transaction,
+    TransactionCostPoolOpening,
     WatchlistItem,
 )
+
+
+class TransactionCostPoolOpeningRepository(Protocol):
+    def list_all(self) -> list[TransactionCostPoolOpening]: ...
 
 
 class StockNetEquityHistoryRepository(Protocol):
@@ -40,6 +46,17 @@ class LiabilityPrincipalEventRepository(Protocol):
     def list_by_liability(self, liability_id: str) -> list[LiabilityPrincipalEvent]: ...
     def insert_many_if_absent(self, events: list[LiabilityPrincipalEvent]) -> int: ...
     def replace(self, event: LiabilityPrincipalEvent) -> None: ...
+
+
+class MarginFinancingPositionRepository(Protocol):
+    """Persistence for per-symbol margin principal and quantity projections."""
+
+    def list_all(self) -> list[MarginFinancingPosition]: ...
+    def list_by_liability(self, liability_id: str) -> list[MarginFinancingPosition]: ...
+    def get(
+        self, liability_id: str, market: str, symbol: str
+    ) -> MarginFinancingPosition | None: ...
+    def upsert(self, position: MarginFinancingPosition) -> None: ...
 
 
 class BrokerImportRecordRepository(Protocol):
@@ -290,6 +307,7 @@ class MarginTransactionUnitOfWork(Protocol):
     transactions: TransactionRepository
     liabilities: LiabilityRepository
     liability_principal_events: LiabilityPrincipalEventRepository
+    margin_positions: MarginFinancingPositionRepository
 
     def transaction(self) -> AbstractContextManager[None]: ...
 
@@ -301,6 +319,7 @@ class BrokerImportUnitOfWork(Protocol):
     transactions: TransactionRepository
     liabilities: LiabilityRepository
     liability_principal_events: LiabilityPrincipalEventRepository
+    margin_positions: MarginFinancingPositionRepository
     broker_import_records: BrokerImportRecordRepository
 
     def transaction(self) -> AbstractContextManager[None]: ...

@@ -12,14 +12,22 @@ from repositories.sqlite import (
     SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
     SQLiteLotAllocationRepository,
+    SQLiteMarginFinancingPositionRepository,
     SQLitePositionSnapshotRepository,
     SQLitePriceQuoteRepository,
     SQLiteReportDeliveryRepository,
     SQLiteSnapshotRepository,
     SQLiteStockNetEquityHistoryRepository,
+    SQLiteTransactionCostPoolOpeningRepository,
     SQLiteTransactionRepository,
     SQLiteWatchlistRepository,
 )
+
+
+class PostgreSQLTransactionCostPoolOpeningRepository(
+    SQLiteTransactionCostPoolOpeningRepository
+):
+    """Read PostgreSQL legacy cost-pool openings."""
 
 
 class PostgreSQLLotAllocationRepository(SQLiteLotAllocationRepository):
@@ -34,6 +42,12 @@ class PostgreSQLLiabilityPrincipalEventRepository(
     SQLiteLiabilityPrincipalEventRepository
 ):
     """Persist replayable liability principal changes in PostgreSQL."""
+
+
+class PostgreSQLMarginFinancingPositionRepository(
+    SQLiteMarginFinancingPositionRepository
+):
+    """Persist per-symbol margin projections in PostgreSQL."""
 
 
 class PostgreSQLBrokerImportRecordRepository(SQLiteBrokerImportRecordRepository):

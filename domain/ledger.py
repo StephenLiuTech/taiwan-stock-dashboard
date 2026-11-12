@@ -1,10 +1,39 @@
 """Immutable transaction-ledger calculation results."""
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from domain.annual_pnl import RealizedSale
-from domain.enums import Currency, Market
+from domain.enums import Currency, FinancingType, Market
+
+
+@dataclass(frozen=True)
+class TransactionCostPool:
+    """One independently costed cash or margin position bucket."""
+
+    symbol: str
+    market: Market
+    currency: Currency
+    financing_type: FinancingType | None
+    quantity: Decimal
+    average_cost: Decimal
+    cost_basis: Decimal
+    realized_pnl: Decimal
+
+
+@dataclass(frozen=True)
+class TransactionCostPoolOpening:
+    """Audited legacy aggregate-to-bucket opening, never a transaction."""
+
+    symbol: str
+    market: Market
+    currency: Currency
+    effective_date: date
+    cash_quantity: Decimal
+    margin_quantity: Decimal
+    source: str
+    source_reference: str
 
 
 @dataclass(frozen=True)
@@ -30,6 +59,7 @@ class PortfolioLedger:
     total_sell_fees: Decimal = Decimal("0")
     total_taxes: Decimal = Decimal("0")
     realized_sales: tuple[RealizedSale, ...] = ()
+    cost_pools: tuple[TransactionCostPool, ...] = ()
 
     @property
     def total_trading_expenses(self) -> Decimal:

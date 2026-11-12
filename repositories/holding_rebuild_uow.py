@@ -9,6 +9,7 @@ from repositories.sqlite import (
     SQLiteHoldingRepository,
     SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
+    SQLiteMarginFinancingPositionRepository,
     SQLiteTransactionRepository,
 )
 
@@ -44,6 +45,9 @@ class SQLiteMarginTransactionUnitOfWork:
         self.liability_principal_events = SQLiteLiabilityPrincipalEventRepository(
             connection, auto_commit=False
         )
+        self.margin_positions = SQLiteMarginFinancingPositionRepository(
+            connection, auto_commit=False
+        )
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -66,6 +70,9 @@ class SQLiteBrokerImportUnitOfWork:
         self.transactions = SQLiteTransactionRepository(connection, auto_commit=False)
         self.liabilities = SQLiteLiabilityRepository(connection, auto_commit=False)
         self.liability_principal_events = SQLiteLiabilityPrincipalEventRepository(
+            connection, auto_commit=False
+        )
+        self.margin_positions = SQLiteMarginFinancingPositionRepository(
             connection, auto_commit=False
         )
         self.broker_import_records = SQLiteBrokerImportRecordRepository(

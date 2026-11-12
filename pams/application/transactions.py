@@ -37,6 +37,9 @@ def _record(
     transaction: Transaction,
     financing: MarginFinancingResult | None = None,
     updated_holding_quantity: Decimal | None = None,
+    *,
+    principal_event_id: str | None = None,
+    applied: bool = True,
 ) -> TransactionRecord:
     return TransactionRecord(
         id=transaction.id,
@@ -51,6 +54,7 @@ def _record(
         taxes=transaction.taxes,
         currency=transaction.currency.value,
         notes=transaction.notes,
+        broker_order=transaction.broker_order,
         financing_type=(
             transaction.financing_type.value
             if transaction.financing_type is not None
@@ -66,6 +70,9 @@ def _record(
         updated_margin_principal=(
             financing.updated_liability.principal if financing else None
         ),
+        margin_position_id=(financing.updated_position.id if financing else None),
+        principal_event_id=principal_event_id,
+        applied=applied,
     )
 
 
@@ -86,7 +93,9 @@ class AddTransactionUseCase:
         self.transaction_engine = transaction_engine or TransactionEngine()
         self.holding_unit_of_work = holding_unit_of_work
 
-    def execute(self, command: AddTransactionCommand) -> TransactionRecord:
+    def execute(
+        self, command: AddTransactionCommand, *, apply: bool = True
+    ) -> TransactionRecord:
         market = Market(command.market)
         currency = Currency(command.currency)
         expected_currency = Currency.USD if market is Market.US else Currency.TWD
@@ -110,13 +119,33 @@ class AddTransactionUseCase:
                 if command.financing_type is not None
                 else None
             ),
+            "broker_order": command.broker_order,
             "notes": command.notes,
         }
         if command.transaction_id is not None:
             transaction_values["id"] = command.transaction_id
+        elif command.broker_order is not None:
+            transaction_values["id"] = str(
+                uuid5(
+                    NAMESPACE_URL,
+                    "broker-order|"
+                    f"{market.value}|{command.symbol.strip().upper()}|"
+                    f"{command.trade_date.isoformat()}|"
+                    f"{command.broker_order.strip().upper()}",
+                )
+            )
         transaction = Transaction.model_validate(transaction_values)
+        if (
+            command.margin_principal is not None
+            and transaction.financing_type is not FinancingType.MARGIN
+        ):
+            raise ValueError(
+                "broker-confirmed margin principal requires margin financing"
+            )
+        if not apply:
+            return self._preview(transaction, command.margin_principal)
         if transaction.financing_type is FinancingType.MARGIN:
-            return self._execute_margin(transaction)
+            return self._execute_margin(transaction, command.margin_principal)
         if self.holding_unit_of_work is not None:
             return self._execute_with_holding(transaction)
         if self.transactions.exists(transaction.id):
@@ -125,6 +154,65 @@ class AddTransactionUseCase:
             )
         self.transactions.add(transaction)
         return _record(transaction)
+
+    def _preview(
+        self, transaction: Transaction, margin_principal: Decimal | None = None
+    ) -> TransactionRecord:
+        """Validate and calculate one transaction without persistence."""
+        if transaction.financing_type is not FinancingType.MARGIN:
+            if self.transactions.exists(transaction.id) or self._broker_order_exists(
+                self.transactions.list_all(), transaction
+            ):
+                raise DuplicateTransactionError(
+                    f"Transaction ID already exists: {transaction.id}"
+                )
+            return _record(transaction, applied=False)
+        unit = self.margin_unit_of_work
+        if unit is None:
+            raise ValueError("margin transaction persistence is not configured")
+        existing = unit.transactions.list_all()
+        if (
+            unit.transactions.exists(transaction.id)
+            or self._broker_order_exists(existing, transaction)
+            or any(self._same_margin_purchase(item, transaction) for item in existing)
+        ):
+            raise DuplicateTransactionError(
+                "Margin transaction already exists for the same trade details"
+            )
+        liabilities = [
+            item
+            for item in unit.liabilities.list_all()
+            if item.liability_type is LiabilityType.MARGIN_FINANCING
+        ]
+        if len(liabilities) != 1:
+            raise ValueError(
+                "exactly one aggregate margin-financing liability is required"
+            )
+        liability = liabilities[0]
+        position = unit.margin_positions.get(
+            liability.id, transaction.market.value, transaction.symbol
+        )
+        financing = self.margin_service.apply(
+            transaction, liability, position, margin_principal
+        )
+        projected = self.transaction_engine.project_current_holdings(
+            [*existing, transaction], unit.holdings.list_all()
+        )
+        holding = next(
+            item
+            for item in projected
+            if item.symbol == transaction.symbol
+            and item.market is transaction.market
+            and item.currency is transaction.currency
+        )
+        event_id = self._principal_event_id(liability.id, transaction.id)
+        return _record(
+            transaction,
+            financing,
+            holding.quantity,
+            principal_event_id=event_id,
+            applied=False,
+        )
 
     def _execute_with_holding(self, transaction: Transaction) -> TransactionRecord:
         unit = self.holding_unit_of_work
@@ -150,14 +238,20 @@ class AddTransactionUseCase:
             unit.holdings.upsert(holding)
             return _record(transaction, updated_holding_quantity=holding.quantity)
 
-    def _execute_margin(self, transaction: Transaction) -> TransactionRecord:
+    def _execute_margin(
+        self, transaction: Transaction, margin_principal: Decimal | None = None
+    ) -> TransactionRecord:
         if self.margin_unit_of_work is None:
             raise ValueError("margin transaction persistence is not configured")
         unit = self.margin_unit_of_work
         with unit.transaction():
             existing = unit.transactions.list_all()
-            if unit.transactions.exists(transaction.id) or any(
-                self._same_margin_purchase(item, transaction) for item in existing
+            if (
+                unit.transactions.exists(transaction.id)
+                or self._broker_order_exists(existing, transaction)
+                or any(
+                    self._same_margin_purchase(item, transaction) for item in existing
+                )
             ):
                 raise DuplicateTransactionError(
                     "Margin transaction already exists for the same trade details"
@@ -168,8 +262,15 @@ class AddTransactionUseCase:
                 if item.liability_type is LiabilityType.MARGIN_FINANCING
             ]
             if len(liabilities) != 1:
-                raise ValueError("exactly one margin-financing liability is required")
-            financing = self.margin_service.apply(transaction, liabilities[0])
+                raise ValueError(
+                    "exactly one aggregate margin-financing liability is required"
+                )
+            position = unit.margin_positions.get(
+                liabilities[0].id, transaction.market.value, transaction.symbol
+            )
+            financing = self.margin_service.apply(
+                transaction, liabilities[0], position, margin_principal
+            )
             history = unit.liability_principal_events.list_by_liability(
                 liabilities[0].id
             )
@@ -182,12 +283,7 @@ class AddTransactionUseCase:
                 default=-1,
             )
             principal_event = LiabilityPrincipalEvent(
-                id=str(
-                    uuid5(
-                        NAMESPACE_URL,
-                        f"margin-principal|{liabilities[0].id}|{transaction.id}",
-                    )
-                ),
+                id=self._principal_event_id(liabilities[0].id, transaction.id),
                 liability_id=liabilities[0].id,
                 effective_date=transaction.trade_date,
                 sequence=sequence,
@@ -196,6 +292,8 @@ class AddTransactionUseCase:
                 resulting_principal=None,
                 source="transaction entry",
                 reference=transaction.id,
+                margin_position_id=financing.updated_position.id,
+                financed_quantity_delta=transaction.quantity,
                 notes="Broker-rounded margin principal from margin BUY",
                 created_at=datetime.combine(
                     transaction.trade_date, datetime.min.time(), UTC
@@ -221,6 +319,7 @@ class AddTransactionUseCase:
             )
             unit.holdings.upsert(holding)
             unit.liabilities.upsert(financing.updated_liability)
+            unit.margin_positions.upsert(financing.updated_position)
             inserted = unit.liability_principal_events.insert_many_if_absent(
                 [principal_event]
             )
@@ -230,7 +329,21 @@ class AddTransactionUseCase:
                 )
             for event in restated_events:
                 unit.liability_principal_events.replace(event)
-            return _record(transaction, financing, holding.quantity)
+            return _record(
+                transaction,
+                financing,
+                holding.quantity,
+                principal_event_id=principal_event.id,
+            )
+
+    @staticmethod
+    def _principal_event_id(liability_id: str, transaction_id: str) -> str:
+        return str(
+            uuid5(
+                NAMESPACE_URL,
+                f"margin-principal|{liability_id}|{transaction_id}",
+            )
+        )
 
     @staticmethod
     def _restated_principal_events(
@@ -287,6 +400,17 @@ class AddTransactionUseCase:
             and existing.fees == candidate.fees
             and existing.taxes == candidate.taxes
             and existing.currency is candidate.currency
+        )
+
+    @staticmethod
+    def _broker_order_exists(
+        existing: list[Transaction], candidate: Transaction
+    ) -> bool:
+        return candidate.broker_order is not None and any(
+            item.market is candidate.market
+            and item.trade_date == candidate.trade_date
+            and item.broker_order == candidate.broker_order
+            for item in existing
         )
 
 

@@ -12,6 +12,7 @@ from config.settings import Settings
 from domain import (
     Currency,
     DailySnapshot,
+    FinancingType,
     FxRate,
     Holding,
     Market,
@@ -153,6 +154,74 @@ def test_multi_currency_valuation_uses_transaction_aware_daily_pnl() -> None:
     )
 
     assert result.holdings[0].daily_pnl_twd == Decimal("-10")
+
+
+def test_margin_and_cash_cost_pools_rebuild_one_aggregate_snapshot_position() -> None:
+    report_date = date(2026, 11, 11)
+    transactions = [
+        Transaction(
+            id="cash-buy",
+            symbol="00406A",
+            market=Market.TWSE,
+            transaction_type=TransactionType.BUY,
+            trade_date=date(2026, 11, 1),
+            settlement_date=date(2026, 11, 1),
+            quantity=Decimal("10000"),
+            price=Decimal("7.50"),
+            currency=Currency.TWD,
+        ),
+        Transaction(
+            id="AW854",
+            symbol="00406A",
+            market=Market.TWSE,
+            transaction_type=TransactionType.BUY,
+            trade_date=report_date,
+            settlement_date=report_date,
+            quantity=Decimal("15000"),
+            price=Decimal("7.89"),
+            fees=Decimal("47"),
+            currency=Currency.TWD,
+            financing_type=FinancingType.MARGIN,
+        ),
+        Transaction(
+            id="AX494",
+            symbol="00406A",
+            market=Market.TWSE,
+            transaction_type=TransactionType.SELL,
+            trade_date=report_date,
+            settlement_date=report_date,
+            quantity=Decimal("10000"),
+            price=Decimal("7.89"),
+            fees=Decimal("31"),
+            taxes=Decimal("78"),
+            currency=Currency.TWD,
+        ),
+    ]
+    projected = TransactionEngine().project_current_holdings(transactions, [])
+    result = MultiCurrencyValuationEngine().valuate(
+        report_date,
+        list(projected),
+        [
+            quote(
+                "00406A",
+                Market.TWSE,
+                Currency.TWD,
+                "7.96",
+                "7.65",
+                report_date,
+            )
+        ],
+        None,
+        daily_transactions=[
+            item for item in transactions if item.trade_date == report_date
+        ],
+    )
+
+    assert projected[0].quantity == Decimal("15000")
+    assert projected[0].average_cost == Decimal("7.89")
+    assert result.total_cost_twd == Decimal("118350")
+    assert result.total_market_value_twd == Decimal("119400")
+    assert result.total_unrealized_pnl_twd == Decimal("1050")
 
 
 def test_fx_repository_never_returns_future_rate(

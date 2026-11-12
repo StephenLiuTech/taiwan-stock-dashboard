@@ -8,10 +8,12 @@ import pytest
 
 from domain import (
     Currency,
+    FinancingType,
     Holding,
     HoldingType,
     Market,
     Transaction,
+    TransactionCostPoolOpening,
     TransactionType,
 )
 from pams.application import RebuildHoldingsUseCase
@@ -37,6 +39,7 @@ def transaction(
     taxes: str = "0",
     trade_date: date = date(2026, 1, 2),
     settlement_date: date | None = None,
+    financing_type: FinancingType | None = None,
 ) -> Transaction:
     return Transaction(
         id=identifier,
@@ -50,7 +53,297 @@ def transaction(
         fees=Decimal(fees),
         taxes=Decimal(taxes),
         currency=currency,
+        financing_type=financing_type,
     )
+
+
+def test_same_day_margin_buy_and_cash_sell_use_independent_cost_pools() -> None:
+    trade_day = date(2026, 11, 11)
+    cash_only = TransactionEngine().build_ledger(
+        [
+            transaction(
+                "cash-buy",
+                TransactionType.BUY,
+                "10000",
+                "7.50",
+                symbol="00406A",
+                trade_date=date(2026, 11, 1),
+            ),
+            transaction(
+                "AX494",
+                TransactionType.SELL,
+                "10000",
+                "7.89",
+                symbol="00406A",
+                fees="31",
+                taxes="78",
+                trade_date=trade_day,
+            ),
+        ]
+    )
+    combined = TransactionEngine().build_ledger(
+        [
+            transaction(
+                "cash-buy",
+                TransactionType.BUY,
+                "10000",
+                "7.50",
+                symbol="00406A",
+                trade_date=date(2026, 11, 1),
+            ),
+            transaction(
+                "AW854",
+                TransactionType.BUY,
+                "15000",
+                "7.89",
+                symbol="00406A",
+                fees="47",
+                trade_date=trade_day,
+                financing_type=FinancingType.MARGIN,
+            ),
+            transaction(
+                "AX494",
+                TransactionType.SELL,
+                "10000",
+                "7.89",
+                symbol="00406A",
+                fees="31",
+                taxes="78",
+                trade_date=trade_day,
+            ),
+        ]
+    )
+
+    assert combined.total_realized_pnl == cash_only.total_realized_pnl
+    assert combined.positions[0].quantity == Decimal("15000")
+    assert combined.positions[0].average_cost == Decimal("7.89")
+    assert combined.positions[0].cost_basis == Decimal("118350")
+    pools = {item.financing_type: item for item in combined.cost_pools}
+    assert pools[None].quantity == 0
+    assert pools[FinancingType.MARGIN].quantity == Decimal("15000")
+    assert pools[FinancingType.MARGIN].cost_basis == Decimal("118350")
+
+
+def test_legacy_opening_splits_prior_aggregate_without_changing_cost_or_realized() -> (
+    None
+):
+    trade_day = date(2026, 11, 11)
+    transactions = [
+        transaction(
+            "cash-buy",
+            TransactionType.BUY,
+            "10000",
+            "7.503",
+            symbol="00406A",
+            trade_date=date(2026, 11, 1),
+        ),
+        transaction(
+            "AW854",
+            TransactionType.BUY,
+            "15000",
+            "7.89",
+            symbol="00406A",
+            trade_date=trade_day,
+            financing_type=FinancingType.MARGIN,
+        ),
+        transaction(
+            "AX494",
+            TransactionType.SELL,
+            "10000",
+            "7.89",
+            symbol="00406A",
+            trade_date=trade_day,
+        ),
+    ]
+    opening = TransactionCostPoolOpening(
+        symbol="00406A",
+        market=Market.TWSE,
+        currency=Currency.TWD,
+        effective_date=trade_day,
+        cash_quantity=Decimal("10000"),
+        margin_quantity=Decimal("0"),
+        source="legacy migration opening",
+        source_reference="pre-AW854 cash position",
+    )
+    ledger = TransactionEngine(cost_pool_openings=[opening]).build_ledger(transactions)
+
+    sale = ledger.realized_sales[0]
+    assert sale.total_cost_basis == Decimal("75030")
+    assert sale.realized_pnl == Decimal("3870")
+    assert ledger.positions[0].quantity == Decimal("15000")
+    assert ledger.positions[0].average_cost == Decimal("7.89")
+
+
+def test_2027_legacy_opening_preserves_aggregate_cost_and_realized_history() -> None:
+    opening_date = date(2026, 10, 30)
+    opening = TransactionCostPoolOpening(
+        symbol="2027",
+        market=Market.TWSE,
+        currency=Currency.TWD,
+        effective_date=opening_date,
+        cash_quantity=Decimal("8000"),
+        margin_quantity=Decimal("55000"),
+        source="legacy migration opening",
+        source_reference="approved cash/margin quantity split",
+    )
+    transactions = [
+        transaction(
+            "legacy-buy",
+            TransactionType.BUY,
+            "63000",
+            "45.25",
+            symbol="2027",
+            trade_date=date(2026, 10, 1),
+        ),
+        transaction(
+            "cash-sell",
+            TransactionType.SELL,
+            "8000",
+            "49.9",
+            symbol="2027",
+            trade_date=opening_date,
+        ),
+        transaction(
+            "margin-sell",
+            TransactionType.SELL,
+            "5000",
+            "49.95",
+            symbol="2027",
+            trade_date=opening_date,
+            financing_type=FinancingType.MARGIN,
+        ),
+        transaction(
+            "later-margin-buy",
+            TransactionType.BUY,
+            "8000",
+            "47.5",
+            symbol="2027",
+            trade_date=date(2026, 11, 1),
+            financing_type=FinancingType.MARGIN,
+        ),
+    ]
+    legacy = TransactionEngine().build_ledger(
+        [item.model_copy(update={"financing_type": None}) for item in transactions]
+    )
+    split = TransactionEngine(cost_pool_openings=[opening]).build_ledger(transactions)
+
+    assert split.positions == legacy.positions
+    assert split.total_realized_pnl == legacy.total_realized_pnl
+    pools = {item.financing_type: item for item in split.cost_pools}
+    assert pools[None].quantity == 0
+    assert pools[FinancingType.MARGIN].quantity == Decimal("58000")
+
+
+def test_closed_8131_legacy_opening_preserves_historical_aggregate_result() -> None:
+    transactions = [
+        transaction(
+            "legacy-buy",
+            TransactionType.BUY,
+            "7000",
+            "75",
+            symbol="8131",
+            trade_date=date(2026, 6, 23),
+        ),
+        transaction(
+            "legacy-sell",
+            TransactionType.SELL,
+            "7000",
+            "70",
+            symbol="8131",
+            trade_date=date(2026, 7, 1),
+        ),
+    ]
+    opening = TransactionCostPoolOpening(
+        symbol="8131",
+        market=Market.TWSE,
+        currency=Currency.TWD,
+        effective_date=date(2026, 7, 2),
+        cash_quantity=Decimal("0"),
+        margin_quantity=Decimal("0"),
+        source="legacy migration opening",
+        source_reference="8131 full margin lifecycle closed",
+    )
+    baseline = TransactionEngine().build_ledger(transactions)
+    migrated = TransactionEngine(cost_pool_openings=[opening]).build_ledger(
+        transactions
+    )
+
+    assert migrated.positions == baseline.positions == ()
+    assert migrated.total_realized_pnl == baseline.total_realized_pnl
+    assert all(item.quantity == 0 for item in migrated.cost_pools)
+
+
+def test_same_day_cash_sell_then_margin_buy_input_order_is_deterministic() -> None:
+    trade_day = date(2026, 11, 11)
+    cash_buy = transaction(
+        "cash-buy",
+        TransactionType.BUY,
+        "10000",
+        "7.50",
+        symbol="00406A",
+        trade_date=date(2026, 11, 1),
+    )
+    cash_sell = transaction(
+        "AX494",
+        TransactionType.SELL,
+        "10000",
+        "7.89",
+        symbol="00406A",
+        trade_date=trade_day,
+    )
+    margin_buy = transaction(
+        "AW854",
+        TransactionType.BUY,
+        "15000",
+        "7.89",
+        symbol="00406A",
+        trade_date=trade_day,
+        financing_type=FinancingType.MARGIN,
+    )
+    engine = TransactionEngine()
+
+    assert engine.build_ledger(
+        [cash_buy, cash_sell, margin_buy]
+    ) == engine.build_ledger([margin_buy, cash_sell, cash_buy])
+
+
+def test_cash_and_margin_sales_consume_only_their_own_cost_pool() -> None:
+    transactions = [
+        transaction("cash-buy", TransactionType.BUY, "10", "10"),
+        transaction(
+            "margin-buy",
+            TransactionType.BUY,
+            "20",
+            "30",
+            financing_type=FinancingType.MARGIN,
+        ),
+        transaction(
+            "margin-sell",
+            TransactionType.SELL,
+            "5",
+            "40",
+            trade_date=date(2026, 1, 3),
+            financing_type=FinancingType.MARGIN,
+        ),
+        transaction(
+            "cash-sell",
+            TransactionType.SELL,
+            "4",
+            "20",
+            trade_date=date(2026, 1, 4),
+        ),
+    ]
+    ledger = TransactionEngine().build_ledger(transactions)
+    sales = {item.transaction_id: item for item in ledger.realized_sales}
+
+    assert sales["margin-sell"].average_cost_basis == Decimal("30")
+    assert sales["cash-sell"].average_cost_basis == Decimal("10")
+    pools = {item.financing_type: item for item in ledger.cost_pools}
+    assert pools[None].quantity == Decimal("6")
+    assert pools[None].cost_basis == Decimal("60")
+    assert pools[FinancingType.MARGIN].quantity == Decimal("15")
+    assert pools[FinancingType.MARGIN].cost_basis == Decimal("450")
+    assert ledger.positions[0].average_cost == Decimal("510") / Decimal("21")
 
 
 def test_one_buy_tracks_fee_without_increasing_broker_cost() -> None:

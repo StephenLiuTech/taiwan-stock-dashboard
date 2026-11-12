@@ -7,6 +7,7 @@ import pytest
 
 from database import initialize_database, initialize_schema
 from database.schema import SCHEMA_VERSION
+from repositories.sqlite import SQLiteTransactionCostPoolOpeningRepository
 
 
 def test_sqlite_schema_14_to_15_adds_empty_lot_allocations_without_rewriting_rows() -> (
@@ -25,12 +26,123 @@ def test_sqlite_schema_14_to_15_adds_empty_lot_allocations_without_rewriting_row
 
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 15
+        == 16
     )
     assert connection.execute("SELECT COUNT(*) FROM lot_allocations").fetchone()[0] == 0
     assert (
         connection.execute("SELECT value FROM preserved").fetchone()[0] == "unchanged"
     )
+    connection.close()
+
+
+def test_sqlite_schema_15_to_16_backfills_legacy_margin_position() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+        INSERT INTO schema_version VALUES (15, 'before');
+        CREATE TABLE transactions (
+          id TEXT PRIMARY KEY, symbol TEXT NOT NULL, market TEXT NOT NULL,
+          transaction_type TEXT NOT NULL, trade_date TEXT NOT NULL,
+          settlement_date TEXT NOT NULL, quantity TEXT NOT NULL, price TEXT NOT NULL,
+          fees TEXT NOT NULL, taxes TEXT NOT NULL, currency TEXT NOT NULL,
+          financing_type TEXT, notes TEXT, created_at TEXT NOT NULL);
+        INSERT INTO transactions VALUES
+          ('margin-buy','2027','TWSE','buy','2026-08-01','2026-08-01',
+           '2000','50','20','0','TWD','margin','Broker order LEGACY1','t');
+        CREATE TABLE holdings (
+          id TEXT PRIMARY KEY, symbol TEXT NOT NULL, name TEXT NOT NULL,
+          market TEXT NOT NULL, currency TEXT NOT NULL, quantity TEXT NOT NULL,
+          average_cost TEXT NOT NULL, holding_type TEXT NOT NULL,
+          is_pledged INTEGER NOT NULL, notes TEXT, created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL, UNIQUE(symbol, market));
+        INSERT INTO holdings VALUES
+          ('holding-2027','2027','Ta Chen','TWSE','TWD','58000','45',
+           'stock',0,NULL,'t','t');
+        CREATE TABLE position_snapshots (
+          snapshot_date TEXT NOT NULL, holding_id TEXT NOT NULL, symbol TEXT NOT NULL,
+          market TEXT NOT NULL, native_currency TEXT NOT NULL, quote_date TEXT,
+          fx_rate TEXT NOT NULL, fx_rate_date TEXT, quantity TEXT NOT NULL,
+          average_cost TEXT NOT NULL, close_price TEXT NOT NULL, cost_basis TEXT NOT NULL,
+          market_value TEXT NOT NULL, unrealized_pnl TEXT NOT NULL,
+          unrealized_return TEXT NOT NULL, portfolio_weight TEXT NOT NULL,
+          daily_value_change TEXT NOT NULL, daily_return TEXT,
+          PRIMARY KEY(snapshot_date, holding_id));
+        CREATE TABLE liabilities (
+          id TEXT PRIMARY KEY, liability_type TEXT NOT NULL, principal TEXT NOT NULL,
+          annual_interest_rate TEXT, currency TEXT NOT NULL, start_date TEXT,
+          maturity_date TEXT, collateral_description TEXT, financed_symbol TEXT,
+          financed_quantity TEXT, notes TEXT, created_at TEXT NOT NULL);
+        INSERT INTO liabilities VALUES
+          ('liability-margin-financing','margin_financing','1584000',NULL,'TWD',
+           NULL,NULL,NULL,'2027','58000',NULL,'2026-01-01T00:00:00+00:00');
+        CREATE TABLE liability_principal_events (
+          id TEXT PRIMARY KEY, liability_id TEXT NOT NULL, effective_date TEXT NOT NULL,
+          sequence INTEGER NOT NULL, event_type TEXT NOT NULL, principal_delta TEXT NOT NULL,
+          resulting_principal TEXT, source TEXT NOT NULL, reference TEXT, notes TEXT,
+          created_at TEXT NOT NULL, UNIQUE(liability_id,effective_date,sequence));
+        INSERT INTO liability_principal_events VALUES
+          ('principal-event','liability-margin-financing','2026-08-01',0,'increase',
+           '60000','1584000','test','margin-buy',NULL,'t');
+        CREATE TABLE investment_cost_events (
+          id TEXT PRIMARY KEY, event_date TEXT NOT NULL, cost_type TEXT NOT NULL,
+          amount TEXT NOT NULL, currency TEXT NOT NULL, description TEXT,
+          source TEXT, created_at TEXT NOT NULL);
+        INSERT INTO investment_cost_events VALUES
+          ('interest','2026-08-01','financing','10','TWD',
+           'liability-margin-financing','test','t');
+        """
+    )
+
+    initialize_schema(connection)
+
+    assert (
+        connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+        == 16
+    )
+    assert (
+        connection.execute(
+            "SELECT broker_order FROM transactions WHERE id='margin-buy'"
+        ).fetchone()[0]
+        == "LEGACY1"
+    )
+    position = connection.execute(
+        """SELECT symbol, principal, financed_quantity
+        FROM margin_financing_positions"""
+    ).fetchone()
+    assert tuple(position) == ("2027", "1584000", "58000")
+    event = connection.execute(
+        """SELECT margin_position_id, financed_quantity_delta
+        FROM liability_principal_events"""
+    ).fetchone()
+    assert tuple(event) == (
+        "margin-position-liability-margin-financing-twse-2027",
+        "2000",
+    )
+    assert (
+        connection.execute(
+            "SELECT margin_position_id FROM investment_cost_events"
+        ).fetchone()[0]
+        == "margin-position-liability-margin-financing-twse-2027"
+    )
+    openings = connection.execute(
+        """SELECT symbol, effective_date, cash_quantity, margin_quantity, source
+        FROM transaction_cost_pool_openings ORDER BY effective_date, symbol"""
+    ).fetchall()
+    assert [tuple(row) for row in openings] == [
+        ("8131", "2026-07-02", "0", "0", "legacy migration opening"),
+        ("2027", "2026-10-30", "8000", "55000", "legacy migration opening"),
+        ("00406A", "2026-11-11", "10000", "0", "legacy migration opening"),
+    ]
+    parsed = SQLiteTransactionCostPoolOpeningRepository(connection).list_all()
+    assert [
+        (item.symbol, item.market.value, item.currency.value) for item in parsed
+    ] == [
+        ("8131", "TWSE", "TWD"),
+        ("2027", "TWSE", "TWD"),
+        ("00406A", "TWSE", "TWD"),
+    ]
     connection.close()
 
 
@@ -241,7 +353,7 @@ def test_sqlite_schema_10_to_11_preserves_existing_rows() -> None:
 
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 15
+        == 16
     )
     assert tuple(connection.execute("SELECT * FROM preserved").fetchone()) == (
         "one",
@@ -294,7 +406,7 @@ def test_sqlite_schema_11_to_12_backfills_valuation_provenance() -> None:
     assert row["unrealized_pnl"] == "123"
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 15
+        == 16
     )
     columns = {
         item[1]: item[3]
@@ -343,7 +455,7 @@ def test_sqlite_schema_12_to_13_preserves_rows_and_adds_empty_provenance() -> No
 
     assert (
         connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-        == 15
+        == 16
     )
     assert tuple(connection.execute("SELECT * FROM preserved").fetchone()) == (
         "one",

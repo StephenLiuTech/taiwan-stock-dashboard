@@ -7,6 +7,7 @@ from decimal import Decimal
 from domain import (
     CorporateAction,
     Currency,
+    FinancingType,
     Holding,
     HoldingType,
     LotAllocation,
@@ -14,12 +15,15 @@ from domain import (
     PortfolioLedger,
     RealizedSale,
     Transaction,
+    TransactionCostPool,
+    TransactionCostPoolOpening,
     TransactionExpenseSummary,
     TransactionPosition,
     TransactionType,
 )
 
 PositionKey = tuple[str, Market, Currency]
+CostPoolKey = tuple[str, Market, Currency, FinancingType | None]
 
 
 class TransactionEngineError(ValueError):
@@ -65,9 +69,11 @@ class TransactionEngine:
         self,
         corporate_actions: list[CorporateAction] | None = None,
         lot_allocations: list[LotAllocation] | None = None,
+        cost_pool_openings: list[TransactionCostPoolOpening] | None = None,
     ) -> None:
         self.corporate_actions = tuple(corporate_actions or ())
         self.lot_allocations = tuple(lot_allocations or ())
+        self.cost_pool_openings = tuple(cost_pool_openings or ())
 
     @staticmethod
     def summarize_expenses(
@@ -100,7 +106,7 @@ class TransactionEngine:
         corporate_actions: list[CorporateAction] | None = None,
     ) -> PortfolioLedger:
         """Process transactions deterministically without mutating the input list."""
-        states: dict[PositionKey, _PositionState] = {}
+        states: dict[CostPoolKey, _PositionState] = {}
         total_realized_pnl = Decimal("0")
         total_buy_fees = Decimal("0")
         total_sell_fees = Decimal("0")
@@ -116,8 +122,19 @@ class TransactionEngine:
             matches.setdefault(allocation.sell_transaction_id, []).append(allocation)
         used_buy_quantity: dict[str, Decimal] = {}
         used_buy_fees: dict[str, Decimal] = {}
-        unmatched_sale_dates: dict[PositionKey, list[object]] = {}
-        events: list[tuple[object, int, str, Transaction | CorporateAction]] = [
+        unmatched_sale_dates: dict[CostPoolKey, list[object]] = {}
+        opening_by_key = {
+            (item.symbol, item.market, item.currency): item
+            for item in self.cost_pool_openings
+        }
+        events: list[
+            tuple[
+                object,
+                int,
+                str,
+                Transaction | CorporateAction | TransactionCostPoolOpening,
+            ]
+        ] = [
             (
                 item.trade_date,
                 0 if item.transaction_type is TransactionType.BUY else 2,
@@ -134,13 +151,41 @@ class TransactionEngine:
                 else corporate_actions
             )
         )
+        events.extend(
+            (item.effective_date, -1, item.symbol, item)
+            for item in self.cost_pool_openings
+            if any(
+                transaction.symbol == item.symbol
+                and transaction.market is item.market
+                and transaction.currency is item.currency
+                and transaction.trade_date >= item.effective_date
+                for transaction in transactions
+            )
+        )
         for _, _, _, event in sorted(events, key=lambda item: item[:3]):
+            if isinstance(event, TransactionCostPoolOpening):
+                self._apply_cost_pool_opening(states, event)
+                continue
             if isinstance(event, CorporateAction):
                 self._apply_corporate_action(states, event)
                 continue
             transaction = event
             self._validate_transaction(transaction)
-            key = (transaction.symbol, transaction.market, transaction.currency)
+            opening = opening_by_key.get(
+                (transaction.symbol, transaction.market, transaction.currency)
+            )
+            financing_type = (
+                None
+                if opening is not None
+                and transaction.trade_date < opening.effective_date
+                else transaction.financing_type
+            )
+            key = (
+                transaction.symbol,
+                transaction.market,
+                transaction.currency,
+                financing_type,
+            )
             state = states.setdefault(key, _PositionState())
             if transaction.transaction_type is TransactionType.BUY:
                 purchase_cost = transaction.quantity * transaction.price
@@ -217,18 +262,53 @@ class TransactionEngine:
             elif sale_matches:
                 state.average_cost = state.cost_basis / state.quantity
 
+        cost_pools = tuple(
+            TransactionCostPool(
+                symbol=symbol,
+                market=market,
+                currency=currency,
+                financing_type=financing_type,
+                quantity=state.quantity,
+                average_cost=state.average_cost,
+                cost_basis=state.cost_basis,
+                realized_pnl=state.realized_pnl,
+            )
+            for (symbol, market, currency, financing_type), state in sorted(
+                states.items(),
+                key=lambda item: (
+                    item[0][0],
+                    item[0][1].value,
+                    item[0][2].value,
+                    item[0][3].value if item[0][3] is not None else "cash",
+                ),
+            )
+        )
+        aggregate: dict[PositionKey, _PositionState] = {}
+        active_pools: dict[PositionKey, list[TransactionCostPool]] = {}
+        for pool in cost_pools:
+            key = (pool.symbol, pool.market, pool.currency)
+            state = aggregate.setdefault(key, _PositionState())
+            state.quantity += pool.quantity
+            state.cost_basis += pool.cost_basis
+            state.realized_pnl += pool.realized_pnl
+            if pool.quantity != 0:
+                active_pools.setdefault(key, []).append(pool)
         positions = tuple(
             TransactionPosition(
                 symbol=symbol,
                 market=market,
                 currency=currency,
                 quantity=state.quantity,
-                average_cost=state.average_cost,
+                average_cost=(
+                    active_pools[(symbol, market, currency)][0].average_cost
+                    if len(active_pools[(symbol, market, currency)]) == 1
+                    else state.cost_basis / state.quantity
+                ),
                 cost_basis=state.cost_basis,
                 realized_pnl=state.realized_pnl,
             )
             for (symbol, market, currency), state in sorted(
-                states.items(),
+                aggregate.items(),
                 key=lambda item: (
                     item[0][0],
                     item[0][1].value,
@@ -244,6 +324,39 @@ class TransactionEngine:
             total_sell_fees,
             total_taxes,
             tuple(realized_sales),
+            cost_pools,
+        )
+
+    @staticmethod
+    def _apply_cost_pool_opening(
+        states: dict[CostPoolKey, _PositionState],
+        opening: TransactionCostPoolOpening,
+    ) -> None:
+        legacy_key = (opening.symbol, opening.market, opening.currency, None)
+        legacy = states.get(legacy_key, _PositionState())
+        expected_quantity = opening.cash_quantity + opening.margin_quantity
+        if legacy.quantity != expected_quantity:
+            raise InvalidTransactionHistoryError(
+                f"Cost-pool opening quantity mismatch for {opening.symbol}: "
+                f"ledger={legacy.quantity} opening={expected_quantity}"
+            )
+        average_cost = legacy.average_cost if legacy.quantity else Decimal("0")
+        states[legacy_key] = _PositionState(
+            quantity=opening.cash_quantity,
+            cost_basis=opening.cash_quantity * average_cost,
+            average_cost=average_cost if opening.cash_quantity else Decimal("0"),
+            realized_pnl=legacy.realized_pnl,
+        )
+        margin_key = (
+            opening.symbol,
+            opening.market,
+            opening.currency,
+            FinancingType.MARGIN,
+        )
+        states[margin_key] = _PositionState(
+            quantity=opening.margin_quantity,
+            cost_basis=opening.margin_quantity * average_cost,
+            average_cost=average_cost if opening.margin_quantity else Decimal("0"),
         )
 
     @staticmethod
@@ -280,6 +393,10 @@ class TransactionEngine:
                 raise InvalidLotAllocationError(
                     f"BUY match is missing or belongs to another position: {item.buy_transaction_id}"
                 )
+            if buy.financing_type is not sale.financing_type:
+                raise InvalidLotAllocationError(
+                    f"BUY match belongs to another financing bucket: {buy.id}"
+                )
             if buy.trade_date > sale.trade_date or any(
                 buy.trade_date <= previous <= sale.trade_date
                 for previous in unmatched_sale_dates
@@ -304,21 +421,23 @@ class TransactionEngine:
 
     @staticmethod
     def _apply_corporate_action(
-        states: dict[PositionKey, _PositionState], action: CorporateAction
+        states: dict[CostPoolKey, _PositionState], action: CorporateAction
     ) -> None:
         matching = [
             (key, state)
             for key, state in states.items()
             if key[0] == action.symbol and key[1] is action.market
         ]
-        if len(matching) != 1 or matching[0][1].quantity <= 0:
+        if not matching or all(state.quantity <= 0 for _, state in matching):
             raise InvalidTransactionHistoryError(
                 f"Corporate action requires one active holding for {action.symbol} "
                 f"in action {action.id}"
             )
-        _, state = matching[0]
-        state.quantity *= action.quantity_multiplier
-        state.average_cost = state.cost_basis / state.quantity
+        for _, state in matching:
+            if state.quantity <= 0:
+                continue
+            state.quantity *= action.quantity_multiplier
+            state.average_cost = state.cost_basis / state.quantity
 
     def project_holdings(
         self,

@@ -66,6 +66,7 @@ class InvestmentCostEvent(BaseModel):
     currency: Currency
     description: str | None = None
     source: str | None = None
+    margin_position_id: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 

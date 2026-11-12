@@ -96,6 +96,15 @@ class MarginFinancingSection:
     position_symbol: str | None
     position_quantity: Decimal | None
     updated: date | None
+    positions: tuple["MarginPositionReference", ...] = ()
+
+
+@dataclass(frozen=True)
+class MarginPositionReference:
+    market: str
+    symbol: str
+    principal: Decimal
+    quantity: Decimal
 
 
 @dataclass(frozen=True)

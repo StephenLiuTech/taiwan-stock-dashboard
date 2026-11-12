@@ -22,6 +22,7 @@ from repositories import (
     DividendEventRepository,
     HoldingRepository,
     LiabilityRepository,
+    MarginFinancingPositionRepository,
     PriceQuoteRepository,
     TransactionRepository,
     WatchlistRepository,
@@ -84,6 +85,7 @@ class BuildReportSectionsUseCase:
         liabilities: LiabilityRepository | None = None,
         corporate_actions: CorporateActionRepository | None = None,
         transaction_engine: TransactionEngine | None = None,
+        margin_positions: MarginFinancingPositionRepository | None = None,
     ) -> None:
         self.holdings = holdings
         self.transactions = transactions
@@ -98,6 +100,7 @@ class BuildReportSectionsUseCase:
         self.liabilities = liabilities
         self.corporate_actions = corporate_actions
         self.transaction_engine = transaction_engine or TransactionEngine()
+        self.margin_positions = margin_positions
 
     def execute(
         self,
@@ -147,6 +150,11 @@ class BuildReportSectionsUseCase:
                 total_market_value,
                 net_asset_value,
                 liability_ratio,
+                (
+                    self.margin_positions.list_all()
+                    if self.margin_positions is not None
+                    else None
+                ),
             )
             if liability_values
             and total_market_value is not None

@@ -17,9 +17,11 @@ from domain import (
     LiabilityPrincipalEvent,
     LiabilityPrincipalEventType,
     LiabilityType,
+    MarginFinancingPosition,
     Market,
     Transaction,
     TransactionType,
+    margin_position_id,
 )
 from pams.application import AddTransactionCommand, AddTransactionUseCase
 from pams.application.exceptions import DuplicateTransactionError
@@ -28,6 +30,7 @@ from repositories.sqlite import (
     SQLiteHoldingRepository,
     SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
+    SQLiteMarginFinancingPositionRepository,
     SQLiteTransactionRepository,
 )
 from services import MarginFinancingError, MarginFinancingService
@@ -93,6 +96,8 @@ def margin_database() -> sqlite3.Connection:
             currency=Currency.TWD,
             collateral_description="2027 — 28,000 shares",
             notes="Accrued interest reference: NT$4,583",
+            financed_symbol="2027",
+            financed_quantity=Decimal("28000"),
         )
     )
     liabilities.upsert(
@@ -107,6 +112,21 @@ def margin_database() -> sqlite3.Connection:
     )
     yield connection
     connection.close()
+
+
+def seed_legacy_margin_position(connection: sqlite3.Connection) -> None:
+    SQLiteMarginFinancingPositionRepository(connection).upsert(
+        MarginFinancingPosition(
+            id=margin_position_id("liability-margin-financing", Market.TWSE, "2027"),
+            liability_id="liability-margin-financing",
+            market=Market.TWSE,
+            symbol="2027",
+            principal=Decimal("707000"),
+            financed_quantity=Decimal("28000"),
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+    )
 
 
 def use_case(
@@ -325,6 +345,56 @@ def test_principal_event_failure_rolls_back_transaction_holding_and_master(
     assert margin is not None and margin.principal == Decimal("707000")
 
 
+def test_margin_position_failure_rolls_back_every_write(
+    margin_database: sqlite3.Connection,
+) -> None:
+    seed_legacy_margin_position(margin_database)
+    unit = SQLiteMarginTransactionUnitOfWork(margin_database)
+
+    class FailingPositions:
+        def get(
+            self, liability_id: str, market: str, symbol: str
+        ) -> MarginFinancingPosition | None:
+            return SQLiteMarginFinancingPositionRepository(margin_database).get(
+                liability_id, market, symbol
+            )
+
+        def upsert(self, position: MarginFinancingPosition) -> None:
+            del position
+            raise RuntimeError("simulated margin-position write failure")
+
+    unit.margin_positions = FailingPositions()  # type: ignore[assignment]
+    with pytest.raises(RuntimeError, match="margin-position"):
+        AddTransactionUseCase(
+            SQLiteTransactionRepository(margin_database), unit, Decimal("0.40")
+        ).execute(
+            command(
+                transaction_id=None,
+                symbol="00406A",
+                trade_date=date(2026, 11, 11),
+                quantity=Decimal("15000"),
+                price=Decimal("7.89"),
+                fees=Decimal("47"),
+                broker_order="AW854",
+                margin_principal=Decimal("47000"),
+            )
+        )
+    assert not any(
+        item.symbol == "00406A"
+        for item in SQLiteTransactionRepository(margin_database).list_all()
+    )
+    liability = SQLiteLiabilityRepository(margin_database).get_by_id(
+        "liability-margin-financing"
+    )
+    assert liability is not None and liability.principal == Decimal("707000")
+    assert (
+        SQLiteMarginFinancingPositionRepository(margin_database).get(
+            "liability-margin-financing", "TWSE", "00406A"
+        )
+        is None
+    )
+
+
 @pytest.mark.parametrize(
     ("updates", "message"),
     [
@@ -363,3 +433,113 @@ def test_structured_financing_classification_survives_reload(
         "2027",
         Decimal("30000"),
     )
+
+
+def test_second_margin_symbol_preserves_existing_legacy_position(
+    margin_database: sqlite3.Connection,
+) -> None:
+    seed_legacy_margin_position(margin_database)
+    result = use_case(margin_database).execute(
+        command(
+            transaction_id=None,
+            symbol="00406A",
+            trade_date=date(2026, 11, 11),
+            quantity=Decimal("15000"),
+            price=Decimal("7.89"),
+            fees=Decimal("47"),
+            notes="Broker order AW854",
+            broker_order="AW854",
+            margin_principal=Decimal("47000"),
+        )
+    )
+
+    assert result.applied is True
+    assert result.financed_principal == Decimal("47000")
+    assert result.self_funded_amount == Decimal("71350")
+    assert result.updated_holding_quantity == Decimal("15000")
+    assert result.updated_margin_quantity == Decimal("15000")
+    assert result.updated_margin_principal == Decimal("754000")
+    positions = SQLiteMarginFinancingPositionRepository(
+        margin_database
+    ).list_by_liability("liability-margin-financing")
+    assert [
+        (item.symbol, item.principal, item.financed_quantity) for item in positions
+    ] == [
+        ("00406A", Decimal("47000"), Decimal("15000")),
+        ("2027", Decimal("707000"), Decimal("28000")),
+    ]
+    liability = SQLiteLiabilityRepository(margin_database).get_by_id(
+        "liability-margin-financing"
+    )
+    assert liability is not None
+    assert liability.principal == Decimal("754000")
+    assert liability.financed_symbol == "2027"
+    assert liability.financed_quantity == Decimal("28000")
+    event = SQLiteLiabilityPrincipalEventRepository(margin_database).list_all()[0]
+    assert event.margin_position_id == result.margin_position_id
+    assert event.financed_quantity_delta == Decimal("15000")
+
+
+def test_second_margin_symbol_dry_run_has_no_writes(
+    margin_database: sqlite3.Connection,
+) -> None:
+    seed_legacy_margin_position(margin_database)
+    before_transactions = SQLiteTransactionRepository(margin_database).list_all()
+    before_holdings = SQLiteHoldingRepository(margin_database).list_all()
+    before_liabilities = SQLiteLiabilityRepository(margin_database).list_all()
+    before_positions = SQLiteMarginFinancingPositionRepository(
+        margin_database
+    ).list_all()
+
+    result = use_case(margin_database).execute(
+        command(
+            transaction_id=None,
+            symbol="00406A",
+            trade_date=date(2026, 11, 11),
+            quantity=Decimal("15000"),
+            price=Decimal("7.89"),
+            fees=Decimal("47"),
+            broker_order="AW854",
+            margin_principal=Decimal("47000"),
+        ),
+        apply=False,
+    )
+
+    assert result.applied is False
+    assert result.updated_holding_quantity == Decimal("15000")
+    assert result.financed_principal == Decimal("47000")
+    assert (
+        SQLiteTransactionRepository(margin_database).list_all() == before_transactions
+    )
+    assert SQLiteHoldingRepository(margin_database).list_all() == before_holdings
+    assert SQLiteLiabilityRepository(margin_database).list_all() == before_liabilities
+    assert (
+        SQLiteMarginFinancingPositionRepository(margin_database).list_all()
+        == before_positions
+    )
+
+
+def test_duplicate_broker_order_does_not_apply_second_margin_write(
+    margin_database: sqlite3.Connection,
+) -> None:
+    seed_legacy_margin_position(margin_database)
+    case = use_case(margin_database)
+    first = command(
+        transaction_id=None,
+        symbol="00406A",
+        trade_date=date(2026, 11, 11),
+        quantity=Decimal("15000"),
+        price=Decimal("7.89"),
+        fees=Decimal("47"),
+        broker_order="AW854",
+        margin_principal=Decimal("47000"),
+    )
+    case.execute(first)
+    with pytest.raises(DuplicateTransactionError):
+        case.execute(first)
+    position = SQLiteMarginFinancingPositionRepository(margin_database).get(
+        "liability-margin-financing", "TWSE", "00406A"
+    )
+    assert position is not None
+    assert position.principal == Decimal("47000")
+    assert position.financed_quantity == Decimal("15000")

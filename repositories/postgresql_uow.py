@@ -9,6 +9,7 @@ from repositories.postgresql import (
     PostgreSQLHoldingRepository,
     PostgreSQLLiabilityPrincipalEventRepository,
     PostgreSQLLiabilityRepository,
+    PostgreSQLMarginFinancingPositionRepository,
     PostgreSQLPositionSnapshotRepository,
     PostgreSQLPriceQuoteRepository,
     PostgreSQLSnapshotRepository,
@@ -99,6 +100,9 @@ class PostgreSQLMarginTransactionUnitOfWork:
         self.liability_principal_events = PostgreSQLLiabilityPrincipalEventRepository(
             connection, auto_commit=False
         )
+        self.margin_positions = PostgreSQLMarginFinancingPositionRepository(
+            connection, auto_commit=False
+        )
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -122,6 +126,9 @@ class PostgreSQLBrokerImportUnitOfWork:
         )
         self.liabilities = PostgreSQLLiabilityRepository(connection, auto_commit=False)
         self.liability_principal_events = PostgreSQLLiabilityPrincipalEventRepository(
+            connection, auto_commit=False
+        )
+        self.margin_positions = PostgreSQLMarginFinancingPositionRepository(
             connection, auto_commit=False
         )
         self.broker_import_records = PostgreSQLBrokerImportRecordRepository(

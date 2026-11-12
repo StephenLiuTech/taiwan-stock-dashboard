@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator, Mapping, Sequence
 
-from database.schema import SCHEMA_VERSION
+from database.schema import LEGACY_MARGIN_TRANSACTION_IDS, SCHEMA_VERSION
 
 POSTGRESQL_URL_PREFIXES = ("postgresql://", "postgres://")
 
@@ -65,7 +65,11 @@ class PostgreSQLConnection:
         self, statement: str, parameters: Sequence[object] | None = None
     ) -> PostgreSQLCursor:
         cursor = self.raw_connection.cursor()
-        cursor.execute(_postgres_sql(statement), parameters or ())
+        sql = _postgres_sql(statement)
+        if parameters is None:
+            cursor.execute(sql)
+        else:
+            cursor.execute(sql, parameters)
         return PostgreSQLCursor(cursor)
 
     def executemany(
@@ -122,10 +126,13 @@ CREATE TABLE IF NOT EXISTS transactions (
     settlement_date TEXT NOT NULL, quantity TEXT NOT NULL, price TEXT NOT NULL,
     fees TEXT NOT NULL, taxes TEXT NOT NULL, currency TEXT NOT NULL,
     financing_type TEXT CHECK (financing_type IS NULL OR financing_type = 'margin'),
-    notes TEXT,
+    broker_order TEXT, notes TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_transactions_symbol_date ON transactions(symbol, trade_date);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_transactions_broker_order
+    ON transactions(market, trade_date, broker_order)
+    WHERE broker_order IS NOT NULL;
 CREATE TABLE IF NOT EXISTS lot_allocations (
     sell_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE RESTRICT,
     buy_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE RESTRICT,
@@ -171,6 +178,25 @@ CREATE TABLE IF NOT EXISTS liabilities (
     annual_interest_rate TEXT, currency TEXT NOT NULL, start_date TEXT,
     maturity_date TEXT, collateral_description TEXT, financed_symbol TEXT,
     financed_quantity TEXT, notes TEXT, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS margin_financing_positions (
+    id TEXT PRIMARY KEY,
+    liability_id TEXT NOT NULL REFERENCES liabilities(id) ON DELETE RESTRICT,
+    market TEXT NOT NULL CHECK (market IN ('TWSE', 'TPEx')),
+    symbol TEXT NOT NULL, currency TEXT NOT NULL CHECK (currency = 'TWD'),
+    principal TEXT NOT NULL CHECK (principal::NUMERIC >= 0),
+    financed_quantity TEXT NOT NULL CHECK (financed_quantity::NUMERIC >= 0),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE(liability_id, market, symbol)
+);
+CREATE INDEX IF NOT EXISTS ix_margin_financing_positions_liability
+    ON margin_financing_positions(liability_id, market, symbol);
+CREATE TABLE IF NOT EXISTS transaction_cost_pool_openings (
+    symbol TEXT NOT NULL, market TEXT NOT NULL, currency TEXT NOT NULL,
+    effective_date TEXT NOT NULL, cash_quantity TEXT NOT NULL,
+    margin_quantity TEXT NOT NULL, source TEXT NOT NULL,
+    source_reference TEXT NOT NULL,
+    PRIMARY KEY(symbol, market, effective_date)
 );
 CREATE TABLE IF NOT EXISTS price_quotes (
     symbol TEXT NOT NULL, market TEXT NOT NULL, trade_date TEXT NOT NULL,
@@ -228,7 +254,7 @@ CREATE TABLE IF NOT EXISTS investment_cost_events (
     id TEXT PRIMARY KEY, event_date TEXT NOT NULL,
     cost_type TEXT NOT NULL CHECK (cost_type IN ('financing', 'other')),
     amount TEXT NOT NULL, currency TEXT NOT NULL, description TEXT,
-    source TEXT, created_at TEXT NOT NULL
+    source TEXT, margin_position_id TEXT, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_investment_cost_events_date_type
     ON investment_cost_events(event_date, cost_type);
@@ -247,7 +273,8 @@ CREATE TABLE IF NOT EXISTS liability_principal_events (
     sequence INTEGER NOT NULL, event_type TEXT NOT NULL
         CHECK (event_type IN ('opening', 'increase', 'repayment', 'correction')),
     principal_delta TEXT NOT NULL, resulting_principal TEXT,
-    source TEXT NOT NULL, reference TEXT, notes TEXT, created_at TEXT NOT NULL,
+    source TEXT NOT NULL, reference TEXT, margin_position_id TEXT,
+    financed_quantity_delta TEXT, notes TEXT, created_at TEXT NOT NULL,
     UNIQUE(liability_id, effective_date, sequence)
 );
 CREATE INDEX IF NOT EXISTS ix_liability_principal_events_replay
@@ -312,6 +339,8 @@ def initialize_postgresql_schema(connection: PostgreSQLConnection) -> None:
             _migrate_postgresql_v13_to_v14(connection)
         if 0 < current_version <= 14:
             _migrate_postgresql_v14_to_v15(connection)
+        if 0 < current_version <= 15:
+            _migrate_postgresql_v15_to_v16(connection)
 
         for version in range(current_version + 1, SCHEMA_VERSION + 1):
             connection.execute(
@@ -431,3 +460,118 @@ def _migrate_postgresql_v14_to_v15(connection: PostgreSQLConnection) -> None:
     for statement in POSTGRESQL_SCHEMA.split(";"):
         if "lot_allocations" in statement:
             connection.execute(statement)
+
+
+def _migrate_postgresql_v15_to_v16(connection: PostgreSQLConnection) -> None:
+    """Add per-symbol projections beneath the aggregate margin liability."""
+    connection.execute(
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS broker_order TEXT"
+    )
+    connection.execute(
+        """UPDATE transactions SET broker_order = upper(trim(substring(notes from 14)))
+        WHERE broker_order IS NULL AND notes LIKE ?""",
+        ("Broker order %",),
+    )
+    connection.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS ux_transactions_broker_order
+        ON transactions(market, trade_date, broker_order)
+        WHERE broker_order IS NOT NULL"""
+    )
+    for statement in POSTGRESQL_SCHEMA.split(";"):
+        if (
+            "margin_financing_positions" in statement
+            or "transaction_cost_pool_openings" in statement
+        ):
+            connection.execute(statement)
+    connection.execute(
+        "ALTER TABLE liability_principal_events "
+        "ADD COLUMN IF NOT EXISTS margin_position_id TEXT"
+    )
+    connection.execute(
+        "ALTER TABLE liability_principal_events "
+        "ADD COLUMN IF NOT EXISTS financed_quantity_delta TEXT"
+    )
+    connection.execute(
+        "ALTER TABLE investment_cost_events "
+        "ADD COLUMN IF NOT EXISTS margin_position_id TEXT"
+    )
+    connection.execute(
+        """INSERT INTO margin_financing_positions (
+        id, liability_id, market, symbol, currency, principal,
+        financed_quantity, created_at, updated_at)
+        SELECT 'margin-position-' || l.id || '-' || lower(h.market) || '-' ||
+               lower(l.financed_symbol),
+               l.id, h.market, l.financed_symbol, l.currency, l.principal,
+               l.financed_quantity, l.created_at, l.created_at
+        FROM liabilities l
+        JOIN holdings h ON h.symbol = l.financed_symbol
+        WHERE l.liability_type = 'margin_financing'
+          AND l.financed_symbol IS NOT NULL
+          AND l.financed_quantity IS NOT NULL
+        ON CONFLICT (liability_id, market, symbol) DO NOTHING"""
+    )
+    connection.execute(
+        """UPDATE liability_principal_events e
+        SET margin_position_id = p.id
+        FROM margin_financing_positions p
+        WHERE e.margin_position_id IS NULL
+          AND e.liability_id = p.liability_id"""
+    )
+    connection.execute(
+        """UPDATE liability_principal_events e
+        SET financed_quantity_delta = t.quantity
+        FROM transactions t
+        WHERE e.financed_quantity_delta IS NULL
+          AND e.event_type = 'increase'
+          AND e.reference = t.id
+          AND t.financing_type = 'margin'
+          AND t.transaction_type = 'buy'"""
+    )
+    connection.execute(
+        """UPDATE investment_cost_events c
+        SET margin_position_id = p.id
+        FROM margin_financing_positions p
+        WHERE c.margin_position_id IS NULL
+          AND c.cost_type = 'financing'
+          AND position(p.liability_id in c.description) > 0"""
+    )
+    connection.executemany(
+        "UPDATE transactions SET financing_type = 'margin' WHERE id = ?",
+        [(transaction_id,) for transaction_id in LEGACY_MARGIN_TRANSACTION_IDS],
+    )
+    connection.executemany(
+        """INSERT INTO transaction_cost_pool_openings VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""",
+        [
+            (
+                "8131",
+                "TWSE",
+                "TWD",
+                "2026-07-02",
+                "0",
+                "0",
+                "legacy migration opening",
+                "8131 full margin lifecycle closed",
+            ),
+            (
+                "2027",
+                "TWSE",
+                "TWD",
+                "2026-10-30",
+                "8000",
+                "55000",
+                "legacy migration opening",
+                "approved cash/margin quantity split",
+            ),
+            (
+                "00406A",
+                "TWSE",
+                "TWD",
+                "2026-11-11",
+                "10000",
+                "0",
+                "legacy migration opening",
+                "pre-AW854 cash position",
+            ),
+        ],
+    )

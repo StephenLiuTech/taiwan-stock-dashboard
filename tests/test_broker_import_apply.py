@@ -6,6 +6,7 @@ import pytest
 from database.schema import initialize_schema
 from domain import (
     Currency,
+    FinancingType,
     Holding,
     Liability,
     LiabilityPrincipalEvent,
@@ -154,6 +155,12 @@ def test_safe_cash_and_margin_rows_apply_atomically_and_idempotently() -> None:
     )
     assert cash_sell.fees == 5
     assert cash_sell.taxes == 10
+    margin_sell = next(
+        item
+        for item in rows
+        if item.symbol == "2027" and item.transaction_type is TransactionType.SELL
+    )
+    assert margin_sell.financing_type is FinancingType.MARGIN
 
     second = use_case.execute(SAFE, apply=True)
     assert second.inserted_transactions == 0

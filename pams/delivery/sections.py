@@ -393,6 +393,15 @@ class DailyReportSectionRenderer:
         ]
         if value.margin_financing is not None:
             margin = value.margin_financing
+            position_summary = (
+                "; ".join(
+                    f"{item.market} {item.symbol} — {item.quantity:,.0f} shares — "
+                    f"{_money(item.principal)}"
+                    for item in margin.positions
+                )
+                or margin.position_symbol
+                or "N/A"
+            )
             cards.append(
                 (
                     "Margin Financing",
@@ -406,7 +415,7 @@ class DailyReportSectionRenderer:
                                 else "N/A"
                             ),
                         ),
-                        ("Margin Position", margin.position_symbol or "N/A"),
+                        ("Margin Positions", position_summary),
                         (
                             "Margin Quantity",
                             (
@@ -742,6 +751,15 @@ class DailyReportSectionRenderer:
         ]
         if value.margin_financing is not None:
             margin = value.margin_financing
+            position_summary = (
+                "; ".join(
+                    f"{item.market} {item.symbol} — {item.quantity:,.0f} shares — "
+                    f"{_money(item.principal)}"
+                    for item in margin.positions
+                )
+                or margin.position_symbol
+                or "N/A"
+            )
             lines.extend(
                 (
                     "",
@@ -753,7 +771,7 @@ class DailyReportSectionRenderer:
                         if margin.accrued_interest is not None
                         else "N/A"
                     ),
-                    f"Margin Position: {margin.position_symbol or 'N/A'}",
+                    f"Margin Positions: {position_summary}",
                     "Margin Quantity: "
                     + (
                         f"{margin.position_quantity:,.0f} shares"

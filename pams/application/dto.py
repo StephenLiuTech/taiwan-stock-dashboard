@@ -298,6 +298,8 @@ class AddTransactionCommand:
     transaction_id: str | None = None
     notes: str | None = None
     financing_type: str | None = None
+    broker_order: str | None = None
+    margin_principal: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -316,6 +318,7 @@ class TransactionRecord:
     taxes: Decimal
     currency: str
     notes: str | None
+    broker_order: str | None = None
     financing_type: str | None = None
     gross_purchase_value: Decimal | None = None
     self_funded_amount: Decimal | None = None
@@ -323,6 +326,9 @@ class TransactionRecord:
     updated_holding_quantity: Decimal | None = None
     updated_margin_quantity: Decimal | None = None
     updated_margin_principal: Decimal | None = None
+    margin_position_id: str | None = None
+    principal_event_id: str | None = None
+    applied: bool = True
 
 
 @dataclass(frozen=True)

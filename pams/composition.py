@@ -272,6 +272,7 @@ def compose_broker_actual_interest(
         yield RecordBrokerActualInterestUseCase(
             repositories.investment_cost_events,
             repositories.liabilities,
+            repositories.margin_positions,
         )
     finally:
         database.connection.close()
@@ -293,7 +294,11 @@ def compose_bootstrap_import(
         yield BootstrapImportUseCase(
             repositories.holdings,
             repositories.transactions,
-            TransactionEngine(),
+            TransactionEngine(
+                cost_pool_openings=(
+                    repositories.transaction_cost_pool_openings.list_all()
+                )
+            ),
             repositories.holding_rebuild_uow,
             database.display_url,
         )
@@ -446,7 +451,9 @@ def compose_daily_report(
                 transaction_engine=TransactionEngine(
                     context.repositories.corporate_actions.list_all(),
                     context.repositories.lot_allocations.list_all(),
+                    context.repositories.transaction_cost_pool_openings.list_all(),
                 ),
+                margin_positions=context.repositories.margin_positions,
             ),
             annual_pnl=context.annual_pnl,
             annual_snapshots=context.repositories.annual_pnl_snapshots,
@@ -787,6 +794,7 @@ def _compose(
         transaction_engine = TransactionEngine(
             repositories.corporate_actions.list_all(),
             repositories.lot_allocations.list_all(),
+            repositories.transaction_cost_pool_openings.list_all(),
         )
         annual_pnl = AnnualPnlUseCase(
             transaction_repository,
@@ -806,6 +814,7 @@ def _compose(
                 LiabilityType.MARGIN_FINANCING: Decimal("0.065"),
                 LiabilityType.STOCK_PLEDGE: Decimal("0.065"),
             },
+            margin_positions=repositories.margin_positions,
         )
         valuate_portfolio = ValuatePortfolioUseCase(
             holdings,

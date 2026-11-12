@@ -17,7 +17,9 @@ from domain import (
     HoldingType,
     Liability,
     LiabilityType,
+    MarginFinancingPosition,
     MarginFinancingSection,
+    MarginPositionReference,
     Market,
     NewsItem,
     NewsSection,
@@ -96,6 +98,7 @@ class ReportSectionService:
         total_market_value: Decimal,
         net_asset_value: Decimal,
         liability_ratio: Decimal,
+        margin_positions: list[MarginFinancingPosition] | None = None,
     ) -> FinancingLeverageSection | None:
         """Build financing facts from principal and descriptive metadata."""
         if not liabilities:
@@ -147,6 +150,19 @@ class ReportSectionService:
                 margin_reference[0],
                 margin_reference[1],
                 _metadata_updated_date(margin.notes),
+                tuple(
+                    MarginPositionReference(
+                        item.market.value,
+                        item.symbol,
+                        item.principal,
+                        item.financed_quantity,
+                    )
+                    for item in sorted(
+                        margin_positions or [],
+                        key=lambda item: (item.market.value, item.symbol),
+                    )
+                    if item.liability_id == margin.id
+                ),
             )
             if margin
             else None

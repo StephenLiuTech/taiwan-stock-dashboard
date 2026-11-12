@@ -177,10 +177,7 @@ class BrokerReconciliationEngine:
             "fee": (record.fee, transaction.fees),
             "tax": (record.tax, transaction.taxes),
         }
-        if (
-            record.financing_type is not None
-            and record.transaction_type is TransactionType.BUY
-        ):
+        if record.financing_type is not None:
             pairs["financing_type"] = (
                 record.financing_type,
                 transaction.financing_type,
@@ -209,11 +206,7 @@ class BrokerReconciliationEngine:
             fees=record.fee,
             taxes=record.tax,
             currency=record.currency,
-            financing_type=(
-                record.financing_type
-                if record.transaction_type is TransactionType.BUY
-                else None
-            ),
+            financing_type=record.financing_type,
         )
 
     @staticmethod

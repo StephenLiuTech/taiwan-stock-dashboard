@@ -1,6 +1,6 @@
 """Safe broker-import planning and atomic application."""
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
@@ -13,8 +13,10 @@ from domain import (
     LiabilityPrincipalEvent,
     LiabilityPrincipalEventType,
     LiabilityType,
+    MarginFinancingPosition,
     Transaction,
     TransactionType,
+    margin_position_id,
 )
 from pams.application.reconcile_broker import ReconcileBrokerUseCase
 from pams.brokerage import (
@@ -139,32 +141,81 @@ class ImportBrokerUseCase:
                     )
                 transactions.append(transaction)
                 if record.financing_type is FinancingType.MARGIN:
-                    event = self._principal_event(
-                        record,
-                        liabilities,
-                        principal_history + principal_events,
-                    )
-                    principal_events.append(event)
+                    assert record.trade_date is not None
                     liability = next(
                         value
                         for value in liabilities
                         if value.liability_type is LiabilityType.MARGIN_FINANCING
                     )
-                    new_quantity = (liability.financed_quantity or Decimal("0")) + (
+                    position = self.unit.margin_positions.get(
+                        liability.id, record.market.value, record.symbol
+                    )
+                    if position is None:
+                        if record.transaction_type is TransactionType.SELL:
+                            raise BrokerImportBlockedError(
+                                "margin SELL has no matching financed position"
+                            )
+                        timestamp = datetime.combine(
+                            record.trade_date, datetime.min.time(), UTC
+                        )
+                        position = MarginFinancingPosition(
+                            id=margin_position_id(
+                                liability.id, record.market, record.symbol
+                            ),
+                            liability_id=liability.id,
+                            market=record.market,
+                            symbol=record.symbol,
+                            principal=(
+                                liability.principal
+                                if liability.financed_symbol == record.symbol
+                                else Decimal("0")
+                            ),
+                            financed_quantity=(
+                                liability.financed_quantity or Decimal("0")
+                                if liability.financed_symbol == record.symbol
+                                else Decimal("0")
+                            ),
+                            created_at=timestamp,
+                            updated_at=timestamp,
+                        )
+                    event = self._principal_event(
+                        record,
+                        liabilities,
+                        principal_history + principal_events,
+                        position.id,
+                    )
+                    principal_events.append(event)
+                    new_quantity = position.financed_quantity + (
                         record.quantity
                         if record.transaction_type is TransactionType.BUY
                         else -record.quantity
                     )
+                    new_position_principal = position.principal + event.principal_delta
                     new_principal = liability.principal + event.principal_delta
-                    if new_quantity < 0 or new_principal < 0:
+                    if (
+                        new_quantity < 0
+                        or new_position_principal < 0
+                        or new_principal < 0
+                    ):
                         raise BrokerImportBlockedError(
                             "margin import would create a negative financed position"
                         )
-                    updated = liability.model_copy(
+                    liability_updates: dict[str, object] = {"principal": new_principal}
+                    if liability.financed_symbol in (None, record.symbol):
+                        liability_updates.update(
+                            {
+                                "financed_symbol": record.symbol,
+                                "financed_quantity": new_quantity,
+                            }
+                        )
+                    updated = liability.model_copy(update=liability_updates)
+                    updated_position = position.model_copy(
                         update={
-                            "principal": new_principal,
-                            "financed_symbol": record.symbol,
+                            "principal": new_position_principal,
                             "financed_quantity": new_quantity,
+                            "updated_at": datetime.combine(
+                                record.trade_date, datetime.min.time(), UTC
+                            ),
                         }
                     )
                     liabilities = [
@@ -172,6 +223,7 @@ class ImportBrokerUseCase:
                         for value in liabilities
                     ]
                     self.unit.liabilities.upsert(updated)
+                    self.unit.margin_positions.upsert(updated_position)
                 provenance.append(self._provenance(plan, reconciled))
 
             for transaction in transactions:
@@ -224,6 +276,7 @@ class ImportBrokerUseCase:
         record: NormalizedBrokerRecord,
         liabilities: list[Liability],
         history: list[LiabilityPrincipalEvent],
+        position_id: str,
     ) -> LiabilityPrincipalEvent:
         margin = [
             value
@@ -285,6 +338,12 @@ class ImportBrokerUseCase:
             resulting_principal=margin[0].principal + delta,
             source=record.broker,
             reference=record.source_reference,
+            margin_position_id=position_id,
+            financed_quantity_delta=(
+                record.quantity
+                if record.transaction_type is TransactionType.BUY
+                else -record.quantity
+            ),
             notes="Imported from reconciled broker source",
         )
 

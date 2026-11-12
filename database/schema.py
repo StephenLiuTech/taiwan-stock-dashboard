@@ -2,7 +2,12 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
+
+# Audited SELL recorded after the legacy 2027 cash/margin opening. Earlier
+# positions are split by explicit legacy-migration openings instead of by
+# rewriting their historical transactions.
+LEGACY_MARGIN_TRANSACTION_IDS = ("broker-f6fc175f-244f-55da-bb27-b1a6d29eb755",)
 
 INITIAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -24,7 +29,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     settlement_date TEXT NOT NULL, quantity TEXT NOT NULL, price TEXT NOT NULL,
     fees TEXT NOT NULL, taxes TEXT NOT NULL, currency TEXT NOT NULL,
     financing_type TEXT CHECK (financing_type IS NULL OR financing_type = 'margin'),
-    notes TEXT,
+    broker_order TEXT, notes TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_transactions_symbol_date ON transactions(symbol, trade_date);
@@ -74,6 +79,26 @@ CREATE TABLE IF NOT EXISTS liabilities (
     annual_interest_rate TEXT, currency TEXT NOT NULL, start_date TEXT,
     maturity_date TEXT, collateral_description TEXT, financed_symbol TEXT,
     financed_quantity TEXT, notes TEXT, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS margin_financing_positions (
+    id TEXT PRIMARY KEY,
+    liability_id TEXT NOT NULL REFERENCES liabilities(id) ON DELETE RESTRICT,
+    market TEXT NOT NULL CHECK (market IN ('TWSE', 'TPEx')),
+    symbol TEXT NOT NULL, currency TEXT NOT NULL CHECK (currency = 'TWD'),
+    principal TEXT NOT NULL CHECK (CAST(principal AS NUMERIC) >= 0),
+    financed_quantity TEXT NOT NULL
+        CHECK (CAST(financed_quantity AS NUMERIC) >= 0),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE(liability_id, market, symbol)
+);
+CREATE INDEX IF NOT EXISTS ix_margin_financing_positions_liability
+    ON margin_financing_positions(liability_id, market, symbol);
+CREATE TABLE IF NOT EXISTS transaction_cost_pool_openings (
+    symbol TEXT NOT NULL, market TEXT NOT NULL, currency TEXT NOT NULL,
+    effective_date TEXT NOT NULL, cash_quantity TEXT NOT NULL,
+    margin_quantity TEXT NOT NULL, source TEXT NOT NULL,
+    source_reference TEXT NOT NULL,
+    PRIMARY KEY(symbol, market, effective_date)
 );
 CREATE TABLE IF NOT EXISTS price_quotes (
     symbol TEXT NOT NULL, market TEXT NOT NULL, trade_date TEXT NOT NULL,
@@ -137,7 +162,7 @@ CREATE TABLE IF NOT EXISTS investment_cost_events (
     id TEXT PRIMARY KEY, event_date TEXT NOT NULL,
     cost_type TEXT NOT NULL CHECK (cost_type IN ('financing', 'other')),
     amount TEXT NOT NULL, currency TEXT NOT NULL, description TEXT,
-    source TEXT, created_at TEXT NOT NULL
+    source TEXT, margin_position_id TEXT, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_investment_cost_events_date_type
     ON investment_cost_events(event_date, cost_type);
@@ -156,7 +181,8 @@ CREATE TABLE IF NOT EXISTS liability_principal_events (
     sequence INTEGER NOT NULL, event_type TEXT NOT NULL
         CHECK (event_type IN ('opening', 'increase', 'repayment', 'correction')),
     principal_delta TEXT NOT NULL, resulting_principal TEXT,
-    source TEXT NOT NULL, reference TEXT, notes TEXT, created_at TEXT NOT NULL,
+    source TEXT NOT NULL, reference TEXT, margin_position_id TEXT,
+    financed_quantity_delta TEXT, notes TEXT, created_at TEXT NOT NULL,
     UNIQUE(liability_id, effective_date, sequence)
 );
 CREATE INDEX IF NOT EXISTS ix_liability_principal_events_replay
@@ -218,6 +244,7 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             _migrate_annual_pnl_valuation_date(connection)
     connection.executescript(INITIAL_SCHEMA)
     _migrate_margin_financing_schema(connection)
+    _migrate_multi_symbol_margin_schema(connection)
     for version in range(1, SCHEMA_VERSION + 1):
         connection.execute(
             """INSERT OR IGNORE INTO schema_version(version, applied_at)
@@ -286,6 +313,152 @@ def _migrate_margin_financing_schema(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE liabilities ADD COLUMN financed_symbol TEXT")
     if "financed_quantity" not in liability_columns:
         connection.execute("ALTER TABLE liabilities ADD COLUMN financed_quantity TEXT")
+
+
+def _migrate_multi_symbol_margin_schema(connection: sqlite3.Connection) -> None:
+    """Add per-symbol margin projections while preserving the legacy master."""
+    transaction_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(transactions)")
+    }
+    if "broker_order" not in transaction_columns:
+        connection.execute("ALTER TABLE transactions ADD COLUMN broker_order TEXT")
+        connection.execute(
+            """UPDATE transactions SET broker_order = upper(trim(substr(notes, 14)))
+            WHERE notes LIKE ?""",
+            ("Broker order %",),
+        )
+    connection.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS ux_transactions_broker_order
+        ON transactions(market, trade_date, broker_order)
+        WHERE broker_order IS NOT NULL"""
+    )
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS margin_financing_positions (
+            id TEXT PRIMARY KEY,
+            liability_id TEXT NOT NULL REFERENCES liabilities(id) ON DELETE RESTRICT,
+            market TEXT NOT NULL CHECK (market IN ('TWSE', 'TPEx')),
+            symbol TEXT NOT NULL, currency TEXT NOT NULL CHECK (currency = 'TWD'),
+            principal TEXT NOT NULL CHECK (CAST(principal AS NUMERIC) >= 0),
+            financed_quantity TEXT NOT NULL
+                CHECK (CAST(financed_quantity AS NUMERIC) >= 0),
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            UNIQUE(liability_id, market, symbol)
+        );
+        CREATE INDEX IF NOT EXISTS ix_margin_financing_positions_liability
+            ON margin_financing_positions(liability_id, market, symbol);
+        CREATE TABLE IF NOT EXISTS transaction_cost_pool_openings (
+            symbol TEXT NOT NULL, market TEXT NOT NULL, currency TEXT NOT NULL,
+            effective_date TEXT NOT NULL, cash_quantity TEXT NOT NULL,
+            margin_quantity TEXT NOT NULL, source TEXT NOT NULL,
+            source_reference TEXT NOT NULL,
+            PRIMARY KEY(symbol, market, effective_date)
+        );
+        """
+    )
+    principal_columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(liability_principal_events)")
+    }
+    if "margin_position_id" not in principal_columns:
+        connection.execute(
+            "ALTER TABLE liability_principal_events "
+            "ADD COLUMN margin_position_id TEXT"
+        )
+    if "financed_quantity_delta" not in principal_columns:
+        connection.execute(
+            "ALTER TABLE liability_principal_events "
+            "ADD COLUMN financed_quantity_delta TEXT"
+        )
+    cost_columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(investment_cost_events)")
+    }
+    if "margin_position_id" not in cost_columns:
+        connection.execute(
+            "ALTER TABLE investment_cost_events ADD COLUMN margin_position_id TEXT"
+        )
+    connection.execute(
+        """INSERT OR IGNORE INTO margin_financing_positions (
+        id, liability_id, market, symbol, currency, principal,
+        financed_quantity, created_at, updated_at)
+        SELECT 'margin-position-' || l.id || '-' || lower(h.market) || '-' ||
+               lower(l.financed_symbol),
+               l.id, h.market, l.financed_symbol, l.currency, l.principal,
+               l.financed_quantity, l.created_at, l.created_at
+        FROM liabilities l
+        JOIN holdings h ON h.symbol = l.financed_symbol
+        WHERE l.liability_type = 'margin_financing'
+          AND l.financed_symbol IS NOT NULL
+          AND l.financed_quantity IS NOT NULL"""
+    )
+    connection.execute(
+        """UPDATE liability_principal_events
+        SET margin_position_id = (
+            SELECT p.id FROM margin_financing_positions p
+            WHERE p.liability_id = liability_principal_events.liability_id
+            ORDER BY p.id LIMIT 1)
+        WHERE margin_position_id IS NULL
+          AND liability_id IN (
+              SELECT id FROM liabilities WHERE liability_type='margin_financing')"""
+    )
+    connection.execute(
+        """UPDATE liability_principal_events
+        SET financed_quantity_delta = (
+            SELECT t.quantity FROM transactions t
+            WHERE t.id = liability_principal_events.reference
+              AND t.financing_type = 'margin'
+              AND t.transaction_type = 'buy')
+        WHERE financed_quantity_delta IS NULL AND event_type = 'increase'"""
+    )
+    connection.execute(
+        """UPDATE investment_cost_events
+        SET margin_position_id = (
+            SELECT p.id FROM margin_financing_positions p
+            WHERE instr(description, p.liability_id) > 0
+            ORDER BY p.id LIMIT 1)
+        WHERE margin_position_id IS NULL AND cost_type = 'financing'"""
+    )
+    connection.executemany(
+        "UPDATE transactions SET financing_type = 'margin' WHERE id = ?",
+        [(transaction_id,) for transaction_id in LEGACY_MARGIN_TRANSACTION_IDS],
+    )
+    connection.executemany(
+        """INSERT OR IGNORE INTO transaction_cost_pool_openings VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                "8131",
+                "TWSE",
+                "TWD",
+                "2026-07-02",
+                "0",
+                "0",
+                "legacy migration opening",
+                "8131 full margin lifecycle closed",
+            ),
+            (
+                "2027",
+                "TWSE",
+                "TWD",
+                "2026-10-30",
+                "8000",
+                "55000",
+                "legacy migration opening",
+                "approved cash/margin quantity split",
+            ),
+            (
+                "00406A",
+                "TWSE",
+                "TWD",
+                "2026-11-11",
+                "10000",
+                "0",
+                "legacy migration opening",
+                "pre-AW854 cash position",
+            ),
+        ],
+    )
 
 
 def _migrate_multi_currency_schema(connection: sqlite3.Connection) -> None:

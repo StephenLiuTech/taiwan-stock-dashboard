@@ -268,7 +268,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("margin",),
         help="finance a Taiwan BUY using the configured margin ratio",
     )
+    add.add_argument(
+        "--margin-principal",
+        type=parse_decimal,
+        help="broker-confirmed principal for a margin BUY",
+    )
     add.add_argument("--notes")
+    add.add_argument("--broker-order")
+    add_mode = add.add_mutually_exclusive_group()
+    add_mode.add_argument(
+        "--dry-run", action="store_true", help="validate without writing"
+    )
+    add_mode.add_argument("--apply", action="store_true", help="write atomically")
     add.add_argument("--database", type=Path)
     add.add_argument("--verbose", action="store_true")
     listing = transaction_commands.add_parser("list", help="list transactions")
@@ -848,28 +859,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             if arguments.command == "transaction":
                 if arguments.transaction_command == "add":
                     assert application.add_transaction is not None
-                    record = application.add_transaction.execute(
-                        AddTransactionCommand(
-                            symbol=arguments.symbol,
-                            market={
-                                "TWSE": "TWSE",
-                                "TPEX": "TPEx",
-                                "US": "US",
-                            }[arguments.market],
-                            transaction_type=arguments.type,
-                            trade_date=arguments.trade_date,
-                            settlement_date=(
-                                arguments.settlement_date or arguments.trade_date
-                            ),
-                            quantity=arguments.quantity,
-                            price=arguments.price,
-                            fees=arguments.fees,
-                            taxes=arguments.taxes,
-                            currency=arguments.currency,
-                            transaction_id=arguments.transaction_id,
-                            notes=arguments.notes,
-                            financing_type=arguments.financing,
-                        )
+                    command = AddTransactionCommand(
+                        symbol=arguments.symbol,
+                        market={
+                            "TWSE": "TWSE",
+                            "TPEX": "TPEx",
+                            "US": "US",
+                        }[arguments.market],
+                        transaction_type=arguments.type,
+                        trade_date=arguments.trade_date,
+                        settlement_date=(
+                            arguments.settlement_date or arguments.trade_date
+                        ),
+                        quantity=arguments.quantity,
+                        price=arguments.price,
+                        fees=arguments.fees,
+                        taxes=arguments.taxes,
+                        currency=arguments.currency,
+                        transaction_id=arguments.transaction_id,
+                        notes=arguments.notes,
+                        financing_type=arguments.financing,
+                        broker_order=arguments.broker_order,
+                        margin_principal=arguments.margin_principal,
+                    )
+                    record = (
+                        application.add_transaction.execute(command, apply=False)
+                        if arguments.dry_run
+                        else application.add_transaction.execute(command)
                     )
                     print(format_transaction_record(record))
                     return int(ExitCode.SUCCESS)

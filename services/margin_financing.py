@@ -2,15 +2,18 @@
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import ROUND_FLOOR, Decimal
 
 from domain import (
     Currency,
     Liability,
     LiabilityType,
+    MarginFinancingPosition,
     Market,
     Transaction,
     TransactionType,
+    margin_position_id,
 )
 
 
@@ -27,6 +30,7 @@ class MarginFinancingResult:
     financed_principal: Decimal
     updated_margin_quantity: Decimal
     updated_liability: Liability
+    updated_position: MarginFinancingPosition
 
 
 class MarginFinancingService:
@@ -42,7 +46,11 @@ class MarginFinancingService:
         self.self_funding_ratio = self_funding_ratio
 
     def apply(
-        self, transaction: Transaction, liability: Liability
+        self,
+        transaction: Transaction,
+        liability: Liability,
+        position: MarginFinancingPosition | None = None,
+        financed_principal: Decimal | None = None,
     ) -> MarginFinancingResult:
         """Return the exact liability change without mutating either input."""
         if transaction.transaction_type is not TransactionType.BUY:
@@ -61,25 +69,76 @@ class MarginFinancingService:
             )
         if liability.liability_type is not LiabilityType.MARGIN_FINANCING:
             raise MarginFinancingError("margin-financing liability is required")
-        symbol, existing_quantity = self._position(liability)
-        if symbol is not None and symbol != transaction.symbol and existing_quantity:
-            raise MarginFinancingError(
-                f"margin liability already tracks a different symbol: {symbol}"
+        if position is not None and (
+            position.liability_id != liability.id
+            or position.market is not transaction.market
+            or position.symbol != transaction.symbol
+        ):
+            raise MarginFinancingError("margin position does not match transaction")
+        legacy_symbol, legacy_quantity = self._position(liability)
+        if position is None:
+            existing_quantity = (
+                legacy_quantity if legacy_symbol == transaction.symbol else Decimal("0")
             )
+            existing_principal = (
+                liability.principal
+                if legacy_symbol == transaction.symbol
+                else Decimal("0")
+            )
+            timestamp = datetime.combine(
+                transaction.trade_date, datetime.min.time(), UTC
+            )
+            position = MarginFinancingPosition(
+                id=margin_position_id(
+                    liability.id, transaction.market, transaction.symbol
+                ),
+                liability_id=liability.id,
+                market=transaction.market,
+                symbol=transaction.symbol,
+                currency=transaction.currency,
+                principal=existing_principal,
+                financed_quantity=existing_quantity,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        else:
+            existing_quantity = position.financed_quantity
+            existing_principal = position.principal
         gross = transaction.quantity * transaction.price
-        raw_financed = gross * (Decimal("1") - self.self_funding_ratio)
-        financed = (raw_financed / self.PRINCIPAL_INCREMENT).to_integral_value(
-            rounding=ROUND_FLOOR
-        ) * self.PRINCIPAL_INCREMENT
+        if financed_principal is not None:
+            if financed_principal <= 0 or financed_principal > gross:
+                raise MarginFinancingError(
+                    "broker-confirmed margin principal must be positive and not "
+                    "exceed gross purchase value"
+                )
+            financed = financed_principal
+        else:
+            raw_financed = gross * (Decimal("1") - self.self_funding_ratio)
+            financed = (raw_financed / self.PRINCIPAL_INCREMENT).to_integral_value(
+                rounding=ROUND_FLOOR
+            ) * self.PRINCIPAL_INCREMENT
         self_funded = gross - financed
         updated_quantity = existing_quantity + transaction.quantity
-        updated = liability.model_copy(
+        liability_updates: dict[str, object] = {
+            "principal": liability.principal + financed,
+        }
+        if legacy_symbol in (None, transaction.symbol):
+            liability_updates.update(
+                {
+                    "financed_symbol": transaction.symbol,
+                    "financed_quantity": updated_quantity,
+                    "collateral_description": (
+                        f"{transaction.symbol} — {updated_quantity:,.0f} shares"
+                    ),
+                }
+            )
+        updated = liability.model_copy(update=liability_updates)
+        updated_position = position.model_copy(
             update={
-                "principal": liability.principal + financed,
-                "financed_symbol": transaction.symbol,
+                "principal": existing_principal + financed,
                 "financed_quantity": updated_quantity,
-                "collateral_description": (
-                    f"{transaction.symbol} — {updated_quantity:,.0f} shares"
+                "updated_at": datetime.combine(
+                    transaction.trade_date, datetime.min.time(), UTC
                 ),
             }
         )
@@ -89,6 +148,7 @@ class MarginFinancingService:
             financed,
             updated_quantity,
             updated,
+            updated_position,
         )
 
     @staticmethod

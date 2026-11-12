@@ -84,7 +84,13 @@ class Transaction(SymbolModel):
     taxes: NonNegativeDecimal = Decimal("0")
     currency: Currency
     financing_type: FinancingType | None = None
+    broker_order: str | None = Field(default=None, min_length=1, max_length=64)
     notes: str | None = None
+
+    @field_validator("broker_order")
+    @classmethod
+    def normalize_broker_order(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value is not None else None
 
     @model_validator(mode="after")
     def validate_dates(self) -> Self:
@@ -92,10 +98,6 @@ class Transaction(SymbolModel):
         if self.settlement_date < self.trade_date:
             raise ValueError("settlement_date cannot precede trade_date")
         if self.financing_type is FinancingType.MARGIN:
-            if self.transaction_type is not TransactionType.BUY:
-                raise ValueError(
-                    "margin financing is supported only for BUY transactions"
-                )
             if self.market not in (Market.TWSE, Market.TPEX):
                 raise ValueError(
                     "margin financing is supported only for Taiwan markets"
