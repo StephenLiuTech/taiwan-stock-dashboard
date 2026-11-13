@@ -300,6 +300,9 @@ class AddTransactionCommand:
     financing_type: str | None = None
     broker_order: str | None = None
     margin_principal: Decimal | None = None
+    margin_principal_repayment: Decimal | None = None
+    actual_margin_interest: Decimal | None = None
+    interest_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -328,6 +331,10 @@ class TransactionRecord:
     updated_margin_principal: Decimal | None = None
     margin_position_id: str | None = None
     principal_event_id: str | None = None
+    repaid_principal: Decimal | None = None
+    actual_margin_interest: Decimal | None = None
+    interest_event_id: str | None = None
+    net_cash_receipt: Decimal | None = None
     applied: bool = True
 
 

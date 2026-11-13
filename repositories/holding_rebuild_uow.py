@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from repositories.sqlite import (
     SQLiteBrokerImportRecordRepository,
     SQLiteHoldingRepository,
+    SQLiteInvestmentCostEventRepository,
     SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
     SQLiteMarginFinancingPositionRepository,
@@ -46,6 +47,9 @@ class SQLiteMarginTransactionUnitOfWork:
             connection, auto_commit=False
         )
         self.margin_positions = SQLiteMarginFinancingPositionRepository(
+            connection, auto_commit=False
+        )
+        self.investment_cost_events = SQLiteInvestmentCostEventRepository(
             connection, auto_commit=False
         )
 

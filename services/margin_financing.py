@@ -33,6 +33,17 @@ class MarginFinancingResult:
     updated_position: MarginFinancingPosition
 
 
+@dataclass(frozen=True)
+class MarginFinancingSaleResult:
+    """Exact debt and position changes produced by one margin sale."""
+
+    gross_sale_value: Decimal
+    principal_repayment: Decimal
+    updated_margin_quantity: Decimal
+    updated_liability: Liability
+    updated_position: MarginFinancingPosition
+
+
 class MarginFinancingService:
     """Apply configured broker margin ratios to one Taiwan BUY transaction."""
 
@@ -148,6 +159,63 @@ class MarginFinancingService:
             financed,
             updated_quantity,
             updated,
+            updated_position,
+        )
+
+    def apply_sale(
+        self,
+        transaction: Transaction,
+        liability: Liability,
+        position: MarginFinancingPosition | None,
+        principal_repayment: Decimal | None,
+    ) -> MarginFinancingSaleResult:
+        """Apply one broker-confirmed margin sale without touching cash positions."""
+        if transaction.transaction_type is not TransactionType.SELL:
+            raise MarginFinancingError("margin sale requires a SELL transaction")
+        if transaction.market not in (Market.TWSE, Market.TPEX):
+            raise MarginFinancingError("margin financing requires a Taiwan market")
+        if transaction.currency is not Currency.TWD:
+            raise MarginFinancingError("margin financing requires TWD currency")
+        if position is None:
+            raise MarginFinancingError("margin SELL has no matching financed position")
+        if principal_repayment is None or principal_repayment <= 0:
+            raise MarginFinancingError(
+                "margin SELL requires a positive broker principal repayment"
+            )
+        if transaction.quantity > position.financed_quantity:
+            raise MarginFinancingError("margin SELL exceeds financed quantity")
+        if principal_repayment > position.principal:
+            raise MarginFinancingError("principal repayment exceeds position principal")
+        if principal_repayment > liability.principal:
+            raise MarginFinancingError("principal repayment exceeds margin liability")
+
+        updated_quantity = position.financed_quantity - transaction.quantity
+        updated_liability = liability.model_copy(
+            update={"principal": liability.principal - principal_repayment}
+        )
+        if liability.financed_symbol == transaction.symbol:
+            updated_liability = updated_liability.model_copy(
+                update={
+                    "financed_quantity": updated_quantity,
+                    "collateral_description": (
+                        f"{transaction.symbol} — {updated_quantity:,.0f} shares"
+                    ),
+                }
+            )
+        updated_position = position.model_copy(
+            update={
+                "principal": position.principal - principal_repayment,
+                "financed_quantity": updated_quantity,
+                "updated_at": datetime.combine(
+                    transaction.trade_date, datetime.min.time(), UTC
+                ),
+            }
+        )
+        return MarginFinancingSaleResult(
+            transaction.quantity * transaction.price,
+            principal_repayment,
+            updated_quantity,
+            updated_liability,
             updated_position,
         )
 

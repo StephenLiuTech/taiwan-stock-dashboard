@@ -28,6 +28,7 @@ from pams.application.exceptions import DuplicateTransactionError
 from repositories.holding_rebuild_uow import SQLiteMarginTransactionUnitOfWork
 from repositories.sqlite import (
     SQLiteHoldingRepository,
+    SQLiteInvestmentCostEventRepository,
     SQLiteLiabilityPrincipalEventRepository,
     SQLiteLiabilityRepository,
     SQLiteMarginFinancingPositionRepository,
@@ -399,7 +400,7 @@ def test_margin_position_failure_rolls_back_every_write(
     ("updates", "message"),
     [
         ({"market": "US", "currency": "USD"}, "Taiwan markets"),
-        ({"transaction_type": "sell"}, "BUY transactions"),
+        ({"transaction_type": "sell"}, "requires principal repayment"),
     ],
 )
 def test_invalid_margin_combinations_are_rejected(
@@ -410,6 +411,55 @@ def test_invalid_margin_combinations_are_rejected(
     with pytest.raises(ValueError, match=message):
         use_case(margin_database).execute(command(**updates))
     assert SQLiteTransactionRepository(margin_database).get_by_id("margin-1") is None
+
+
+def test_margin_sell_atomically_records_repayment_and_actual_interest(
+    margin_database: sqlite3.Connection,
+) -> None:
+    events = SQLiteLiabilityPrincipalEventRepository(margin_database)
+    events.insert_many_if_absent(
+        [
+            LiabilityPrincipalEvent(
+                id="opening-margin",
+                liability_id="liability-margin-financing",
+                effective_date=date(2026, 1, 1),
+                sequence=0,
+                event_type=LiabilityPrincipalEventType.OPENING,
+                principal_delta=Decimal("707000"),
+                resulting_principal=Decimal("707000"),
+                source="test",
+            )
+        ]
+    )
+    case = use_case(margin_database)
+    case.execute(command())
+    result = case.execute(
+        command(
+            transaction_id=None,
+            transaction_type="sell",
+            trade_date=date(2026, 11, 13),
+            quantity=Decimal("2000"),
+            price=Decimal("45.15"),
+            fees=Decimal("36"),
+            taxes=Decimal("271"),
+            broker_order="AP717",
+            margin_principal_repayment=Decimal("50000"),
+            actual_margin_interest=Decimal("100"),
+            interest_source="broker actual margin interest",
+        )
+    )
+    assert result.repaid_principal == Decimal("50000")
+    assert result.actual_margin_interest == Decimal("100")
+    assert result.updated_holding_quantity == Decimal("36000")
+    assert result.updated_margin_quantity == Decimal("28000")
+    assert result.updated_margin_principal == Decimal("717000")
+    assert result.net_cash_receipt == Decimal("39893")
+    assert len(events.list_by_liability("liability-margin-financing")) == 3
+    costs = SQLiteInvestmentCostEventRepository(margin_database).list_between_dates(
+        date(2026, 11, 13), date(2026, 11, 13)
+    )
+    assert len(costs) == 1
+    assert costs[0].amount == Decimal("100")
 
 
 @pytest.mark.parametrize("ratio", [Decimal("0"), Decimal("1"), Decimal("1.1")])

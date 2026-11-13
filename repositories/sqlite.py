@@ -1,7 +1,7 @@
 """SQLite implementations of the PAMS repository contracts."""
 
 import sqlite3
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -28,6 +28,16 @@ from domain import (
     TransactionCostPoolOpening,
     WatchlistItem,
 )
+
+
+def _utc_datetime(value: object) -> datetime:
+    """Normalize database timestamps before domain validation."""
+    parsed = (
+        value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    )
+    return (
+        parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    )
 
 
 class SQLiteTransactionCostPoolOpeningRepository:
@@ -1183,8 +1193,8 @@ class SQLiteMarginFinancingPositionRepository:
         values = dict(row)
         values["principal"] = _decimal(values["principal"])
         values["financed_quantity"] = _decimal(values["financed_quantity"])
-        values["created_at"] = datetime.fromisoformat(values["created_at"])
-        values["updated_at"] = datetime.fromisoformat(values["updated_at"])
+        values["created_at"] = _utc_datetime(values["created_at"])
+        values["updated_at"] = _utc_datetime(values["updated_at"])
         return MarginFinancingPosition.model_validate(values)
 
 

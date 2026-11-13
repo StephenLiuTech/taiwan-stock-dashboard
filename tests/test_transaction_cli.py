@@ -71,6 +71,7 @@ class FakeAddUseCase:
         self.command = command
         self.apply = apply
         margin = command.financing_type == "margin"
+        margin_sell = margin and command.transaction_type == "sell"
         return TransactionRecord(
             id=command.transaction_id or "generated",
             symbol=command.symbol,
@@ -85,12 +86,19 @@ class FakeAddUseCase:
             currency=command.currency,
             notes=command.notes,
             financing_type=command.financing_type,
-            gross_purchase_value=Decimal("100000") if margin else None,
-            self_funded_amount=Decimal("40000") if margin else None,
-            financed_principal=Decimal("60000") if margin else None,
+            gross_purchase_value=(
+                Decimal("100000") if margin and not margin_sell else None
+            ),
+            self_funded_amount=Decimal("40000") if margin and not margin_sell else None,
+            financed_principal=Decimal("60000") if margin and not margin_sell else None,
             updated_holding_quantity=Decimal("38000") if margin else None,
             updated_margin_quantity=Decimal("30000") if margin else None,
             updated_margin_principal=Decimal("767000") if margin else None,
+            principal_event_id="principal-event" if margin else None,
+            repaid_principal=Decimal("125000") if margin_sell else None,
+            actual_margin_interest=Decimal("3521") if margin_sell else None,
+            interest_event_id="interest-event" if margin_sell else None,
+            net_cash_receipt=Decimal("96462") if margin_sell else None,
             applied=apply,
         )
 
@@ -366,6 +374,50 @@ def test_transaction_add_margin_dry_run_preserves_broker_fields(
     assert add_use_case.command.broker_order == "AW854"
     assert add_use_case.command.margin_principal == Decimal("47000")
     assert "PAMS Transaction Dry Run" in capsys.readouterr().out
+
+
+def test_cli_margin_sell_dry_run_passes_repayment_and_interest(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, add_use_case, _ = install_composition(monkeypatch)
+    args = [
+        "transaction",
+        "add",
+        "--symbol",
+        "2027",
+        "--market",
+        "TWSE",
+        "--type",
+        "sell",
+        "--trade-date",
+        "2026-11-13",
+        "--quantity",
+        "5000",
+        "--price",
+        "45.15",
+        "--fees",
+        "90",
+        "--taxes",
+        "677",
+        "--financing",
+        "margin",
+        "--margin-principal-repayment",
+        "125000",
+        "--actual-margin-interest",
+        "3521",
+        "--interest-source",
+        "broker actual margin interest",
+        "--broker-order",
+        "AP717",
+        "--dry-run",
+    ]
+    assert main(args) == ExitCode.SUCCESS
+    assert add_use_case.apply is False
+    assert add_use_case.command.margin_principal_repayment == Decimal("125000")
+    assert add_use_case.command.actual_margin_interest == Decimal("3521")
+    output = capsys.readouterr().out
+    assert "Principal repayment: NT$125,000" in output
+    assert "Net cash receipt: NT$96,462" in output
 
 
 def test_cli_holdings_list_and_show_route_to_query_use_case(

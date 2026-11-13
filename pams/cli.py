@@ -273,6 +273,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=parse_decimal,
         help="broker-confirmed principal for a margin BUY",
     )
+    add.add_argument(
+        "--margin-principal-repayment",
+        type=parse_decimal,
+        help="broker-confirmed principal repayment for a margin SELL",
+    )
+    add.add_argument(
+        "--actual-margin-interest",
+        type=parse_decimal,
+        help="broker-confirmed actual interest for a margin SELL",
+    )
+    add.add_argument(
+        "--interest-source",
+        help="source description for broker-confirmed actual margin interest",
+    )
     add.add_argument("--notes")
     add.add_argument("--broker-order")
     add_mode = add.add_mutually_exclusive_group()
@@ -881,6 +895,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         financing_type=arguments.financing,
                         broker_order=arguments.broker_order,
                         margin_principal=arguments.margin_principal,
+                        margin_principal_repayment=(
+                            arguments.margin_principal_repayment
+                        ),
+                        actual_margin_interest=arguments.actual_margin_interest,
+                        interest_source=arguments.interest_source,
                     )
                     record = (
                         application.add_transaction.execute(command, apply=False)

@@ -26,6 +26,7 @@ from services.liability_principal import (
 from services.margin_financing import (
     MarginFinancingError,
     MarginFinancingResult,
+    MarginFinancingSaleResult,
     MarginFinancingService,
 )
 from services.multi_currency_valuation import (
@@ -65,6 +66,7 @@ __all__ = [
     "MissingPriceQuoteError",
     "MarginFinancingError",
     "MarginFinancingResult",
+    "MarginFinancingSaleResult",
     "MarginFinancingService",
     "LiabilityPrincipalEngine",
     "LiabilityPrincipalReplayError",

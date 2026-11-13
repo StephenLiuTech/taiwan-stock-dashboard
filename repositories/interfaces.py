@@ -301,13 +301,14 @@ class TransactionHoldingUnitOfWork(Protocol):
 
 
 class MarginTransactionUnitOfWork(Protocol):
-    """Atomic persistence boundary for a margin BUY and its projections."""
+    """Atomic persistence boundary for margin trades and their projections."""
 
     holdings: HoldingRepository
     transactions: TransactionRepository
     liabilities: LiabilityRepository
     liability_principal_events: LiabilityPrincipalEventRepository
     margin_positions: MarginFinancingPositionRepository
+    investment_cost_events: InvestmentCostEventRepository
 
     def transaction(self) -> AbstractContextManager[None]: ...
 

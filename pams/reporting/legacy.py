@@ -415,6 +415,28 @@ def format_transaction_record(record: TransactionRecord) -> str:
     if record.broker_order is not None:
         lines.append(f"Broker order: {record.broker_order}")
     if record.financing_type == "margin":
+        if record.transaction_type == "sell":
+            lines.extend(
+                [
+                    "Financing: Margin",
+                    "",
+                    f"Gross sale value: NT${record.quantity * record.price:,.0f}",
+                    f"Principal repayment: NT${record.repaid_principal:,.0f}",
+                    f"Actual margin interest: NT${record.actual_margin_interest:,.0f}",
+                    f"Net cash receipt: NT${record.net_cash_receipt:,.0f}",
+                    "",
+                    "Updated holding:",
+                    f"{record.symbol}: {record.updated_holding_quantity:,.0f} shares",
+                    "",
+                    "Updated margin financing:",
+                    f"Position: {record.updated_margin_quantity:,.0f} shares",
+                    f"Principal: NT${record.updated_margin_principal:,.0f}",
+                    f"Margin position ID: {record.margin_position_id}",
+                    f"Principal event ID: {record.principal_event_id}",
+                    f"Interest event ID: {record.interest_event_id}",
+                ]
+            )
+            return "\n".join(lines)
         lines.extend(
             [
                 "Financing: Margin",

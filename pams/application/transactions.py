@@ -14,6 +14,11 @@ from domain import (
     Transaction,
     TransactionType,
 )
+from pams.application.broker_actual_interest import (
+    BrokerActualInterestPlan,
+    RecordBrokerActualInterestCommand,
+    RecordBrokerActualInterestUseCase,
+)
 from pams.application.dto import (
     AddTransactionCommand,
     TransactionList,
@@ -28,6 +33,7 @@ from repositories.interfaces import (
 from services import (
     LiabilityPrincipalEngine,
     MarginFinancingResult,
+    MarginFinancingSaleResult,
     MarginFinancingService,
     TransactionEngine,
 )
@@ -35,10 +41,11 @@ from services import (
 
 def _record(
     transaction: Transaction,
-    financing: MarginFinancingResult | None = None,
+    financing: MarginFinancingResult | MarginFinancingSaleResult | None = None,
     updated_holding_quantity: Decimal | None = None,
     *,
     principal_event_id: str | None = None,
+    interest_plan: BrokerActualInterestPlan | None = None,
     applied: bool = True,
 ) -> TransactionRecord:
     return TransactionRecord(
@@ -60,9 +67,21 @@ def _record(
             if transaction.financing_type is not None
             else None
         ),
-        gross_purchase_value=(financing.gross_purchase_value if financing else None),
-        self_funded_amount=(financing.self_funded_amount if financing else None),
-        financed_principal=(financing.financed_principal if financing else None),
+        gross_purchase_value=(
+            financing.gross_purchase_value
+            if isinstance(financing, MarginFinancingResult)
+            else None
+        ),
+        self_funded_amount=(
+            financing.self_funded_amount
+            if isinstance(financing, MarginFinancingResult)
+            else None
+        ),
+        financed_principal=(
+            financing.financed_principal
+            if isinstance(financing, MarginFinancingResult)
+            else None
+        ),
         updated_holding_quantity=updated_holding_quantity,
         updated_margin_quantity=(
             financing.updated_margin_quantity if financing else None
@@ -72,6 +91,27 @@ def _record(
         ),
         margin_position_id=(financing.updated_position.id if financing else None),
         principal_event_id=principal_event_id,
+        repaid_principal=(
+            financing.principal_repayment
+            if isinstance(financing, MarginFinancingSaleResult)
+            else None
+        ),
+        actual_margin_interest=(
+            interest_plan.event.amount if interest_plan is not None else None
+        ),
+        interest_event_id=(
+            interest_plan.event.id if interest_plan is not None else None
+        ),
+        net_cash_receipt=(
+            financing.gross_sale_value
+            - transaction.fees
+            - transaction.taxes
+            - financing.principal_repayment
+            - interest_plan.event.amount
+            if isinstance(financing, MarginFinancingSaleResult)
+            and interest_plan is not None
+            else None
+        ),
         applied=applied,
     )
 
@@ -142,10 +182,48 @@ class AddTransactionUseCase:
             raise ValueError(
                 "broker-confirmed margin principal requires margin financing"
             )
+        sale_fields = (
+            command.margin_principal_repayment,
+            command.actual_margin_interest,
+            command.interest_source,
+        )
+        if any(value is not None for value in sale_fields) and not (
+            transaction.financing_type is FinancingType.MARGIN
+            and transaction.transaction_type is TransactionType.SELL
+        ):
+            raise ValueError(
+                "margin repayment and actual interest require a margin SELL"
+            )
+        if (
+            transaction.financing_type is FinancingType.MARGIN
+            and transaction.transaction_type is TransactionType.SELL
+            and (
+                command.margin_principal_repayment is None
+                or command.actual_margin_interest is None
+                or not command.interest_source
+                or transaction.broker_order is None
+            )
+        ):
+            raise ValueError(
+                "margin SELL requires principal repayment, actual interest, "
+                "interest source, and broker order"
+            )
         if not apply:
-            return self._preview(transaction, command.margin_principal)
+            return self._preview(
+                transaction,
+                command.margin_principal,
+                command.margin_principal_repayment,
+                command.actual_margin_interest,
+                command.interest_source,
+            )
         if transaction.financing_type is FinancingType.MARGIN:
-            return self._execute_margin(transaction, command.margin_principal)
+            return self._execute_margin(
+                transaction,
+                command.margin_principal,
+                command.margin_principal_repayment,
+                command.actual_margin_interest,
+                command.interest_source,
+            )
         if self.holding_unit_of_work is not None:
             return self._execute_with_holding(transaction)
         if self.transactions.exists(transaction.id):
@@ -156,7 +234,12 @@ class AddTransactionUseCase:
         return _record(transaction)
 
     def _preview(
-        self, transaction: Transaction, margin_principal: Decimal | None = None
+        self,
+        transaction: Transaction,
+        margin_principal: Decimal | None = None,
+        principal_repayment: Decimal | None = None,
+        actual_interest: Decimal | None = None,
+        interest_source: str | None = None,
     ) -> TransactionRecord:
         """Validate and calculate one transaction without persistence."""
         if transaction.financing_type is not FinancingType.MARGIN:
@@ -192,9 +275,23 @@ class AddTransactionUseCase:
         position = unit.margin_positions.get(
             liability.id, transaction.market.value, transaction.symbol
         )
-        financing = self.margin_service.apply(
-            transaction, liability, position, margin_principal
-        )
+        if transaction.transaction_type is TransactionType.BUY:
+            financing = self.margin_service.apply(
+                transaction, liability, position, margin_principal
+            )
+            interest_plan = None
+        else:
+            financing = self.margin_service.apply_sale(
+                transaction, liability, position, principal_repayment
+            )
+            interest_plan = self._actual_interest_plan(
+                unit,
+                liability.id,
+                transaction,
+                actual_interest,
+                interest_source,
+                apply=False,
+            )
         projected = self.transaction_engine.project_current_holdings(
             [*existing, transaction], unit.holdings.list_all()
         )
@@ -211,6 +308,7 @@ class AddTransactionUseCase:
             financing,
             holding.quantity,
             principal_event_id=event_id,
+            interest_plan=interest_plan,
             applied=False,
         )
 
@@ -239,7 +337,12 @@ class AddTransactionUseCase:
             return _record(transaction, updated_holding_quantity=holding.quantity)
 
     def _execute_margin(
-        self, transaction: Transaction, margin_principal: Decimal | None = None
+        self,
+        transaction: Transaction,
+        margin_principal: Decimal | None = None,
+        principal_repayment: Decimal | None = None,
+        actual_interest: Decimal | None = None,
+        interest_source: str | None = None,
     ) -> TransactionRecord:
         if self.margin_unit_of_work is None:
             raise ValueError("margin transaction persistence is not configured")
@@ -268,9 +371,31 @@ class AddTransactionUseCase:
             position = unit.margin_positions.get(
                 liabilities[0].id, transaction.market.value, transaction.symbol
             )
-            financing = self.margin_service.apply(
-                transaction, liabilities[0], position, margin_principal
-            )
+            if transaction.transaction_type is TransactionType.BUY:
+                financing = self.margin_service.apply(
+                    transaction, liabilities[0], position, margin_principal
+                )
+                event_type = LiabilityPrincipalEventType.INCREASE
+                principal_delta = financing.financed_principal
+                quantity_delta = transaction.quantity
+                event_notes = "Broker-rounded margin principal from margin BUY"
+                interest_plan = None
+            else:
+                financing = self.margin_service.apply_sale(
+                    transaction, liabilities[0], position, principal_repayment
+                )
+                event_type = LiabilityPrincipalEventType.REPAYMENT
+                principal_delta = -financing.principal_repayment
+                quantity_delta = -transaction.quantity
+                event_notes = "Broker-confirmed principal repayment from margin SELL"
+                interest_plan = self._actual_interest_plan(
+                    unit,
+                    liabilities[0].id,
+                    transaction,
+                    actual_interest,
+                    interest_source,
+                    apply=True,
+                )
             history = unit.liability_principal_events.list_by_liability(
                 liabilities[0].id
             )
@@ -287,14 +412,14 @@ class AddTransactionUseCase:
                 liability_id=liabilities[0].id,
                 effective_date=transaction.trade_date,
                 sequence=sequence,
-                event_type=LiabilityPrincipalEventType.INCREASE,
-                principal_delta=financing.financed_principal,
+                event_type=event_type,
+                principal_delta=principal_delta,
                 resulting_principal=None,
                 source="transaction entry",
                 reference=transaction.id,
                 margin_position_id=financing.updated_position.id,
-                financed_quantity_delta=transaction.quantity,
-                notes="Broker-rounded margin principal from margin BUY",
+                financed_quantity_delta=quantity_delta,
+                notes=event_notes,
                 created_at=datetime.combine(
                     transaction.trade_date, datetime.min.time(), UTC
                 ),
@@ -334,7 +459,37 @@ class AddTransactionUseCase:
                 financing,
                 holding.quantity,
                 principal_event_id=principal_event.id,
+                interest_plan=interest_plan,
             )
+
+    @staticmethod
+    def _actual_interest_plan(
+        unit: MarginTransactionUnitOfWork,
+        liability_id: str,
+        transaction: Transaction,
+        amount: Decimal | None,
+        source: str | None,
+        *,
+        apply: bool,
+    ) -> BrokerActualInterestPlan:
+        if amount is None or source is None or transaction.broker_order is None:
+            raise ValueError("margin SELL actual-interest details are incomplete")
+        return RecordBrokerActualInterestUseCase(
+            unit.investment_cost_events,
+            unit.liabilities,
+            unit.margin_positions,
+        ).execute(
+            RecordBrokerActualInterestCommand(
+                event_date=transaction.trade_date,
+                amount=amount,
+                liability_id=liability_id,
+                market=transaction.market,
+                symbol=transaction.symbol,
+                sell_order=transaction.broker_order,
+                source=source,
+            ),
+            apply=apply,
+        )
 
     @staticmethod
     def _principal_event_id(liability_id: str, transaction_id: str) -> str:

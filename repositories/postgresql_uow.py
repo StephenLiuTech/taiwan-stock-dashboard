@@ -7,6 +7,7 @@ from repositories.postgresql import (
     PostgreSQLBrokerImportRecordRepository,
     PostgreSQLFxRateRepository,
     PostgreSQLHoldingRepository,
+    PostgreSQLInvestmentCostEventRepository,
     PostgreSQLLiabilityPrincipalEventRepository,
     PostgreSQLLiabilityRepository,
     PostgreSQLMarginFinancingPositionRepository,
@@ -101,6 +102,9 @@ class PostgreSQLMarginTransactionUnitOfWork:
             connection, auto_commit=False
         )
         self.margin_positions = PostgreSQLMarginFinancingPositionRepository(
+            connection, auto_commit=False
+        )
+        self.investment_cost_events = PostgreSQLInvestmentCostEventRepository(
             connection, auto_commit=False
         )
 
